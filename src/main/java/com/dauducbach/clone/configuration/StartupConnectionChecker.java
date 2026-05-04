@@ -6,6 +6,7 @@ import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.data.elasticsearch.client.elc.ReactiveElasticsearchClient;
 import org.springframework.data.redis.connection.ReactiveRedisConnectionFactory;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.stereotype.Component;
@@ -20,6 +21,7 @@ import java.util.Map;
 public class StartupConnectionChecker {
     private final DatabaseClient databaseClient;
     private final ReactiveRedisConnectionFactory redisConnectionFactory;
+    private final ReactiveElasticsearchClient elasticsearchClient;
 
     @EventListener(ApplicationReadyEvent.class)
     public void checkConnectionsOnStartup() {
@@ -53,8 +55,18 @@ public class StartupConnectionChecker {
             return Mono.empty();
         });
 
+        // 4. Kiểm tra Elasticsearch
+        Mono<Void> checkElasticsearch = elasticsearchClient.info()
+                .doOnSuccess(res ->
+                        log.info("🟢 Elasticsearch: Kết nối thành công! (Cluster: {})",
+                                res.clusterName()))
+                .doOnError(err ->
+                        log.error("🔴 Elasticsearch: Lỗi kết nối - {}", err.getMessage()))
+                .then()
+                .onErrorResume(e -> Mono.empty());
+
         // Gộp cả 2 tiến trình chạy song song và BẮT BUỘC phải gọi .subscribe() để thực thi
-        Mono.when(checkR2dbc, checkRedis, checkKafka)
+        Mono.when(checkR2dbc, checkRedis, checkKafka, checkElasticsearch)
                 .subscribe(
                         null, 
                         err -> log.error("🔴 Lỗi không xác định khi kiểm tra kết nối: ", err)
