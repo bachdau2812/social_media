@@ -34,6 +34,10 @@ public class StartupConnectionChecker {
                 .then()
                 .onErrorResume(e -> Mono.error(e.getCause()));
 
+        System.out.println(System.getenv("MYSQL_USERNAME"));
+        System.out.println(System.getenv("MYSQL_PASSWORD"));
+        System.out.println(System.getenv("REDIS_PASSWORD"));
+
         // 2. Kiểm tra Redis
         Mono<Void> checkRedis = redisConnectionFactory.getReactiveConnection().ping()
                 .doOnSuccess(res -> log.info("🟢 Redis: Kết nối thành công! (Phản hồi: {})", res))

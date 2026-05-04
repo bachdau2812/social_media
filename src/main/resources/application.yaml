@@ -20,11 +20,12 @@ spring:
     password: ${ELASTICSEARCH_PASSWORD}
 
   r2dbc:
-    url: "r2dbc:mysql://localhost:3307/ins_clone"
+    url: "r2dbc:mysql://localhost:3306/ins_clone"
     username: ${MYSQL_USERNAME}
     password: ${MYSQL_PASSWORD}
     pool:
       enabled: true
+      max-idle-time: 30m
 
   kafka:
     bootstrap-servers: localhost:9092
