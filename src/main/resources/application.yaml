@@ -1,6 +1,9 @@
 server:
   port: 8888
 
+logging:
+  config: classpath:log4j2.xml
+
 spring:
   application:
     name: social-media

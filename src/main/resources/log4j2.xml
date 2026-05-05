@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
+
+    <Properties>
+        <Property name="BASE_DIR">${sys:user.dir}</Property>
+        <Property name="LOG_DIR">${sys:LOG_DIR:-${BASE_DIR}/logs}</Property>
+        <Property name="PORT">${sys:PORT:-8888}</Property>
+    </Properties>
+
+    <Appenders>
+        <RollingFile
+                name="AppFile"
+                fileName="${LOG_DIR}/log_media-${PORT}.log"
+                filePattern="${LOG_DIR}/archive/log_media-${PORT}-%d{yyyy-MM-dd}-%i.log.gz"
+        >
+
+            <PatternLayout
+                    pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level %X{traceId} [%t] [port:${PORT}] %c{1} - %msg%n"/>
+
+            <Policies>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+                <SizeBasedTriggeringPolicy size="100MB"/>
+            </Policies>
+
+            <DefaultRolloverStrategy max="30">
+                <Delete basePath="${LOG_DIR}/archive" maxDepth="1">
+                    <IfFileName glob="log_media-${PORT}-*.log.gz"/>
+                    <IfLastModified age="14d"/>
+                </Delete>
+            </DefaultRolloverStrategy>
+
+        </RollingFile>
+    </Appenders>
+
+    <Loggers>
+        <Root level="info">
+            <AppenderRef ref="AppFile"/>
+        </Root>
+    </Loggers>
+
+</Configuration>

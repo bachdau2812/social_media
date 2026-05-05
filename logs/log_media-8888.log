@@ -1,0 +1,104 @@
+2026-05-05 23:19:56.125 INFO   [background-preinit] [port:8888] Version - HV000001: Hibernate Validator 8.0.3.Final
+2026-05-05 23:19:56.183 INFO   [main] [port:8888] CloneApplication - Starting CloneApplication using Java 21.0.4 with PID 8724 (D:\Learning\Javaaa\Learn_Backend\Spring_WebFlux\social_media\target\classes started by dauducbach in D:\Learning\Javaaa\Learn_Backend\Spring_WebFlux\social_media)
+2026-05-05 23:19:56.184 INFO   [main] [port:8888] CloneApplication - No active profile set, falling back to 1 default profile: "default"
+2026-05-05 23:19:57.125 INFO   [main] [port:8888] RepositoryConfigurationDelegate - Multiple Spring Data modules found, entering strict repository configuration mode
+2026-05-05 23:19:57.128 INFO   [main] [port:8888] RepositoryConfigurationDelegate - Bootstrapping Spring Data Elasticsearch repositories in DEFAULT mode.
+2026-05-05 23:19:57.157 INFO   [main] [port:8888] RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 19 ms. Found 0 Elasticsearch repository interfaces.
+2026-05-05 23:19:57.165 INFO   [main] [port:8888] RepositoryConfigurationDelegate - Multiple Spring Data modules found, entering strict repository configuration mode
+2026-05-05 23:19:57.165 INFO   [main] [port:8888] RepositoryConfigurationDelegate - Bootstrapping Spring Data Reactive Elasticsearch repositories in DEFAULT mode.
+2026-05-05 23:19:57.172 INFO   [main] [port:8888] RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 3 ms. Found 0 Reactive Elasticsearch repository interfaces.
+2026-05-05 23:19:57.188 INFO   [main] [port:8888] RepositoryConfigurationDelegate - Multiple Spring Data modules found, entering strict repository configuration mode
+2026-05-05 23:19:57.188 INFO   [main] [port:8888] RepositoryConfigurationDelegate - Bootstrapping Spring Data R2DBC repositories in DEFAULT mode.
+2026-05-05 23:19:57.193 INFO   [main] [port:8888] RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 2 ms. Found 0 R2DBC repository interfaces.
+2026-05-05 23:19:57.210 INFO   [main] [port:8888] RepositoryConfigurationDelegate - Multiple Spring Data modules found, entering strict repository configuration mode
+2026-05-05 23:19:57.212 INFO   [main] [port:8888] RepositoryConfigurationDelegate - Bootstrapping Spring Data Redis repositories in DEFAULT mode.
+2026-05-05 23:19:57.228 INFO   [main] [port:8888] RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 2 ms. Found 0 Redis repository interfaces.
+2026-05-05 23:19:59.781 INFO   [main] [port:8888] NettyWebServer - Netty started on port 8888 (http)
+2026-05-05 23:19:59.791 INFO   [main] [port:8888] CloneApplication - Started CloneApplication in 4.259 seconds (process running for 6.217)
+2026-05-05 23:20:00.283 INFO   [lettuce-nioEventLoop-5-1] [port:8888] StartupConnectionChecker - 🟢 Redis: Kết nối thành công! (Phản hồi: PONG)
+2026-05-05 23:20:00.355 INFO   [main] [port:8888] AdminClientConfig - AdminClientConfig values: 
+	auto.include.jmx.reporter = true
+	bootstrap.controllers = []
+	bootstrap.servers = [localhost:9092]
+	client.dns.lookup = use_all_dns_ips
+	client.id = 
+	connections.max.idle.ms = 300000
+	default.api.timeout.ms = 60000
+	enable.metrics.push = true
+	metadata.max.age.ms = 300000
+	metadata.recovery.strategy = none
+	metric.reporters = []
+	metrics.num.samples = 2
+	metrics.recording.level = INFO
+	metrics.sample.window.ms = 30000
+	receive.buffer.bytes = 65536
+	reconnect.backoff.max.ms = 1000
+	reconnect.backoff.ms = 50
+	request.timeout.ms = 30000
+	retries = 2147483647
+	retry.backoff.max.ms = 1000
+	retry.backoff.ms = 100
+	sasl.client.callback.handler.class = null
+	sasl.jaas.config = null
+	sasl.kerberos.kinit.cmd = /usr/bin/kinit
+	sasl.kerberos.min.time.before.relogin = 60000
+	sasl.kerberos.service.name = null
+	sasl.kerberos.ticket.renew.jitter = 0.05
+	sasl.kerberos.ticket.renew.window.factor = 0.8
+	sasl.login.callback.handler.class = null
+	sasl.login.class = null
+	sasl.login.connect.timeout.ms = null
+	sasl.login.read.timeout.ms = null
+	sasl.login.refresh.buffer.seconds = 300
+	sasl.login.refresh.min.period.seconds = 60
+	sasl.login.refresh.window.factor = 0.8
+	sasl.login.refresh.window.jitter = 0.05
+	sasl.login.retry.backoff.max.ms = 10000
+	sasl.login.retry.backoff.ms = 100
+	sasl.mechanism = GSSAPI
+	sasl.oauthbearer.clock.skew.seconds = 30
+	sasl.oauthbearer.expected.audience = null
+	sasl.oauthbearer.expected.issuer = null
+	sasl.oauthbearer.header.urlencode = false
+	sasl.oauthbearer.jwks.endpoint.refresh.ms = 3600000
+	sasl.oauthbearer.jwks.endpoint.retry.backoff.max.ms = 10000
+	sasl.oauthbearer.jwks.endpoint.retry.backoff.ms = 100
+	sasl.oauthbearer.jwks.endpoint.url = null
+	sasl.oauthbearer.scope.claim.name = scope
+	sasl.oauthbearer.sub.claim.name = sub
+	sasl.oauthbearer.token.endpoint.url = null
+	security.protocol = PLAINTEXT
+	security.providers = null
+	send.buffer.bytes = 131072
+	socket.connection.setup.timeout.max.ms = 30000
+	socket.connection.setup.timeout.ms = 10000
+	ssl.cipher.suites = null
+	ssl.enabled.protocols = [TLSv1.2, TLSv1.3]
+	ssl.endpoint.identification.algorithm = https
+	ssl.engine.factory.class = null
+	ssl.key.password = null
+	ssl.keymanager.algorithm = SunX509
+	ssl.keystore.certificate.chain = null
+	ssl.keystore.key = null
+	ssl.keystore.location = null
+	ssl.keystore.password = null
+	ssl.keystore.type = JKS
+	ssl.protocol = TLSv1.3
+	ssl.provider = null
+	ssl.secure.random.implementation = null
+	ssl.trustmanager.algorithm = PKIX
+	ssl.truststore.certificates = null
+	ssl.truststore.location = null
+	ssl.truststore.password = null
+	ssl.truststore.type = JKS
+
+2026-05-05 23:20:00.471 INFO   [main] [port:8888] AppInfoParser - Kafka version: 3.9.1
+2026-05-05 23:20:00.471 INFO   [main] [port:8888] AppInfoParser - Kafka commitId: f745dfdcee2b9851
+2026-05-05 23:20:00.472 INFO   [main] [port:8888] AppInfoParser - Kafka startTimeMs: 1777998000469
+2026-05-05 23:20:00.859 INFO   [reactor-tcp-nio-2] [port:8888] StartupConnectionChecker - 🟢 R2DBC: Kết nối thành công!
+2026-05-05 23:20:01.244 INFO   [main] [port:8888] StartupConnectionChecker - 🟢 Kafka connected OK
+2026-05-05 23:20:01.244 INFO   [kafka-admin-client-thread | adminclient-1] [port:8888] AppInfoParser - App info kafka.admin.client for adminclient-1 unregistered
+2026-05-05 23:20:01.249 INFO   [kafka-admin-client-thread | adminclient-1] [port:8888] Metrics - Metrics scheduler closed
+2026-05-05 23:20:01.249 INFO   [kafka-admin-client-thread | adminclient-1] [port:8888] Metrics - Closing reporter org.apache.kafka.common.metrics.JmxReporter
+2026-05-05 23:20:01.249 INFO   [kafka-admin-client-thread | adminclient-1] [port:8888] Metrics - Metrics reporters closed
+2026-05-05 23:20:01.253 INFO   [main] [port:8888] StartupConnectionChecker - 🟢 Elasticsearch: Kết nối thành công! (Cluster: docker-cluster)
