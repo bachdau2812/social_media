@@ -18,4 +18,7 @@ public class UserCredentials {
     String username;
     String userPassword;
     String userRole;
+    String email;
+    String provider;
+    String providerId;
 }

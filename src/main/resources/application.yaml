@@ -30,6 +30,35 @@ spring:
       enabled: true
       max-idle-time: 30m
 
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID}
+            client-secret: ${GOOGLE_CLIENT_SECRET}
+            scope:
+              - email
+              - profile
+            redirect-uri: http://localhost:8080/identity/login/oauth2/code/google
+            authorization-grant-type: authorization_code
+            client-name: Google
+          facebook:
+            client-id: ${FACEBOOK_CLIENT_ID}
+            client-secret: ${FACEBOOK_CLIENT_SECRET}
+            scope:
+              - email
+              - public_profile
+            redirect-uri: http://localhost:8080/identity/login/oauth2/code/facebook
+            authorization-grant-type: authorization_code
+            client-name: Facebook
+          github:
+            client-id: ${GITHUB_CLIENT_ID}
+            client-secret: ${GITHUB_CLIENT_SECRET}
+            redirect-uri: http://localhost:8080/identity/login/oauth2/code/github
+            authorization-grant-type: authorization_code
+            client-name: GitHub
+
   kafka:
     bootstrap-servers: localhost:9092
     producer:
@@ -41,6 +70,11 @@ spring:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
 
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
 
 jwt:
   signerKey: ${JWT_SIGNER_KEY}

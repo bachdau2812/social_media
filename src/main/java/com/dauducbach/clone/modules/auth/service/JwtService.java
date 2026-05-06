@@ -80,7 +80,18 @@ public class JwtService {
                                 return Mono.error(new JwtException("Token logged out"));
                             }
 
-                            return Mono.just(true);
+                            try {
+                                return reactiveRedisTemplate.hasKey(REVOKED_USER_KEY_PREFIX + signedJWT.getJWTClaimsSet().getSubject())
+                                        .flatMap(isUserRevoked -> {
+                                            if (Boolean.TRUE.equals(isUserRevoked)) {
+                                                return Mono.error(new JwtException("User revoked")).hasElement();
+                                            }
+
+                                            return Mono.just(true);
+                                        });
+                            } catch (ParseException e) {
+                                throw new JwtException("Invalid token", e);
+                            }
                         });
             } catch (ParseException | JOSEException e) {
                 logger.error("Cannot verify token: {}", e.getMessage());
