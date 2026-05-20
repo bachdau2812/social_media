@@ -16,4 +16,6 @@ public interface UserCredentialsRepository extends ReactiveCrudRepository<UserCr
     Mono<Boolean> existsByUsername(String username);
 
     Mono<UserCredentials> findByProviderId(String providerId);
+
+    Mono<Boolean> existsByProviderId(String providerId);
 }

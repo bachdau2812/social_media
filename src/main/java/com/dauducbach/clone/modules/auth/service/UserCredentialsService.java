@@ -23,8 +23,6 @@ import reactor.kafka.sender.KafkaSender;
 import reactor.kafka.sender.SenderRecord;
 
 import java.time.Duration;
-import java.time.LocalDate;
-import java.util.ArrayList;
 import java.util.UUID;
 
 @Service
@@ -61,7 +59,7 @@ public class UserCredentialsService {
                     String userInformationKey = "user_registration:" + request.getEmail();
 
                     return reactiveRedisTemplate.opsForValue()
-                            .set(userInformationKey, request, Duration.ofSeconds(5))
+                            .set(userInformationKey, request, Duration.ofMinutes(5))
                             .doOnSuccess(success -> logger.info("|UserCredentialsService|preRegister|userInformationKey={}", userInformationKey))
                             .then(sendCode(request.getEmail(), request.getUsername()))
                             .doOnSuccess(sendCodeSuccess -> logger.info("|UserCredentialsService|preRegister|sendCodeToUser=true"))
@@ -69,7 +67,6 @@ public class UserCredentialsService {
                 });
     }
 
-    @Transactional
     public Mono<String> emailVerifyAndCreateUser(EmailVerifyRequest request) {
         logger.info("|UserCredentialsService|emailVerifyAndCreateUser|request={}", request.toString());
 
@@ -104,6 +101,7 @@ public class UserCredentialsService {
                             .username(userRequest.getUsername())
                             .email(userRequest.getEmail())
                             .userPassword(passwordEncoder.encode(userRequest.getPassword()))
+                            .userRole(userRequest.getRole())
                             .build())
                     .doOnError(throwable -> logger.error("|UserCredentialsService|emailVerifyAndCreateUser|insert_error={}", throwable.getMessage()))
                     .doOnSuccess(createdUser -> logger.info("|UserCredentialsService|emailVerifyAndCreateUser|insert_success={}", createdUser.getUserId()))
@@ -114,6 +112,7 @@ public class UserCredentialsService {
                                 .username(userRequest.getUsername())
                                 .email(userRequest.getEmail())
                                 .userPassword(passwordEncoder.encode(userRequest.getPassword()))
+                                .provider("SYSTEM")
                                 .build();
                         /// The notification and user modules subscribe to this event and handle their own logic for user creation.
                         ProducerRecord<String, Object> producerRecord = new ProducerRecord<>("profile_creation_event", user.getUserId(), request.toString());
@@ -131,6 +130,7 @@ public class UserCredentialsService {
         });
     }
 
+    @Transactional
     /// Forget password
     public Mono<String> checkAndSendCodeForForgetPassword(String email) {
         logger.info("|UserCredentialsService|checkAndSendCodeForForgetPassword|email={}", email);
@@ -148,7 +148,7 @@ public class UserCredentialsService {
                     forgetPasswordEvent.addProperty("code", code);
                     forgetPasswordEvent.addProperty("email", email);
 
-                    ProducerRecord<String, Object> producerRecord = new ProducerRecord<>("forget_password_event", email, forgetPasswordEvent);
+                    ProducerRecord<String, Object> producerRecord = new ProducerRecord<>("forget_password_event", email, forgetPasswordEvent.toString());
                     SenderRecord<String, Object, String> senderRecord = SenderRecord.create(producerRecord, "Gui code de nguoi dung xac nhan email de doi mat khau");
                     return kafkaSender.send(Mono.just(senderRecord))
                             .doOnComplete(() -> logger.info("|UserCredentialsService|checkAndSendCodeForForgetPassword|send forget_password_event complete"))
@@ -160,8 +160,10 @@ public class UserCredentialsService {
                 .thenReturn("Check email and send code success");
     }
 
+    @Transactional
     public Mono<String> verifyAndSendNewPasswordToUser(EmailVerifyRequest request) {
-        return reactiveRedisTemplate.opsForValue().get("forget_password_key:" + request.getEmail())
+        return reactiveRedisTemplate.opsForValue().get("forget_password:" + request.getEmail())
+                .doOnSuccess(code -> logger.info("|UserCredentialsService|verifyAndSendNewPasswordToUser|getCodeFromRedis={}", code))
                 .flatMap(code -> {
                     if (code == null) {
                         logger.info("|UserCredentialsService|verifyAndSendNewPasswordToUser|codeExpired=true");
@@ -185,7 +187,7 @@ public class UserCredentialsService {
                                 newPasswordEvent.addProperty("email", request.getEmail());
                                 newPasswordEvent.addProperty("newPassword", newPassword);
 
-                                ProducerRecord<String, Object> producerRecord = new ProducerRecord<>("new_password_event", request.getEmail(), newPasswordEvent);
+                                ProducerRecord<String, Object> producerRecord = new ProducerRecord<>("new_password_event", request.getEmail(), newPasswordEvent.toString());
                                 SenderRecord<String, Object, String> senderRecord = SenderRecord.create(producerRecord, "Send new password to User");
 
                                 return kafkaSender.send(Mono.just(senderRecord))
@@ -205,8 +207,9 @@ public class UserCredentialsService {
                 });
     }
 
+    @Transactional
     public Mono<String> verifyAndSendNewUserNameAndNewPasswordToUser(EmailVerifyRequest request) {
-        return reactiveRedisTemplate.opsForValue().get("forget_password_key:" + request.getEmail())
+        return reactiveRedisTemplate.opsForValue().get("forget_password:" + request.getEmail())
                 .flatMap(code -> {
                     if (code == null) {
                         logger.info("|UserCredentialsService|verifyAndSendNewPasswordToUser|codeExpired=true");
@@ -231,7 +234,7 @@ public class UserCredentialsService {
                                 newPasswordEvent.addProperty("email", request.getEmail());
                                 newPasswordEvent.addProperty("newPassword", newPassword);
 
-                                ProducerRecord<String, Object> producerRecord = new ProducerRecord<>("new_password_event", request.getEmail(), newPasswordEvent);
+                                ProducerRecord<String, Object> producerRecord = new ProducerRecord<>("new_password_and_username_event", request.getEmail(), newPasswordEvent.toString());
                                 SenderRecord<String, Object, String> senderRecord = SenderRecord.create(producerRecord, "Send new password to User");
 
                                 return kafkaSender.send(Mono.just(senderRecord))
@@ -259,11 +262,12 @@ public class UserCredentialsService {
                 .flatMap(saveComplete -> {
                     if (saveComplete) {
                         JsonObject emailVerifyEvent = new JsonObject();
+
                         emailVerifyEvent.addProperty("username", username);
                         emailVerifyEvent.addProperty("email", email);
                         emailVerifyEvent.addProperty("code", code);
 
-                        ProducerRecord<String, Object> producerRecord = new ProducerRecord<>("auth_send_code", email, emailVerifyEvent);
+                        ProducerRecord<String, Object> producerRecord = new ProducerRecord<>("auth_send_code", email, emailVerifyEvent.toString());
                         SenderRecord<String, Object, String> senderRecord = SenderRecord.create(producerRecord, "Send verify code for new registration user");
                         return kafkaSender.send(Mono.just(senderRecord))
                                 .then();

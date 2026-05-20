@@ -21,8 +21,19 @@ public enum ErrorCode {
     TIMEOUT(1013, "Timeout, please re-enter your information!", HttpStatus.REQUEST_TIMEOUT),
     INVALID_VERIFICATION(1014, "Invalid verification", HttpStatus.BAD_REQUEST),
     SEND_PASSWORD_FAILED(1015, "Failed to send new password, please re-enter your information.", HttpStatus.INTERNAL_SERVER_ERROR),
+    ACCESS_TOKEN_EXPIRED(1016, "Access token expired, please refresh token", HttpStatus.UNAUTHORIZED),
 
     KAFKA_SEND_MESSAGE_FOR_EVENT_FAIL(3000, "Send message fail", HttpStatus.BAD_REQUEST),
+
+    REFRESH_TOKEN_INVALID(4000, "User haven't had valid refresh token", HttpStatus.FORBIDDEN),
+    LOGOUT_FAILED(4001, "Logout failed", HttpStatus.INTERNAL_SERVER_ERROR),
+    INTROSPECTION_FAILED(4002, "Introspection failed", HttpStatus.INTERNAL_SERVER_ERROR),
+    LOAD_USER_FROM_SOCIAL_MEDIA_FAIL(4003, "Load user from social media failed", HttpStatus.FORBIDDEN),
+    MISSING_USER_INFO_FROM_SOCIAL_MEDIA(4004, "Missing user info from social media", HttpStatus.BAD_REQUEST),
+
+    SEND_EMAIL_FAILED(5000, "Send email failed", HttpStatus.INTERNAL_SERVER_ERROR),
+    SEND_PUSH_NOTIFICATION_FAILED(5001, "Send push notification failed", HttpStatus.INTERNAL_SERVER_ERROR),
+    NOTIFICATION_TYPE_NOT_SUPPORTED(5002, "Notification type not supported", HttpStatus.BAD_REQUEST),
     ;
     private final int code;
     private final String message;

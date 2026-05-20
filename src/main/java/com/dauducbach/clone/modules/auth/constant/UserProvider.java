@@ -1,4 +1,4 @@
-package com.dauducbach.clone.commons.constants;
+package com.dauducbach.clone.modules.auth.constant;
 
 public enum UserProvider {
     GOOGLE, FACEBOOK, GITHUB, SYSTEM

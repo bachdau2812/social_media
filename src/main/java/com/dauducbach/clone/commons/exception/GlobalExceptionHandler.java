@@ -15,11 +15,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(value = AppException.class)
     ResponseEntity<ApiResponse<?>> handleAppException(AppException appException, ServerWebExchange exchange) {
         ErrorCode errorCode = appException.getErrorCode();
+        String message = appException.getMessage() == null ? errorCode.getMessage() : appException.getMessage();
 
         return ResponseEntity.status(errorCode.getHttpStatus()).body(
                 ApiResponse.builder()
                         .code(errorCode.getCode())
-                        .message(errorCode.getMessage())
+                        .message(message)
                         .traceId(resolveTraceId(exchange))
                         .build()
         );

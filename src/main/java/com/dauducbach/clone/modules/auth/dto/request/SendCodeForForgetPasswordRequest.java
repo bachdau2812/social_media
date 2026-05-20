@@ -1,18 +1,19 @@
 package com.dauducbach.clone.modules.auth.dto.request;
 
 import jakarta.validation.constraints.NotBlank;
-import lombok.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 import lombok.experimental.FieldDefaults;
 
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
+@FieldDefaults(level = lombok.AccessLevel.PRIVATE)
 @Builder
-@FieldDefaults(level = AccessLevel.PRIVATE)
-public class EmailVerifyRequest {
+public class SendCodeForForgetPasswordRequest {
     @NotBlank(message = "Email must not be blank")
     String email;
-
-    @NotBlank(message = "Code must not be blank")
-    String code;
 }
+

@@ -44,10 +44,6 @@ public class JwtService {
     @Value("${jwt.valid-duration}")
     private long validDuration;
 
-    @NonFinal
-    @Value("${jwt.refreshable-duration}")
-    private long refreshableDuration;
-
     public Mono<String> generateToken(UserCredentials userCredentials) {
         return Mono.fromSupplier(() -> {
             try {

@@ -1,0 +1,104 @@
+package com.dauducbach.clone.modules.notification.service;
+
+import com.dauducbach.clone.commons.exception.AppException;
+import com.dauducbach.clone.commons.exception.ErrorCode;
+import com.dauducbach.clone.modules.notification.constants.NotificationStatus;
+import com.dauducbach.clone.modules.notification.dto.NotificationForService;
+import com.dauducbach.clone.modules.notification.entity.NotificationEvents;
+import com.dauducbach.clone.modules.notification.entity.UserNotifications;
+import com.dauducbach.clone.modules.notification.repository.NotificationEventsRepository;
+import com.dauducbach.clone.modules.notification.repository.UserPushNotificationRepository;
+import com.google.firebase.messaging.FirebaseMessaging;
+import com.google.firebase.messaging.Message;
+import com.google.firebase.messaging.Notification;
+import lombok.RequiredArgsConstructor;
+import lombok.experimental.FieldDefaults;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
+import org.springframework.stereotype.Service;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
+
+import java.time.Instant;
+import java.util.UUID;
+
+@Service
+@FieldDefaults(level = lombok.AccessLevel.PRIVATE,  makeFinal = true)
+@RequiredArgsConstructor
+
+public class PushNotificationService {
+    private static final Logger logger = LoggerFactory.getLogger(PushNotificationService.class);
+    UserPushNotificationRepository userPushNotificationRepository;
+    NotificationEventsRepository notificationEventsRepository;
+    R2dbcEntityTemplate r2dbcEntityTemplate;
+
+    public Mono<String> sendPushNotification(NotificationForService request) {
+        if (request.getRecipient() == null || request.getRecipient().isBlank()) {
+            return Mono.error(new AppException(ErrorCode.SEND_PUSH_NOTIFICATION_FAILED, "Recipient userId is missing"));
+        }
+
+        return userPushNotificationRepository.findByUserId(request.getRecipient())
+                .flatMap(notificationPushToken -> {
+                    logger.info("|PushNotificationService|sendPushNotification|recipientId={}", request.getRecipient());
+
+                    Notification noti = Notification.builder()
+                            .setTitle(request.getTitle())
+                            .setBody(request.getHtmlContent())
+                            .build();
+
+                    Message msg = Message.builder()
+                            .setToken(notificationPushToken.getDeviceToken())
+                            .setNotification(noti)
+                            .build();
+
+                    var entity = NotificationEvents.builder()
+                            .id(UUID.randomUUID().toString())
+                            .actorId(request.getActorId())
+                            .entityType(request.getEntityType())
+                            .entityId(request.getEntityId())
+                            .actionType(request.getActionType())
+                            .createdAt(Instant.now())
+                            .build();
+
+                    var userNotification = UserNotifications.builder()
+                            .id(UUID.randomUUID().toString())
+                            .userId(request.getRecipient())
+                            .eventId(entity.getId())
+                            .notificationStatus(NotificationStatus.UNREAD)
+                            .readAt(null)
+                            .createdAt(Instant.now())
+                            .build();
+
+                    return Mono.fromCallable(() -> {
+                                FirebaseMessaging.getInstance().send(msg);
+                                logger.info("|PushNotificationService|sendPushNotification|push notification sent successfully|recipientId={}", request.getRecipient());
+                                return entity;
+                            })
+                            .subscribeOn(Schedulers.boundedElastic())
+                            .flatMap(savedEntity -> r2dbcEntityTemplate.insert(NotificationEvents.class).using(savedEntity)
+                                    .doOnSuccess(event -> logger.info("|PushNotificationService|sendPushNotification|notification event saved successfully|eventId={}", event.getId()))
+                                    .then(r2dbcEntityTemplate.insert(UserNotifications.class).using(userNotification)
+                                            .doOnSuccess(savedUserNoti -> logger.info("|PushNotificationService|sendPushNotification|user notification saved successfully|recipientId={}|notificationId={}", request.getRecipient(), savedUserNoti.getId()))
+                                            .thenReturn("Push notifications sent successfully"))
+                                    .onErrorResume(throwable -> {
+                                        logger.info("|PushNotificationService|sendPushNotification|error when saving user notification|recipientId={}|error={}", request.getRecipient(), throwable.getMessage());
+
+                                        return notificationEventsRepository.deleteById(entity.getId())
+                                                .then(Mono.error(new AppException(ErrorCode.SEND_PUSH_NOTIFICATION_FAILED)));
+                                    }))
+                            .onErrorMap(throwable -> {
+                                if (throwable instanceof AppException appException) {
+                                    return appException;
+                                }
+
+                                logger.error("|PushNotificationService|sendPushNotification|error when sending push notification|recipientId={}|error={}", request.getRecipient(), throwable.getMessage());
+                                return new AppException(ErrorCode.SEND_PUSH_NOTIFICATION_FAILED, "Send push notification failed", throwable);
+                            });
+                })
+                .switchIfEmpty(Mono.fromSupplier(() -> {
+                    logger.info("|PushNotificationService|sendPushNotification|no push token found for recipientId={}", request.getRecipient());
+                    return "Push notifications sent successfully";
+                }));
+    }
+}

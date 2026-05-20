@@ -1,4 +1,4 @@
-package com.dauducbach.clone.modules.auth.entity;
+package com.dauducbach.clone.modules.notification.entity;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -11,19 +11,17 @@ import org.springframework.data.relational.core.mapping.Table;
 import java.time.Instant;
 
 @Data
-@NoArgsConstructor
 @AllArgsConstructor
+@NoArgsConstructor
 @FieldDefaults(level = lombok.AccessLevel.PRIVATE)
 @Builder
 
-@Table("refresh_tokens")
-public class RefreshTokens {
+@Table("notification_push_token")
+public class NotificationPushToken {
     @Id
     String id;
     String userId;
-    String tokenHash;
-    Instant expiredTime;
+    String deviceId;
+    String deviceToken;
     Instant createdAt;
-    String deviceInfo;
-    boolean revoked;
 }
