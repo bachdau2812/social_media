@@ -40,7 +40,7 @@ spring:
             scope:
               - email
               - profile
-            redirect-uri: http://localhost:8080/identity/login/oauth2/code/google
+            redirect-uri: http://localhost:8888/app/login/oauth2/code/google
             authorization-grant-type: authorization_code
             client-name: Google
           facebook:
@@ -49,13 +49,16 @@ spring:
             scope:
               - email
               - public_profile
-            redirect-uri: http://localhost:8080/identity/login/oauth2/code/facebook
+            redirect-uri: http://localhost:8888/app/login/oauth2/code/facebook
             authorization-grant-type: authorization_code
             client-name: Facebook
           github:
             client-id: ${GITHUB_CLIENT_ID}
             client-secret: ${GITHUB_CLIENT_SECRET}
-            redirect-uri: http://localhost:8080/identity/login/oauth2/code/github
+            scope:
+              - user:email
+              - read:user
+            redirect-uri: http://localhost:8888/app/login/oauth2/code/github
             authorization-grant-type: authorization_code
             client-name: GitHub
 
@@ -92,6 +95,6 @@ jwt:
   valid-duration: 900
 
 
-#    http://localhost:8080/identity/oauth2/authorization/google
-#    http://localhost:8080/identity/oauth2/authorization/facebook
-#    http://localhost:8080/identity/oauth2/authorization/github
+#    http://localhost:8888/app/oauth2/authorization/google
+#    http://localhost:8888/app/oauth2/authorization/facebook
+#    http://localhost:8888/app/oauth2/authorization/github

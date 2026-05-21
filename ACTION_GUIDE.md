@@ -349,7 +349,77 @@ Nếu refresh token không hợp lệ/hết hạn/thiếu cookie:
 
 ---
 
-## 9) Ghi chú cập nhật lần sau
+## 10) Test Social Login (Google, Facebook, GitHub)
+
+### 10.1. Điều kiện tiên quyết
+
+1. Đã cấu hình OAuth2 credentials trong `application.yaml`:
+   - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+   - `FACEBOOK_CLIENT_ID`, `FACEBOOK_CLIENT_SECRET`
+   - `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`
+
+2. Đã register callback URL trên mỗi provider:
+   - Google: `http://localhost:8888/app/login/oauth2/code/google`
+   - Facebook: `http://localhost:8888/app/login/oauth2/code/facebook`
+   - GitHub: `http://localhost:8888/app/login/oauth2/code/github`
+
+### 10.2. Authorization endpoints
+
+Dùng browser để mở các link:
+
+- **Google**: `http://localhost:8888/app/oauth2/authorization/google`
+- **Facebook**: `http://localhost:8888/app/oauth2/authorization/facebook`
+- **GitHub**: `http://localhost:8888/app/oauth2/authorization/github`
+
+### 10.3. Flow
+
+1. Browser mở link authorization endpoint (VD: `google`)
+2. Spring Security redirect sang provider login page
+3. User login tại provider
+4. Provider callback về `/login/oauth2/code/{provider}` với authorization code
+5. Backend:
+   - Đổi code lấy access token
+   - Gọi `SocialLoginService.loadUser()`:
+     - Fetch user info từ provider
+     - Nếu GitHub và email null → call `/user/emails` API để lấy email
+     - Kiểm tra providerId có registered chưa
+     - Nếu email đã linked → return error
+     - Nếu không → create new user, publish Kafka event
+   - Gọi `SocialLoginSuccessHandler`:
+     - Wrap user trong `DefaultOAuth2User`
+     - Set cookies HttpOnly (`accessToken`, `refreshToken`, `deviceInfo`)
+     - Redirect về frontend
+6. Frontend nhận cookies từ response
+
+### 10.4. Kết quả mong đợi tại logs
+
+Khi login Google/Facebook/GitHub thành công, sẽ thấy logs:
+
+```log
+2026-05-21 07:20:00.000 INFO [reactor-http-nio-X] ... SocialLoginService - |SocialLoginService| Successfully loaded user from provider: {login=..., id=..., ...}
+2026-05-21 07:20:00.001 INFO [reactor-http-nio-X] ... SocialLoginService - |SocialLoginService| Processing user from provider: email=<email>, displayName=<name>, provider=<provider>
+2026-05-21 07:20:00.002 INFO [reactor-http-nio-X] ... SocialLoginService - |SocialLoginService| Successfully created new user from social media: UserCredentials(userId=..., email=..., provider=<provider>)
+2026-05-21 07:20:00.003 INFO [kafka-producer-network-thread | producer-1] ... SocialLoginService - |SocialLoginService| Successfully sent user creation event to Kafka
+2026-05-21 07:20:00.004 INFO [reactor-http-nio-X] ... SocialLoginSuccessHandler - |SocialLoginSuccessHandler| redirectToFrontEnd|userId=...|redirectUrl=http://localhost:5000/login
+```
+
+### 10.5. GitHub special case
+
+Khi login GitHub:
+
+- Nếu email **null** từ user info endpoint:
+  ```log
+  2026-05-21 07:20:00.000 INFO [reactor-http-nio-X] ... SocialLoginService - |SocialLoginService| Successfully fetched email from GitHub: <email@example.com>
+  ```
+- Nếu fetch email **fail**:
+  ```log
+  2026-05-21 07:20:00.000 WARN [reactor-http-nio-X] ... SocialLoginService - |SocialLoginService| Failed to fetch email from GitHub, will use null
+  2026-05-21 07:20:00.001 ERROR [reactor-http-nio-X] ... SocialLoginService - |SocialLoginService| Missing required user information from provider: email=null, providerId=<githubId>
+  ```
+
+---
+
+## 11) Ghi chú cập nhật lần sau (Updated)
 
 Khi thay đổi thêm bất kỳ thứ gì liên quan tới:
 
@@ -358,7 +428,7 @@ Khi thay đổi thêm bất kỳ thứ gì liên quan tới:
 - logout
 - cookie
 - CORS
-- social login
+- social login (OAuth2 flow, GitHub email fetching, etc.)
 - notification auth flow
 
 hãy append thêm một section mới ở cuối file này.

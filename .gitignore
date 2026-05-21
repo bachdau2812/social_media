@@ -33,3 +33,4 @@ build/
 .vscode/
 
 **/social-app.json
+logs/

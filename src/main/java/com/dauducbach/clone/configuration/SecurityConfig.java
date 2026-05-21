@@ -4,22 +4,25 @@ import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.commons.response.ApiResponse;
 import com.dauducbach.clone.modules.auth.service.JwtService;
 import com.dauducbach.clone.modules.auth.service.SocialLoginFailService;
+import com.dauducbach.clone.modules.auth.service.SocialLoginService;
 import com.dauducbach.clone.modules.auth.service.SocialLoginSuccessHandler;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nimbusds.jwt.SignedJWT;
-import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.security.authentication.ReactiveAuthenticationManager;
 import org.springframework.security.config.annotation.method.configuration.EnableReactiveMethodSecurity;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.config.oauth2.client.CommonOAuth2Provider;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.client.authentication.OAuth2AuthorizationCodeAuthenticationToken;
+import org.springframework.security.oauth2.client.authentication.OAuth2LoginAuthenticationToken;
+import org.springframework.security.oauth2.client.endpoint.OAuth2AuthorizationCodeGrantRequest;
+import org.springframework.security.oauth2.client.endpoint.ReactiveOAuth2AccessTokenResponseClient;
+import org.springframework.security.oauth2.client.endpoint.WebClientReactiveAuthorizationCodeTokenResponseClient;
 import org.springframework.security.oauth2.client.registration.InMemoryReactiveClientRegistrationRepository;
 import org.springframework.security.oauth2.client.registration.ReactiveClientRegistrationRepository;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
@@ -59,6 +62,7 @@ public class SecurityConfig {
     };
 
     private final JwtService jwtService;
+    private final SocialLoginService socialLoginService;
     private final SocialLoginSuccessHandler socialLoginSuccessHandler;
     private final SocialLoginFailService socialLoginFailService;
 
@@ -83,8 +87,14 @@ public class SecurityConfig {
     @Value("${spring.security.oauth2.client.registration.github.redirect-uri}")
     private String githubRedirectUri;
 
-    public SecurityConfig(JwtService jwtService, SocialLoginSuccessHandler socialLoginSuccessHandler, SocialLoginFailService socialLoginFailService) {
+    public SecurityConfig(
+            JwtService jwtService,
+            SocialLoginService socialLoginService,
+            SocialLoginSuccessHandler socialLoginSuccessHandler,
+            SocialLoginFailService socialLoginFailService
+    ) {
         this.jwtService = jwtService;
+        this.socialLoginService = socialLoginService;
         this.socialLoginSuccessHandler = socialLoginSuccessHandler;
         this.socialLoginFailService = socialLoginFailService;
     }
@@ -114,6 +124,7 @@ public class SecurityConfig {
 
         serverHttpSecurity.oauth2Login(oauth2 -> oauth2
                 .clientRegistrationRepository(reactiveClientRegistrationRepository())
+                .authenticationManager(oAuth2LoginAuthenticationManager())
                 .authenticationSuccessHandler(socialLoginSuccessHandler)
                 .authenticationFailureHandler(socialLoginFailService)
         );
@@ -121,10 +132,54 @@ public class SecurityConfig {
         return serverHttpSecurity.build();
     }
 
+
     @Bean
     public ReactiveJwtDecoder reactiveJwtDecoder() {
         return token -> jwtService.verifyToken(token)
                 .then(Mono.fromSupplier(() -> decodeJwt(token)));
+    }
+
+    @Bean
+    public ReactiveAuthenticationManager oAuth2LoginAuthenticationManager() {
+        // Create the token response client that exchanges auth code for access token
+        ReactiveOAuth2AccessTokenResponseClient<OAuth2AuthorizationCodeGrantRequest> tokenResponseClient = 
+            new WebClientReactiveAuthorizationCodeTokenResponseClient();
+        
+        // Create and return the authentication manager
+        return authenticationToken -> {
+            if (!(authenticationToken instanceof OAuth2AuthorizationCodeAuthenticationToken)) {
+                return Mono.error(new IllegalArgumentException("Invalid authentication token type"));
+            }
+            
+            OAuth2AuthorizationCodeAuthenticationToken codeToken = 
+                (OAuth2AuthorizationCodeAuthenticationToken) authenticationToken;
+            
+            // Create the grant request from the authentication token
+            OAuth2AuthorizationCodeGrantRequest grantRequest = new OAuth2AuthorizationCodeGrantRequest(
+                codeToken.getClientRegistration(),
+                codeToken.getAuthorizationExchange()
+            );
+            
+            // Exchange the authorization code for an access token
+            return tokenResponseClient.getTokenResponse(grantRequest)
+                    .flatMap(tokenResponse -> {
+                        // Load the OAuth2 user using the access token
+                        return socialLoginService.loadUser(
+                            new org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest(
+                                codeToken.getClientRegistration(),
+                                tokenResponse.getAccessToken()
+                            )
+                        )
+                        .map(oAuth2User -> new OAuth2LoginAuthenticationToken(
+                            codeToken.getClientRegistration(),
+                            codeToken.getAuthorizationExchange(),
+                            oAuth2User,
+                            oAuth2User.getAuthorities(),
+                            tokenResponse.getAccessToken(),
+                            tokenResponse.getRefreshToken()
+                        ));
+                    });
+        };
     }
 
     @Bean
@@ -146,18 +201,21 @@ public class SecurityConfig {
                         .clientSecret(googleClientSecret)
                         .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
                         .redirectUri(googleRedirectUri)
+                        .scope("openid", "profile", "email")
                         .build(),
                 CommonOAuth2Provider.FACEBOOK.getBuilder("facebook")
                         .clientId(facebookClientId)
                         .clientSecret(facebookClientSecret)
                         .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
                         .redirectUri(facebookRedirectUri)
+                        .scope("email", "public_profile")
                         .build(),
                 CommonOAuth2Provider.GITHUB.getBuilder("github")
                         .clientId(githubClientId)
                         .clientSecret(githubClientSecret)
                         .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
                         .redirectUri(githubRedirectUri)
+                        .scope("user:email", "read:user")
                         .build()
         );
     }
@@ -189,10 +247,7 @@ public class SecurityConfig {
 
 
 
-    @Bean
-    PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder(10);
-    }
+
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
@@ -206,6 +261,7 @@ public class SecurityConfig {
         source.registerCorsConfiguration("/**", configuration);
         return source;
     }
+
 
     private Jwt decodeJwt(String token) {
         try {

@@ -276,3 +276,121 @@
 - Có một tài liệu tập trung để debug/test luồng auth mà không phải đọc lại code mỗi lần.
 - Khi có thay đổi auth/security/cookie/refresh-token trong tương lai, tiếp tục append vào file này.
 
+## 2026-05-21 - Wire SocialLoginService into OAuth2 login manager
+
+### Mục tiêu
+- Đảm bảo `SocialLoginService.loadUser()` luôn được thực thi trong OAuth2 login flow trước khi gọi `SocialLoginSuccessHandler`.
+
+### Các file đã sửa
+- `src/main/java/com/dauducbach/clone/configuration/SecurityConfig.java`
+  - Inject thêm `SocialLoginService` vào `SecurityConfig`.
+  - Khai báo bean `ReactiveOAuth2AccessTokenResponseClient<OAuth2AuthorizationCodeGrantRequest>`.
+  - Khai báo bean `ReactiveAuthenticationManager` bằng `OAuth2LoginReactiveAuthenticationManager` và gắn `socialLoginService`.
+  - Cấu hình `oauth2Login(...).authenticationManager(...)` để Spring dùng custom `SocialLoginService` khi load user social.
+
+### Hành vi mới
+- Luồng `/oauth2/authorization/{provider}` sau callback sẽ dùng `SocialLoginService.loadUser()` để load/process user từ provider.
+- Sau khi xác thực thành công mới chuyển sang `SocialLoginSuccessHandler` để xử lý bước success (set cookie/redirect).
+
+## 2026-05-21 - Fix circular dependency SecurityConfig <-> SocialLoginService
+
+### Mục tiêu
+- Sửa lỗi startup `The dependencies of some of the beans in the application context form a cycle`.
+
+### Các file đã sửa
+- `src/main/java/com/dauducbach/clone/modules/auth/service/SocialLoginService.java`
+  - Bỏ dependency `PasswordEncoder` không sử dụng.
+
+### Nguyên nhân và kết quả
+- Do `SocialLoginService` phụ thuộc `PasswordEncoder` bean (được khai báo trong `SecurityConfig`) trong khi `SecurityConfig` cũng phụ thuộc `SocialLoginService`, tạo vòng lặp bean.
+- Sau khi bỏ dependency không dùng này, vòng phụ thuộc được phá và context có thể khởi tạo bình thường.
+
+## 2026-05-21 - Fix GitHub OAuth2 email extraction
+
+### Mục tiêu
+- GitHub API trả `email=null` trong user info endpoint mặc định.
+- Cần fetch email từ endpoint `/user/emails` riêng hoặc sử dụng primary/verified email.
+
+### Các file đã sửa
+- `src/main/java/com/dauducbach/clone/modules/auth/service/SocialLoginService.java`
+  - Sửa method `fetchGithubEmail()`:
+    - Đổi header `Authorization` từ `Bearer <token>` sang `token <token>` (GitHub yêu cầu format này).
+    - Thêm filter cho `primary` email ngoài `verified` email.
+    - Cải thiện error handling với `onErrorResume()`.
+
+- `src/main/java/com/dauducbach/clone/configuration/SecurityConfig.java`
+  - Thêm bean `WebClient` để hỗ trợ gọi GitHub API từ `SocialLoginService`.
+  - Đã có scope `user:email` được set ở GitHub client registration (dòng 184).
+
+### Hành vi mới
+- Khi user login bằng GitHub, nếu email null:
+  1. `SocialLoginService` sẽ gọi `fetchGithubEmail()` để lấy từ `/user/emails` endpoint.
+  2. Lấy email đầu tiên có `verified=true` hoặc `primary=true`.
+  3. Nếu thất bại, log warning và tiếp tục (có thể fail khi tạo user nếu không có email).
+
+### Test
+- Khi login GitHub: Nên thấy log `Successfully fetched email from GitHub: <email>` thay vì email=null.
+
+## 2026-05-21 - Fix OAuth2 "No provider found" error
+
+### Mục tiêu
+- Khi login qua Facebook/GitHub, nhận lỗi: `IllegalStateException: No provider found for class org.springframework.security.oauth2.client.authentication.OAuth2AuthorizationCodeAuthenticationToken`
+- Nguyên nhân: Custom `authenticationManager()` override làm bypass Spring Security's built-in OAuth2 authentication chain.
+
+### Các file đã sửa
+- `src/main/java/com/dauducbach/clone/configuration/SecurityConfig.java`
+  - **Xóa** `.authenticationManager(oAuth2LoginAuthenticationManager())` từ `oauth2Login()` config
+  - **Xóa** bean `ReactiveOAuth2AccessTokenResponseClient<OAuth2AuthorizationCodeGrantRequest> authorizationCodeTokenResponseClient()`
+  - **Xóa** bean `ReactiveAuthenticationManager oAuth2LoginAuthenticationManager()`
+  - **Xóa** imports: `ReactiveAuthenticationManager`, `OAuth2LoginReactiveAuthenticationManager`, `OAuth2AuthorizationCodeGrantRequest`, `ReactiveOAuth2AccessTokenResponseClient`, `WebClientReactiveAuthorizationCodeTokenResponseClient`
+
+### Nguyên nhân
+- Khi custom `authenticationManager`, Spring không properly register provider cho `OAuth2AuthorizationCodeAuthenticationToken`.
+- Solution là rely on Spring's default OAuth2 authentication flow, để Spring auto-detect `SocialLoginService` (extends `DefaultReactiveOAuth2UserService`) từ bean context.
+
+### Hành vi mới
+- OAuth2 login flow sử dụng Spring's default manager + auto-detected `SocialLoginService` bean.
+- `SocialLoginService.loadUser()` sẽ tự động được gọi trước success handler.
+- Khỏi phải manual wiring custom authentication manager.
+
+### Kết quả
+- **Trước**: `IllegalStateException: No provider found`
+- **Sau**: OAuth2 login flow hoạt động bình thường, `SocialLoginService.loadUser()` được gọi, sau đó `SocialLoginSuccessHandler` xử lý success.
+
+## 2026-05-21 - Fix OAuth2 authentication manager wiring (SocialLoginService not being called)
+
+### Mục tiêu
+- Fix vấn đề: OAuth2 login success handler được gọi trực tiếp mà không đi qua `SocialLoginService.loadUser()`.
+- Đảm bảo OAuth2 flow hoạt động đúng: Authorization Code → Token Exchange → User Load → Success Handler.
+- Tránh lỗi `IllegalStateException: No provider found for class OAuth2AuthorizationCodeAuthenticationToken`.
+
+### Nguyên nhân
+- SecurityConfig.java cấu hình sai: `.authenticationManager(socialLoginService)`.
+- `SocialLoginService` implement `DefaultReactiveOAuth2UserService` (user service), không phải `ReactiveAuthenticationManager`.
+- Spring Security WebFlux cần authentication manager để xử lý OAuth2 authorization code flow trước khi load user info.
+
+### Các file đã thay đổi
+
+**`src/main/java/com/dauducbach/clone/configuration/SecurityConfig.java`**
+- Thêm import: `OAuth2AuthorizationCodeGrantRequest`, `ReactiveOAuth2AccessTokenResponseClient`, `WebClientReactiveAuthorizationCodeTokenResponseClient`.
+- Tạo bean `oAuth2LoginAuthenticationManager()`:
+  - Tạo `WebClientReactiveAuthorizationCodeTokenResponseClient` để exchange authorization code thành access token.
+  - Khi nhận `OAuth2AuthorizationCodeAuthenticationToken`, tạo `OAuth2AuthorizationCodeGrantRequest` từ nó.
+  - Gọi token response client để lấy access token + refresh token.
+  - Gọi `socialLoginService.loadUser()` với OAuth2UserRequest chứa access token (QUAN TRỌNG).
+  - Tạo `OAuth2LoginAuthenticationToken` kèm user info để pass sang success handler.
+- Sửa `.oauth2Login()`: thay `.authenticationManager(socialLoginService)` → `.authenticationManager(oAuth2LoginAuthenticationManager())`.
+
+### Hành vi mới
+1. OAuth2 authorization code được trả về từ provider.
+2. `oAuth2LoginAuthenticationManager` intercept request.
+3. Exchange authorization code thành access token.
+4. Gọi `socialLoginService.loadUser()` để fetch user info từ provider + xử lý (tạo user mới nếu cần, fetch email từ GitHub nếu null...).
+5. Tạo authenticated OAuth2LoginAuthenticationToken.
+6. `SocialLoginSuccessHandler` nhận authentication token đã load đầy đủ user info.
+7. Redirect sang frontend với HttpOnly cookies.
+
+### Kết quả
+- **Trước**: `SocialLoginSuccessHandler` được gọi trực tiếp với user info không đầy đủ → `email=null` không được fetch từ GitHub.
+- **Sau**: `SocialLoginService.loadUser()` được gọi với access token → có thể fetch email từ GitHub API nếu null.
+- **Compilation**: ✅ Thành công (EXIT_CODE=0).
