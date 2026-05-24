@@ -83,6 +83,9 @@ spring:
           auth: true
           starttls:
             enable: true
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
 
 springdoc:
   api-docs:

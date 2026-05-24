@@ -86,12 +86,12 @@ public class JwtService {
                                             return Mono.just(true);
                                         });
                             } catch (ParseException e) {
-                                throw new JwtException("Invalid token", e);
+                                throw new JwtException("Invalid token 1", e);
                             }
                         });
             } catch (ParseException | JOSEException e) {
                 logger.error("Cannot verify token: {}", e.getMessage());
-                return Mono.error(new JwtException("Invalid token"));
+                return Mono.error(new JwtException("Invalid token 2"));
             }
         });
     }

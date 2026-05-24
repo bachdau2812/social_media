@@ -26,10 +26,10 @@ public class CreateUserRequest {
     String email;
 
     String phoneNumber;
-    Date birthday;
+    Date dob;
     String sex;
-    String currentAddress;
-    String homeTown;
+    String livingIn;
+    String hometown;
 
     @Builder.Default
     String role = "USER";

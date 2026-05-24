@@ -7,7 +7,7 @@ import org.springframework.http.HttpStatus;
 public enum ErrorCode {
     USER_NOT_FOUND(1000, "User not found", HttpStatus.NOT_FOUND),
     PASSWORD_INCORRECT(1001, "Incorrect password", HttpStatus.UNAUTHORIZED),
-    INVALID_TOKEN(1002, "Invalid token", HttpStatus.UNAUTHORIZED),
+    INVALID_TOKEN(1002, "Invalid token 4", HttpStatus.UNAUTHORIZED),
     TOKEN_VERIFICATION_FAILED(1003, "Token verification failed", HttpStatus.UNAUTHORIZED),
     REFRESH_TOKEN_FAILED(1004, "Refresh token failed", HttpStatus.UNAUTHORIZED),
     AUTHENTICATION_FAILED(1005, "Authentication failed", HttpStatus.UNAUTHORIZED),

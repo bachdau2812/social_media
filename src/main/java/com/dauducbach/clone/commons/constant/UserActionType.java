@@ -13,5 +13,6 @@ public enum UserActionType {
     ACCEPT_FRIEND,
     RESET_PASSWORD,
     RESET_PASSWORD_AND_USERNAME,
+    WELCOME_USER,
 
 }

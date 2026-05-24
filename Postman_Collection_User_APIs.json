@@ -1,0 +1,727 @@
+{
+  "info": {
+    "name": "Social Media User APIs",
+    "description": "Collection để test tất cả user modules APIs - UserDetails, User Info Entities, Followers",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "user-apis-export"
+  },
+  "item": [
+    {
+      "name": "UserDetails",
+      "item": [
+        {
+          "name": "Create UserDetails",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-details",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-details"]
+            },
+            "description": "Tạo mới user details"
+          },
+          "response": []
+        },
+        {
+          "name": "Update UserDetails",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"user123\",\n  \"username\": \"new_username\",\n  \"dob\": \"1998-05-15\",\n  \"homeTown\": \"Hanoi\",\n  \"livingIn\": \"Ho Chi Minh City\",\n  \"sex\": \"MALE\",\n  \"hobbieList\": [\"reading\", \"gaming\", \"traveling\"]\n}"
+            },
+            "url": {
+              "raw": "http://localhost:8888/app/user-details/update",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-details", "update"]
+            },
+            "description": "Cập nhật user details (partial update)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get UserDetails by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-details/user123",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-details", "user123"]
+            },
+            "description": "Lấy thông tin user details theo userId"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete UserDetails",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-details/user123",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-details", "user123"]
+            },
+            "description": "Xóa user details theo userId"
+          },
+          "response": []
+        }
+      ],
+      "description": "UserDetails CRUD operations"
+    },
+    {
+      "name": "UserJob",
+      "item": [
+        {
+          "name": "Create UserJob",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"user123\",\n  \"companyName\": \"Tech Company\",\n  \"position\": \"Software Engineer\",\n  \"from\": \"2022-01-01\",\n  \"to\": \"2024-12-31\",\n  \"isPublic\": true\n}"
+            },
+            "url": {
+              "raw": "http://localhost:8888/app/user-jobs",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-jobs"]
+            },
+            "description": "Tạo mới thông tin công việc"
+          },
+          "response": []
+        },
+        {
+          "name": "Update UserJob",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"job123\",\n  \"companyName\": \"New Tech Company\",\n  \"position\": \"Senior Engineer\",\n  \"isPublic\": false\n}"
+            },
+            "url": {
+              "raw": "http://localhost:8888/app/user-jobs",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-jobs"]
+            },
+            "description": "Cập nhật thông tin công việc"
+          },
+          "response": []
+        },
+        {
+          "name": "Get UserJob by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-jobs/job123",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-jobs", "job123"]
+            },
+            "description": "Lấy thông tin công việc theo ID"
+          },
+          "response": []
+        },
+        {
+          "name": "Get UserJobs by User ID (Public only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-jobs/user/user123?includeNonPublic=false",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-jobs", "user", "user123"],
+              "query": [
+                {
+                  "key": "includeNonPublic",
+                  "value": "false"
+                }
+              ]
+            },
+            "description": "Lấy danh sách công việc public của user"
+          },
+          "response": []
+        },
+        {
+          "name": "Get UserJobs by User ID (All)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-jobs/user/user123?includeNonPublic=true",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-jobs", "user", "user123"],
+              "query": [
+                {
+                  "key": "includeNonPublic",
+                  "value": "true"
+                }
+              ]
+            },
+            "description": "Lấy tất cả công việc của user (bao gồm private)"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete UserJob",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-jobs/job123",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-jobs", "job123"]
+            },
+            "description": "Xóa thông tin công việc"
+          },
+          "response": []
+        }
+      ],
+      "description": "UserJob CRUD operations với privacy controls"
+    },
+    {
+      "name": "UserSocialMedia",
+      "item": [
+        {
+          "name": "Create UserSocialMedia",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"user123\",\n  \"link\": \"https://facebook.com/username\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost:8888/app/user-social-media",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-social-media"]
+            },
+            "description": "Tạo mới social media link"
+          },
+          "response": []
+        },
+        {
+          "name": "Get UserSocialMedia by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-social-media/social123",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-social-media", "social123"]
+            },
+            "description": "Lấy social media link theo ID"
+          },
+          "response": []
+        },
+        {
+          "name": "Get UserSocialMedia by User ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-social-media/user/user123",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-social-media", "user", "user123"]
+            },
+            "description": "Lấy tất cả social media links của user"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete UserSocialMedia",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-social-media/social123",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-social-media", "social123"]
+            },
+            "description": "Xóa social media link"
+          },
+          "response": []
+        }
+      ],
+      "description": "UserSocialMedia CRUD operations"
+    },
+    {
+      "name": "UserPhone",
+      "item": [
+        {
+          "name": "Create UserPhone",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"user123\",\n  \"phoneNum\": \"+84912345678\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost:8888/app/user-phones",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-phones"]
+            },
+            "description": "Tạo mới phone number (mặc định isVerified=false)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get UserPhone by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-phones/phone123",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-phones", "phone123"]
+            },
+            "description": "Lấy phone number theo ID"
+          },
+          "response": []
+        },
+        {
+          "name": "Get UserPhones by User ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-phones/user/user123",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-phones", "user", "user123"]
+            },
+            "description": "Lấy tất cả phone numbers của user"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete UserPhone",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-phones/phone123",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-phones", "phone123"]
+            },
+            "description": "Xóa phone number"
+          },
+          "response": []
+        }
+      ],
+      "description": "UserPhone CRUD operations"
+    },
+    {
+      "name": "UserHighSchool",
+      "item": [
+        {
+          "name": "Create UserHighSchool",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"user123\",\n  \"schoolName\": \"High School for Gifted Students\",\n  \"from\": \"2015-09-01\",\n  \"to\": \"2018-06-30\",\n  \"isGraduate\": true,\n  \"isPublic\": true\n}"
+            },
+            "url": {
+              "raw": "http://localhost:8888/app/user-high-schools",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-high-schools"]
+            },
+            "description": "Tạo mới high school information"
+          },
+          "response": []
+        },
+        {
+          "name": "Get UserHighSchool by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-high-schools/school123",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-high-schools", "school123"]
+            },
+            "description": "Lấy high school information theo ID"
+          },
+          "response": []
+        },
+        {
+          "name": "Get UserHighSchools by User ID (Public only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-high-schools/user/user123?includeNonPublic=false",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-high-schools", "user", "user123"],
+              "query": [
+                {
+                  "key": "includeNonPublic",
+                  "value": "false"
+                }
+              ]
+            },
+            "description": "Lấy danh sách high schools public của user"
+          },
+          "response": []
+        },
+        {
+          "name": "Get UserHighSchools by User ID (All)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-high-schools/user/user123?includeNonPublic=true",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-high-schools", "user", "user123"],
+              "query": [
+                {
+                  "key": "includeNonPublic",
+                  "value": "true"
+                }
+              ]
+            },
+            "description": "Lấy tất cả high schools của user"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete UserHighSchool",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-high-schools/school123",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-high-schools", "school123"]
+            },
+            "description": "Xóa high school information"
+          },
+          "response": []
+        }
+      ],
+      "description": "UserHighSchool CRUD operations với privacy controls"
+    },
+    {
+      "name": "UserUniversity",
+      "item": [
+        {
+          "name": "Create UserUniversity",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"user123\",\n  \"schoolName\": \"FPT University\",\n  \"major\": \"Software Engineering\",\n  \"from\": \"2018-09-01\",\n  \"to\": \"2022-06-30\",\n  \"isGraduate\": true,\n  \"isPublic\": true\n}"
+            },
+            "url": {
+              "raw": "http://localhost:8888/app/user-universities",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-universities"]
+            },
+            "description": "Tạo mới university information"
+          },
+          "response": []
+        },
+        {
+          "name": "Get UserUniversity by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-universities/university123",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-universities", "university123"]
+            },
+            "description": "Lấy university information theo ID"
+          },
+          "response": []
+        },
+        {
+          "name": "Get UserUniversities by User ID (Public only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-universities/user/user123?includeNonPublic=false",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-universities", "user", "user123"],
+              "query": [
+                {
+                  "key": "includeNonPublic",
+                  "value": "false"
+                }
+              ]
+            },
+            "description": "Lấy danh sách universities public của user"
+          },
+          "response": []
+        },
+        {
+          "name": "Get UserUniversities by User ID (All)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-universities/user/user123?includeNonPublic=true",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-universities", "user", "user123"],
+              "query": [
+                {
+                  "key": "includeNonPublic",
+                  "value": "true"
+                }
+              ]
+            },
+            "description": "Lấy tất cả universities của user"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete UserUniversity",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-universities/university123",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-universities", "university123"]
+            },
+            "description": "Xóa university information"
+          },
+          "response": []
+        }
+      ],
+      "description": "UserUniversity CRUD operations với privacy controls"
+    },
+    {
+      "name": "UserFollower",
+      "item": [
+        {
+          "name": "Follow User",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"followerId\": \"user456\",\n  \"followingId\": \"user123\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost:8888/app/user-followers/follow",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-followers", "follow"]
+            },
+            "description": "Theo dõi user (user456 follows user123)"
+          },
+          "response": []
+        },
+        {
+          "name": "Unfollow User",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-followers/unfollow?followerId=user456&followingId=user123",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-followers", "unfollow"],
+              "query": [
+                {
+                  "key": "followerId",
+                  "value": "user456"
+                },
+                {
+                  "key": "followingId",
+                  "value": "user123"
+                }
+              ]
+            },
+            "description": "Bỏ theo dõi user"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Follow Relationship by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-followers/follow123",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-followers", "follow123"]
+            },
+            "description": "Lấy follow relationship theo ID"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Followers (Page 1)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-followers/followers/user123?page=0&size=20",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-followers", "followers", "user123"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Lấy danh sách followers của user123 (người đang follow user123)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Following (Page 1)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-followers/following/user123?page=0&size=20",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-followers", "following", "user123"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Lấy danh sách following của user123 (người mà user123 đang follow)"
+          },
+          "response": []
+        },
+        {
+          "name": "Check Is Following",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-followers/is-following?followerId=user456&followingId=user123",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-followers", "is-following"],
+              "query": [
+                {
+                  "key": "followerId",
+                  "value": "user456"
+                },
+                {
+                  "key": "followingId",
+                  "value": "user123"
+                }
+              ]
+            },
+            "description": "Kiểm tra xem user456 có đang follow user123 không"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Follower Counts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:8888/app/user-followers/counts/user123",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8888",
+              "path": ["app", "user-followers", "counts", "user123"]
+            },
+            "description": "Lấy số liệu followers và following của user123"
+          },
+          "response": []
+        }
+      ],
+      "description": "UserFollower social networking operations"
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8888/app",
+      "type": "string"
+    }
+  ]
+}

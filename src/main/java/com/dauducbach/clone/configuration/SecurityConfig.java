@@ -2,12 +2,11 @@ package com.dauducbach.clone.configuration;
 
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.commons.response.ApiResponse;
-import com.dauducbach.clone.modules.auth.service.JwtService;
-import com.dauducbach.clone.modules.auth.service.SocialLoginFailService;
-import com.dauducbach.clone.modules.auth.service.SocialLoginService;
-import com.dauducbach.clone.modules.auth.service.SocialLoginSuccessHandler;
+import com.dauducbach.clone.modules.auth.service.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nimbusds.jwt.SignedJWT;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
@@ -60,6 +59,7 @@ public class SecurityConfig {
             "/auth/refresh-token",
             "/auth/logout"
     };
+    private static final Logger log = LoggerFactory.getLogger(SecurityConfig.class);
 
     private final JwtService jwtService;
     private final SocialLoginService socialLoginService;
@@ -91,7 +91,7 @@ public class SecurityConfig {
             JwtService jwtService,
             SocialLoginService socialLoginService,
             SocialLoginSuccessHandler socialLoginSuccessHandler,
-            SocialLoginFailService socialLoginFailService
+            SocialLoginFailService socialLoginFailService, AuthenticationService authenticationService
     ) {
         this.jwtService = jwtService;
         this.socialLoginService = socialLoginService;
@@ -116,6 +116,7 @@ public class SecurityConfig {
         );
 
         serverHttpSecurity.oauth2ResourceServer(oAuth2ResourceServerSpec -> oAuth2ResourceServerSpec
+                .bearerTokenConverter(new CookieServerAuthenticationConverter())
                 .jwt(jwtSpec -> jwtSpec
                         .jwtDecoder(reactiveJwtDecoder())
                         .jwtAuthenticationConverter(jwtAuthenticationConverter())
@@ -129,13 +130,17 @@ public class SecurityConfig {
                 .authenticationFailureHandler(socialLoginFailService)
         );
 
-        return serverHttpSecurity.build();
+
+        return serverHttpSecurity
+                .build();
     }
 
 
     @Bean
     public ReactiveJwtDecoder reactiveJwtDecoder() {
         return token -> jwtService.verifyToken(token)
+                .doOnError(e -> log.info("SecurityConfig|JWT verification failed: {}", e.getMessage()))
+                .doOnSuccess(jwt -> log.info("SecurityConfig|Valid_token: {}", jwt))
                 .then(Mono.fromSupplier(() -> decodeJwt(token)));
     }
 
@@ -245,10 +250,6 @@ public class SecurityConfig {
         };
     }
 
-
-
-
-
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
@@ -265,13 +266,10 @@ public class SecurityConfig {
 
     private Jwt decodeJwt(String token) {
         try {
+            log.info("SecurityConfig|Decoding JWT: {}", token);
             SignedJWT signedJWT = SignedJWT.parse(token);
             Date issueTime = signedJWT.getJWTClaimsSet().getIssueTime();
             Date expiryTime = signedJWT.getJWTClaimsSet().getExpirationTime();
-
-            if (issueTime == null || expiryTime == null) {
-                throw new JwtException("Invalid token");
-            }
 
             return new Jwt(
                     token,
@@ -281,7 +279,8 @@ public class SecurityConfig {
                     signedJWT.getJWTClaimsSet().getClaims()
             );
         } catch (ParseException e) {
-            throw new JwtException("Invalid token", e);
+            log.info("SecurityConfig|Decoding JWT: parse exception: {}", e.getMessage());
+            throw new JwtException("Invalid token 3", e);
         }
     }
 

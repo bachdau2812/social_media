@@ -6,6 +6,7 @@ import com.dauducbach.clone.modules.auth.dto.request.CreateUserRequest;
 import com.dauducbach.clone.modules.auth.dto.request.EmailVerifyRequest;
 import com.dauducbach.clone.modules.auth.entity.UserCredentials;
 import com.dauducbach.clone.modules.auth.repository.UserCredentialsRepository;
+import com.dauducbach.clone.utils.GsonUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.gson.JsonObject;
 import lombok.RequiredArgsConstructor;
@@ -115,7 +116,10 @@ public class UserCredentialsService {
                                 .provider("SYSTEM")
                                 .build();
                         /// The notification and user modules subscribe to this event and handle their own logic for user creation.
-                        ProducerRecord<String, Object> producerRecord = new ProducerRecord<>("profile_creation_event", user.getUserId(), request.toString());
+                        JsonObject eventPayload = GsonUtils.fromObject(userRequest);
+                        eventPayload.addProperty("userId", user.getUserId());
+
+                        ProducerRecord<String, Object> producerRecord = new ProducerRecord<>("profile_creation_event", user.getUserId(), eventPayload.toString());
                         SenderRecord<String, Object, String> senderRecord = SenderRecord.create(producerRecord, "User Creation Event");
 
                         return kafkaSender.send(Mono.just(senderRecord))

@@ -163,4 +163,36 @@ public class AuthModuleNotificationHandler {
                 })
                 .subscribe();
     }
+
+    @KafkaListener(topics = "profile_creation_event", groupId = "notification-service")
+    public void handleProfileCreationEvent(@Payload String payload) {
+        JsonObject payloadJson = GsonUtils.fromString(payload);
+
+        String username = payloadJson.get("username").toString();
+        String email = String.valueOf(payloadJson.get("email"));
+
+        /// Build notification request
+        var notificationRequest = NotificationRequest.builder()
+                .actorId("welcome_user" + email)
+                .notificationType(NotificationType.EMAIL)
+                .actionType(UserActionType.WELCOME_USER)
+                .entityId(null)
+                .entityType(null)
+                .recipientIds(List.of(email))
+                .title("Welcome to Our Service")
+                .build();
+
+        ///  Send notification
+        notificationTemplatesRepository.findByActionType(notificationRequest.getActionType())
+                .doOnSuccess(notificationTemplates -> log.info("|AuthModuleNotificationHandler|handleSendNewPasswordEvent|fetched template for actionType={}|templateId={}", notificationRequest.getActionType(), notificationTemplates.getId()))
+                .flatMap(notificationTemplates -> {
+                    String processedHtml = notificationTemplates.getTemplate()
+                            .replace("{{USERNAME}}", username);
+
+                    notificationRequest.setContent(processedHtml);
+
+                    return notificationService.sendNotification(notificationRequest);
+                })
+                .subscribe();
+    }
 }
