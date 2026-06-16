@@ -37,8 +37,6 @@ public class AuthModuleNotificationHandler {
         String email = String.valueOf(payloadJson.get("email"));
         String code = String.valueOf(payloadJson.get("code"));
 
-        /// Get user information
-
         /// Build notification request
         var notificationRequest = NotificationRequest.builder()
                 .actorId("register_notification" + username)

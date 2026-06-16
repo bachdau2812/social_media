@@ -66,11 +66,11 @@ spring:
     bootstrap-servers: localhost:9092
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
     consumer:
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
   mail:
     host: smtp.gmail.com
@@ -87,16 +87,29 @@ spring:
     serialization:
       write-dates-as-timestamps: false
 
-springdoc:
-  api-docs:
-    path: /v3/api-docs
-  swagger-ui:
-    path: /swagger-ui.html
+  springdoc:
+    api-docs:
+      path: /v3/api-docs
+    swagger-ui:
+      path: /swagger-ui.html
+
+gemini-key: ${GEMINI_KEY}
 
 jwt:
   signerKey: ${JWT_SIGNER_KEY}
   valid-duration: 900
 
+
+cloudinary:
+  cloud-name: "dpilnbfrs"
+  api-key: ${CLOUDINARY_API_KEY}
+  api-secret: ${CLOUDINARY_API_SECRET}
+
+post:
+  media:
+    scan:
+      api-url: http://localhost:8000/api/v1/scan
+      max-in-memory-size: 10MB
 
 #    http://localhost:8888/app/oauth2/authorization/google
 #    http://localhost:8888/app/oauth2/authorization/facebook

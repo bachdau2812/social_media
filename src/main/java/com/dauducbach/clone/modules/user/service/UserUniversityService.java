@@ -1,5 +1,7 @@
 package com.dauducbach.clone.modules.user.service;
 
+import com.dauducbach.clone.commons.exception.AppException;
+import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.user.dto.request.UserUniversityRequest;
 import com.dauducbach.clone.modules.user.entity.UserUniversity;
 import com.dauducbach.clone.modules.user.repositoty.UserUniversityRepository;
@@ -52,6 +54,11 @@ public class UserUniversityService {
 
         return r2dbcEntityTemplate.insert(UserUniversity.class)
                 .using(userUniversity)
+                .onErrorMap(throwable -> new AppException(
+                        ErrorCode.USER_UNIVERSITY_SAVE_FAILED,
+                        String.format("Save user university failed for userId=%s", request.getUserId()),
+                        throwable
+                ))
                 .doOnSuccess(savedUniversity -> {
                     log.info("|UserUniversityService|createUserUniversity|created|id={}", savedUniversity.getId());
                     String jsonString = RedisUtil.serialize(savedUniversity);
@@ -70,6 +77,10 @@ public class UserUniversityService {
         String cacheKey = CACHE_PREFIX + id;
 
         return reactiveRedisStringTemplate.opsForValue().get(cacheKey)
+                .onErrorResume(error -> {
+                    log.warn("|UserUniversityService|getUserUniversityById|cache read failed, fallback to database|id={}|error={}", id, error.getMessage());
+                    return Mono.empty();
+                })
                 .flatMap(cachedJsonString -> {
                     UserUniversity cached = RedisUtil.deserialize(cachedJsonString, UserUniversity.class);
                     if (cached != null) {
@@ -80,7 +91,17 @@ public class UserUniversityService {
                 })
                 .switchIfEmpty(
                         userUniversityRepository.findById(id)
-                                .switchIfEmpty(Mono.error(new RuntimeException("UserUniversity not found with id: " + id)))
+                                .switchIfEmpty(Mono.error(new AppException(
+                                        ErrorCode.USER_UNIVERSITY_NOT_FOUND,
+                                        String.format("User university not found for id=%s", id)
+                                )))
+                                .onErrorMap(throwable -> throwable instanceof AppException
+                                        ? throwable
+                                        : new AppException(
+                                                ErrorCode.USER_UNIVERSITY_FETCH_FAILED,
+                                                String.format("Fetch user university failed for id=%s", id),
+                                                throwable
+                                        ))
                                 .doOnSuccess(university -> {
                                     log.info("|UserUniversityService|getUserUniversityById|found in database|id={}", id);
                                     String jsonString = RedisUtil.serialize(university);
@@ -105,6 +126,10 @@ public class UserUniversityService {
         }
 
         return reactiveRedisStringTemplate.opsForValue().get(listCacheKey)
+                .onErrorResume(error -> {
+                    log.warn("|UserUniversityService|getUserUniversitiesByUserId|cache read failed, fallback to database|userId={}|error={}", userId, error.getMessage());
+                    return Mono.empty();
+                })
                 .flatMapMany(cachedJsonString -> {
                     if (cachedJsonString != null) {
                         log.info("|UserUniversityService|getUserUniversitiesByUserId|found list in cache|userId={}", userId);
@@ -117,6 +142,11 @@ public class UserUniversityService {
                         userUniversityRepository.findByUserId(userId)
                                 .filter(UserUniversity::isPublic)
                                 .collectList()
+                                .onErrorMap(throwable -> new AppException(
+                                        ErrorCode.USER_UNIVERSITY_FETCH_FAILED,
+                                        String.format("Fetch user universities failed for userId=%s", userId),
+                                        throwable
+                                ))
                                 .doOnNext(universityList -> {
                                     log.info("|UserUniversityService|getUserUniversitiesByUserId|found {} public items in database|userId={}", universityList.size(), userId);
                                     String jsonString = RedisUtil.serialize(universityList);
@@ -136,7 +166,10 @@ public class UserUniversityService {
         String cacheKey = CACHE_PREFIX + id;
 
         return userUniversityRepository.findById(id)
-                .switchIfEmpty(Mono.error(new RuntimeException("UserUniversity not found with id: " + id)))
+                .switchIfEmpty(Mono.error(new AppException(
+                        ErrorCode.USER_UNIVERSITY_NOT_FOUND,
+                        String.format("User university not found for id=%s", id)
+                )))
                 .flatMap(university -> userUniversityRepository.deleteById(id)
                         .doOnSuccess(v -> {
                             log.info("|UserUniversityService|deleteUserUniversity|deleted|id={}", id);
@@ -144,6 +177,13 @@ public class UserUniversityService {
                             reactiveRedisStringTemplate.opsForValue().delete(LIST_CACHE_PREFIX + university.getUserId()).subscribe();
                         })
                         .doOnError(error -> log.error("|UserUniversityService|deleteUserUniversity|failed to delete|id={}|error={}", id, error.getMessage()))
+                        .onErrorMap(throwable -> throwable instanceof AppException
+                                ? throwable
+                                : new AppException(
+                                        ErrorCode.USER_UNIVERSITY_DELETE_FAILED,
+                                        String.format("Delete user university failed for id=%s", id),
+                                        throwable
+                                ))
                 );
     }
 }

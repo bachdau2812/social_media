@@ -1,5 +1,7 @@
 package com.dauducbach.clone.modules.user.service;
 
+import com.dauducbach.clone.commons.exception.AppException;
+import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.user.dto.request.UserPhoneRequest;
 import com.dauducbach.clone.modules.user.entity.UserPhone;
 import com.dauducbach.clone.modules.user.repositoty.UserPhoneRepository;
@@ -48,6 +50,11 @@ public class UserPhoneService {
 
         return r2dbcEntityTemplate.insert(UserPhone.class)
                 .using(userPhone)
+                .onErrorMap(throwable -> new AppException(
+                        ErrorCode.USER_PHONE_SAVE_FAILED,
+                        String.format("Save user phone failed for userId=%s", request.getUserId()),
+                        throwable
+                ))
                 .doOnSuccess(savedPhone -> {
                     log.info("|UserPhoneService|createUserPhone|created user phone|id={}", savedPhone.getId());
                     String jsonString = RedisUtil.serialize(savedPhone);
@@ -66,6 +73,10 @@ public class UserPhoneService {
         String cacheKey = CACHE_PREFIX + id;
 
         return reactiveRedisStringTemplate.opsForValue().get(cacheKey)
+                .onErrorResume(error -> {
+                    log.warn("|UserPhoneService|getUserPhoneById|cache read failed, fallback to database|id={}|error={}", id, error.getMessage());
+                    return Mono.empty();
+                })
                 .flatMap(cachedJsonString -> {
                     UserPhone cached = RedisUtil.deserialize(cachedJsonString, UserPhone.class);
                     if (cached != null) {
@@ -76,7 +87,17 @@ public class UserPhoneService {
                 })
                 .switchIfEmpty(
                         userPhoneRepository.findById(id)
-                                .switchIfEmpty(Mono.error(new RuntimeException("UserPhone not found with id: " + id)))
+                                .switchIfEmpty(Mono.error(new AppException(
+                                        ErrorCode.USER_PHONE_NOT_FOUND,
+                                        String.format("User phone not found for id=%s", id)
+                                )))
+                                .onErrorMap(throwable -> throwable instanceof AppException
+                                        ? throwable
+                                        : new AppException(
+                                                ErrorCode.USER_PHONE_FETCH_FAILED,
+                                                String.format("Fetch user phone failed for id=%s", id),
+                                                throwable
+                                        ))
                                 .doOnSuccess(phone -> {
                                     log.info("|UserPhoneService|getUserPhoneById|found in database|id={}", id);
                                     String jsonString = RedisUtil.serialize(phone);
@@ -95,6 +116,10 @@ public class UserPhoneService {
         String listCacheKey = LIST_CACHE_PREFIX + userId;
 
         return reactiveRedisStringTemplate.opsForValue().get(listCacheKey)
+                .onErrorResume(error -> {
+                    log.warn("|UserPhoneService|getUserPhonesByUserId|cache read failed, fallback to database|userId={}|error={}", userId, error.getMessage());
+                    return Mono.empty();
+                })
                 .flatMapMany(cachedJsonString -> {
                     if (cachedJsonString != null) {
                         log.info("|UserPhoneService|getUserPhonesByUserId|found list in cache|userId={}", userId);
@@ -105,6 +130,11 @@ public class UserPhoneService {
                 .switchIfEmpty(
                         userPhoneRepository.findByUserId(userId)
                                 .collectList()
+                                .onErrorMap(throwable -> new AppException(
+                                        ErrorCode.USER_PHONE_FETCH_FAILED,
+                                        String.format("Fetch user phones failed for userId=%s", userId),
+                                        throwable
+                                ))
                                 .doOnNext(phoneList -> {
                                     log.info("|UserPhoneService|getUserPhonesByUserId|found {} items in database|userId={}", phoneList.size(), userId);
                                     String jsonString = RedisUtil.serialize(phoneList);
@@ -124,7 +154,10 @@ public class UserPhoneService {
         String cacheKey = CACHE_PREFIX + id;
 
         return userPhoneRepository.findById(id)
-                .switchIfEmpty(Mono.error(new RuntimeException("UserPhone not found with id: " + id)))
+                .switchIfEmpty(Mono.error(new AppException(
+                        ErrorCode.USER_PHONE_NOT_FOUND,
+                        String.format("User phone not found for id=%s", id)
+                )))
                 .flatMap(phone -> userPhoneRepository.deleteById(id)
                         .doOnSuccess(v -> {
                             log.info("|UserPhoneService|deleteUserPhone|deleted|id={}", id);
@@ -132,6 +165,13 @@ public class UserPhoneService {
                             reactiveRedisStringTemplate.opsForValue().delete(LIST_CACHE_PREFIX + phone.getUserId()).subscribe();
                         })
                         .doOnError(error -> log.error("|UserPhoneService|deleteUserPhone|failed to delete|id={}|error={}", id, error.getMessage()))
+                        .onErrorMap(throwable -> throwable instanceof AppException
+                                ? throwable
+                                : new AppException(
+                                        ErrorCode.USER_PHONE_DELETE_FAILED,
+                                        String.format("Delete user phone failed for id=%s", id),
+                                        throwable
+                                ))
                 );
     }
 }

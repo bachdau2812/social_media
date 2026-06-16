@@ -28,6 +28,8 @@ public class CookieServerAuthenticationConverter implements ServerAuthentication
 
             // Trả về token dưới dạng BearerTokenAuthenticationToken để Spring Security xử lý tiếp
             return Mono.just(new BearerTokenAuthenticationToken(token));
+        } else {
+            log.info("Cookie is empty or null");
         }
         
         // Trả về rỗng nếu không tìm thấy cookie, Spring sẽ chuyển sang báo lỗi 401

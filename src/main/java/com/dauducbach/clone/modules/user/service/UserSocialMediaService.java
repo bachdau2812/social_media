@@ -1,5 +1,7 @@
 package com.dauducbach.clone.modules.user.service;
 
+import com.dauducbach.clone.commons.exception.AppException;
+import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.user.dto.request.UserSocialMediaRequest;
 import com.dauducbach.clone.modules.user.entity.UserSocialMedia;
 import com.dauducbach.clone.modules.user.repositoty.UserSocialMediaRepository;
@@ -47,6 +49,11 @@ public class UserSocialMediaService {
 
         return r2dbcEntityTemplate.insert(UserSocialMedia.class)
                 .using(userSocialMedia)
+                .onErrorMap(throwable -> new AppException(
+                        ErrorCode.USER_SOCIAL_MEDIA_SAVE_FAILED,
+                        String.format("Save user social media failed for userId=%s", request.getUserId()),
+                        throwable
+                ))
                 .doOnSuccess(savedSocialMedia -> {
                     log.info("|UserSocialMediaService|createUserSocialMedia|created user social media|id={}", savedSocialMedia.getId());
                     String jsonString = RedisUtil.serialize(savedSocialMedia);
@@ -65,6 +72,10 @@ public class UserSocialMediaService {
         String cacheKey = CACHE_PREFIX + id;
 
         return reactiveRedisStringTemplate.opsForValue().get(cacheKey)
+                .onErrorResume(error -> {
+                    log.warn("|UserSocialMediaService|getUserSocialMediaById|cache read failed, fallback to database|id={}|error={}", id, error.getMessage());
+                    return Mono.empty();
+                })
                 .flatMap(cachedJsonString -> {
                     UserSocialMedia cached = RedisUtil.deserialize(cachedJsonString, UserSocialMedia.class);
                     if (cached != null) {
@@ -75,7 +86,17 @@ public class UserSocialMediaService {
                 })
                 .switchIfEmpty(
                         userSocialMediaRepository.findById(id)
-                                .switchIfEmpty(Mono.error(new RuntimeException("UserSocialMedia not found with id: " + id)))
+                                .switchIfEmpty(Mono.error(new AppException(
+                                        ErrorCode.USER_SOCIAL_MEDIA_NOT_FOUND,
+                                        String.format("User social media not found for id=%s", id)
+                                )))
+                                .onErrorMap(throwable -> throwable instanceof AppException
+                                        ? throwable
+                                        : new AppException(
+                                                ErrorCode.USER_SOCIAL_MEDIA_FETCH_FAILED,
+                                                String.format("Fetch user social media failed for id=%s", id),
+                                                throwable
+                                        ))
                                 .doOnSuccess(socialMedia -> {
                                     log.info("|UserSocialMediaService|getUserSocialMediaById|found in database|id={}", id);
                                     String jsonString = RedisUtil.serialize(socialMedia);
@@ -94,6 +115,10 @@ public class UserSocialMediaService {
         String listCacheKey = LIST_CACHE_PREFIX + userId;
 
         return reactiveRedisStringTemplate.opsForValue().get(listCacheKey)
+                .onErrorResume(error -> {
+                    log.warn("|UserSocialMediaService|getUserSocialMediaByUserId|cache read failed, fallback to database|userId={}|error={}", userId, error.getMessage());
+                    return Mono.empty();
+                })
                 .flatMapMany(cachedJsonString -> {
                     if (cachedJsonString != null) {
                         log.info("|UserSocialMediaService|getUserSocialMediaByUserId|found list in cache|userId={}", userId);
@@ -104,6 +129,11 @@ public class UserSocialMediaService {
                 .switchIfEmpty(
                         userSocialMediaRepository.findByUserId(userId)
                                 .collectList()
+                                .onErrorMap(throwable -> new AppException(
+                                        ErrorCode.USER_SOCIAL_MEDIA_FETCH_FAILED,
+                                        String.format("Fetch user social media failed for userId=%s", userId),
+                                        throwable
+                                ))
                                 .doOnNext(socialMediaList -> {
                                     log.info("|UserSocialMediaService|getUserSocialMediaByUserId|found {} items in database|userId={}", socialMediaList.size(), userId);
                                     String jsonString = RedisUtil.serialize(socialMediaList);
@@ -123,7 +153,10 @@ public class UserSocialMediaService {
         String cacheKey = CACHE_PREFIX + id;
 
         return userSocialMediaRepository.findById(id)
-                .switchIfEmpty(Mono.error(new RuntimeException("UserSocialMedia not found with id: " + id)))
+                .switchIfEmpty(Mono.error(new AppException(
+                        ErrorCode.USER_SOCIAL_MEDIA_NOT_FOUND,
+                        String.format("User social media not found for id=%s", id)
+                )))
                 .flatMap(socialMedia -> userSocialMediaRepository.deleteById(id)
                         .doOnSuccess(v -> {
                             log.info("|UserSocialMediaService|deleteUserSocialMedia|deleted|id={}", id);
@@ -131,6 +164,13 @@ public class UserSocialMediaService {
                             reactiveRedisStringTemplate.opsForValue().delete(LIST_CACHE_PREFIX + socialMedia.getUserId()).subscribe();
                         })
                         .doOnError(error -> log.error("|UserSocialMediaService|deleteUserSocialMedia|failed to delete|id={}|error={}", id, error.getMessage()))
+                        .onErrorMap(throwable -> throwable instanceof AppException
+                                ? throwable
+                                : new AppException(
+                                        ErrorCode.USER_SOCIAL_MEDIA_DELETE_FAILED,
+                                        String.format("Delete user social media failed for id=%s", id),
+                                        throwable
+                                ))
                 );
     }
 }

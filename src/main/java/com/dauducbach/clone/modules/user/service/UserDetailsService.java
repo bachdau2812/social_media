@@ -1,5 +1,7 @@
 package com.dauducbach.clone.modules.user.service;
 
+import com.dauducbach.clone.commons.exception.AppException;
+import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.user.dto.request.UserDetailsUpdateRequest;
 import com.dauducbach.clone.modules.user.entity.UserDetails;
 import com.dauducbach.clone.modules.user.repositoty.UserDetailsRepository;
@@ -17,6 +19,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.time.Duration;
 
@@ -50,7 +53,11 @@ public class UserDetailsService {
                 .build();
         userDetails.setHobbyList(KafkaUtils.extractStringList(payloadJson, "hobbieList"));
 
-        insertUserDetails(userDetails).subscribe();
+        insertUserDetails(userDetails)
+                .subscribe(
+                        saved -> log.info("|UserDetailsService|createUserDetails|created user details|userId={}", saved.getUserId()),
+                        error -> log.error("|UserDetailsService|createUserDetails|failed to create user details|userId={}|error={}", userDetails.getUserId(), error.getMessage())
+                );
     }
 
     /// Insert UserDetails with caching
@@ -61,6 +68,11 @@ public class UserDetailsService {
 
         return r2dbcEntityTemplate.insert(UserDetails.class)
                 .using(userDetails)
+                .onErrorMap(throwable -> new AppException(
+                        ErrorCode.USER_DETAILS_SAVE_FAILED,
+                        String.format("Save user details failed for userId=%s", userDetails.getUserId()),
+                        throwable
+                ))
                 .doOnSuccess(savedUserDetails -> {
                     log.info("|UserDetailsService|insertUserDetails|saved userDetails to database|userId={}", savedUserDetails.getUserId());
                     // Cache the saved user details as JSON string
@@ -85,7 +97,10 @@ public class UserDetailsService {
         return userDetailsRepository.existsById(request.getUserId())
                 .flatMap(exists -> {
                     if (!exists) {
-                        return Mono.error(new RuntimeException("User not found with id: " + request.getUserId()));
+                        return Mono.error(new AppException(
+                                ErrorCode.USER_DETAILS_NOT_FOUND,
+                                String.format("User details not found for userId=%s", request.getUserId())
+                        ));
                     }
 
                     // Get existing user details
@@ -114,6 +129,14 @@ public class UserDetailsService {
 
                     return userDetailsRepository.save(existingUserDetails);
                 })
+                .onErrorMap(throwable -> throwable instanceof AppException
+                        ? throwable
+                        : new AppException(
+                                ErrorCode.USER_DETAILS_UPDATE_FAILED,
+                                String.format("Update user details failed for userId=%s", request.getUserId()),
+                                throwable
+                        ))
+                .publishOn(Schedulers.boundedElastic())
                 .doOnSuccess(updatedUserDetails -> {
                     log.info("|UserDetailsService|updateUserDetails|updated userDetails successfully|userId={}", updatedUserDetails.getUserId());
                     // Update cache as JSON string
@@ -134,8 +157,12 @@ public class UserDetailsService {
 
         String cacheKey = USER_DETAILS_CACHE_PREFIX + userId;
 
-        // Try to get from cache first
+        // Try to get from cache firstA
         return reactiveRedisStringTemplate.opsForValue().get(cacheKey)
+                .onErrorResume(error -> {
+                    log.warn("|UserDetailsService|getUserDetailsById|cache read failed, fallback to database|userId={}|error={}", userId, error.getMessage());
+                    return Mono.empty();
+                })
                 .flatMap(cachedJsonString -> {
                     // Cache hit - deserialize JSON string to UserDetails
                     UserDetails cachedUserDetails = RedisUtil.deserialize(cachedJsonString, UserDetails.class);
@@ -148,7 +175,17 @@ public class UserDetailsService {
                 .switchIfEmpty(
                         // Cache miss - fetch from database
                         userDetailsRepository.findById(userId)
-                                .switchIfEmpty(Mono.error(new RuntimeException("User not found with id: " + userId)))
+                                .switchIfEmpty(Mono.error(new AppException(
+                                        ErrorCode.USER_DETAILS_NOT_FOUND,
+                                        String.format("User details not found for userId=%s", userId)
+                                )))
+                                .onErrorMap(throwable -> throwable instanceof AppException
+                                        ? throwable
+                                        : new AppException(
+                                                ErrorCode.USER_DETAILS_FETCH_FAILED,
+                                                String.format("Fetch user details failed for userId=%s", userId),
+                                                throwable
+                                        ))
                                 .doOnSuccess(userDetails -> {
                                     log.info("|UserDetailsService|getUserDetailsById|found userDetails in database|userId={}", userId);
                                     // Cache the result as JSON string
@@ -170,15 +207,26 @@ public class UserDetailsService {
 
         String cacheKey = USER_DETAILS_CACHE_PREFIX + userId;
 
-        // Delete from cache
-        return reactiveRedisStringTemplate.opsForValue().delete(cacheKey)
-                .doOnSuccess(v -> log.info("|UserDetailsService|deleteUserDetails|deleted cache|userId={}", userId))
-                .doOnError(error -> log.error("|UserDetailsService|deleteUserDetails|failed to delete cache|userId={}|error={}", userId, error.getMessage()))
-                .then(
-                        // Delete from database
-                        userDetailsRepository.deleteById(userId)
-                                .doOnSuccess(v -> log.info("|UserDetailsService|deleteUserDetails|deleted userDetails from database|userId={}", userId))
-                                .doOnError(error -> log.error("|UserDetailsService|deleteUserDetails|failed to delete userDetails from database|userId={}|error={}", userId, error.getMessage()))
+        return userDetailsRepository.findById(userId)
+                .switchIfEmpty(Mono.error(new AppException(
+                        ErrorCode.USER_DETAILS_NOT_FOUND,
+                        String.format("User details not found for userId=%s", userId)
+                )))
+                .flatMap(existing -> reactiveRedisStringTemplate.opsForValue().delete(cacheKey)
+                        .onErrorResume(error -> {
+                            log.warn("|UserDetailsService|deleteUserDetails|cache delete failed, continue|userId={}|error={}", userId, error.getMessage());
+                            return Mono.empty();
+                        })
+                        .then(userDetailsRepository.deleteById(userId))
+                        .then()
+                        .doOnSuccess(v -> log.info("|UserDetailsService|deleteUserDetails|deleted userDetails from database|userId={}", userId))
+                        .onErrorMap(throwable -> throwable instanceof AppException
+                                ? throwable
+                                : new AppException(
+                                        ErrorCode.USER_DETAILS_DELETE_FAILED,
+                                        String.format("Delete user details failed for userId=%s", userId),
+                                        throwable
+                                ))
                 );
     }
 }

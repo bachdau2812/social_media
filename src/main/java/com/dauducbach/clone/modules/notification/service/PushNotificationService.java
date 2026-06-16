@@ -4,7 +4,10 @@ import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.notification.constants.NotificationStatus;
 import com.dauducbach.clone.modules.notification.dto.NotificationForService;
+import com.dauducbach.clone.modules.notification.dto.request.PushTokenRegisterRequest;
+import com.dauducbach.clone.modules.notification.dto.response.PushTokenRegisterResponse;
 import com.dauducbach.clone.modules.notification.entity.NotificationEvents;
+import com.dauducbach.clone.modules.notification.entity.NotificationPushToken;
 import com.dauducbach.clone.modules.notification.entity.UserNotifications;
 import com.dauducbach.clone.modules.notification.repository.NotificationEventsRepository;
 import com.dauducbach.clone.modules.notification.repository.UserPushNotificationRepository;
@@ -32,6 +35,30 @@ public class PushNotificationService {
     UserPushNotificationRepository userPushNotificationRepository;
     NotificationEventsRepository notificationEventsRepository;
     R2dbcEntityTemplate r2dbcEntityTemplate;
+
+    public Mono<PushTokenRegisterResponse> registerPushToken(PushTokenRegisterRequest request) {
+        return Mono.defer(() -> {
+            validatePushTokenRequest(request);
+
+            String userId = request.userId().trim();
+            String deviceId = normalizeOptional(request.deviceId());
+            String deviceToken = request.deviceToken().trim();
+
+            return userPushNotificationRepository.findByUserId(userId)
+                    .flatMap(existing -> updatePushToken(existing, deviceId, deviceToken))
+                    .switchIfEmpty(Mono.defer(() -> createPushToken(userId, deviceId, deviceToken)))
+                    .map(this::toRegisterResponse)
+                    .doOnSuccess(response -> logger.info("|PushNotificationService|registerPushToken|success|userId={}|tokenId={}",
+                            response.userId(), response.id()))
+                    .onErrorMap(error -> error instanceof AppException
+                            ? error
+                            : new AppException(
+                                    ErrorCode.PUSH_TOKEN_SAVE_FAILED,
+                                    String.format("Save push token failed for userId=%s", userId),
+                                    error
+                            ));
+        });
+    }
 
     public Mono<String> sendPushNotification(NotificationForService request) {
         if (request.getRecipient() == null || request.getRecipient().isBlank()) {
@@ -100,5 +127,54 @@ public class PushNotificationService {
                     logger.info("|PushNotificationService|sendPushNotification|no push token found for recipientId={}", request.getRecipient());
                     return "Push notifications sent successfully";
                 }));
+    }
+
+    private void validatePushTokenRequest(PushTokenRegisterRequest request) {
+        if (request == null) {
+            throw new AppException(ErrorCode.PUSH_TOKEN_INVALID, "Request is required");
+        }
+        if (request.userId() == null || request.userId().isBlank()) {
+            throw new AppException(ErrorCode.PUSH_TOKEN_INVALID, "userId is required");
+        }
+        if (request.deviceToken() == null || request.deviceToken().isBlank()) {
+            throw new AppException(ErrorCode.PUSH_TOKEN_INVALID, "deviceToken is required");
+        }
+    }
+
+    private Mono<NotificationPushToken> updatePushToken(NotificationPushToken existing, String deviceId, String deviceToken) {
+        existing.setDeviceId(deviceId);
+        existing.setDeviceToken(deviceToken);
+
+        return userPushNotificationRepository.save(existing)
+                .doOnSuccess(saved -> logger.info("|PushNotificationService|updatePushToken|success|userId={}|tokenId={}",
+                        saved.getUserId(), saved.getId()));
+    }
+
+    private Mono<NotificationPushToken> createPushToken(String userId, String deviceId, String deviceToken) {
+        NotificationPushToken pushToken = NotificationPushToken.builder()
+                .id(UUID.randomUUID().toString())
+                .userId(userId)
+                .deviceId(deviceId)
+                .deviceToken(deviceToken)
+                .createdAt(Instant.now())
+                .build();
+
+        return r2dbcEntityTemplate.insert(NotificationPushToken.class)
+                .using(pushToken)
+                .doOnSuccess(saved -> logger.info("|PushNotificationService|createPushToken|success|userId={}|tokenId={}",
+                        saved.getUserId(), saved.getId()));
+    }
+
+    private PushTokenRegisterResponse toRegisterResponse(NotificationPushToken pushToken) {
+        return new PushTokenRegisterResponse(
+                pushToken.getId(),
+                pushToken.getUserId(),
+                pushToken.getDeviceId(),
+                pushToken.getCreatedAt()
+        );
+    }
+
+    private String normalizeOptional(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 }

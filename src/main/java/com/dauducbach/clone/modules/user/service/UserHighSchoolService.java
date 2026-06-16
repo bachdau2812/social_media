@@ -1,5 +1,7 @@
 package com.dauducbach.clone.modules.user.service;
 
+import com.dauducbach.clone.commons.exception.AppException;
+import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.user.dto.request.UserHighSchoolRequest;
 import com.dauducbach.clone.modules.user.entity.UserHighSchool;
 import com.dauducbach.clone.modules.user.repositoty.UserHighSchoolRepository;
@@ -13,6 +15,7 @@ import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.time.Duration;
 import java.util.UUID;
@@ -51,6 +54,12 @@ public class UserHighSchoolService {
 
         return r2dbcEntityTemplate.insert(UserHighSchool.class)
                 .using(userHighSchool)
+                .onErrorMap(throwable -> new AppException(
+                        ErrorCode.USER_HIGH_SCHOOL_SAVE_FAILED,
+                        String.format("Save user high school failed for userId=%s", request.getUserId()),
+                        throwable
+                ))
+                .publishOn(Schedulers.boundedElastic())
                 .doOnSuccess(savedHighSchool -> {
                     log.info("|UserHighSchoolService|createUserHighSchool|created|id={}", savedHighSchool.getId());
                     String jsonString = RedisUtil.serialize(savedHighSchool);
@@ -69,6 +78,10 @@ public class UserHighSchoolService {
         String cacheKey = CACHE_PREFIX + id;
 
         return reactiveRedisStringTemplate.opsForValue().get(cacheKey)
+                .onErrorResume(error -> {
+                    log.warn("|UserHighSchoolService|getUserHighSchoolById|cache read failed, fallback to database|id={}|error={}", id, error.getMessage());
+                    return Mono.empty();
+                })
                 .flatMap(cachedJsonString -> {
                     UserHighSchool cached = RedisUtil.deserialize(cachedJsonString, UserHighSchool.class);
                     if (cached != null) {
@@ -79,7 +92,18 @@ public class UserHighSchoolService {
                 })
                 .switchIfEmpty(
                         userHighSchoolRepository.findById(id)
-                                .switchIfEmpty(Mono.error(new RuntimeException("UserHighSchool not found with id: " + id)))
+                                .switchIfEmpty(Mono.error(new AppException(
+                                        ErrorCode.USER_HIGH_SCHOOL_NOT_FOUND,
+                                        String.format("User high school not found for id=%s", id)
+                                )))
+                                .onErrorMap(throwable -> throwable instanceof AppException
+                                        ? throwable
+                                        : new AppException(
+                                                ErrorCode.USER_HIGH_SCHOOL_FETCH_FAILED,
+                                                String.format("Fetch user high school failed for id=%s", id),
+                                                throwable
+                                        ))
+                                .publishOn(Schedulers.boundedElastic())
                                 .doOnSuccess(highSchool -> {
                                     log.info("|UserHighSchoolService|getUserHighSchoolById|found in database|id={}", id);
                                     String jsonString = RedisUtil.serialize(highSchool);
@@ -104,6 +128,10 @@ public class UserHighSchoolService {
         }
 
         return reactiveRedisStringTemplate.opsForValue().get(listCacheKey)
+                .onErrorResume(error -> {
+                    log.warn("|UserHighSchoolService|getUserHighSchoolsByUserId|cache read failed, fallback to database|userId={}|error={}", userId, error.getMessage());
+                    return Mono.empty();
+                })
                 .flatMapMany(cachedJsonString -> {
                     if (cachedJsonString != null) {
                         log.info("|UserHighSchoolService|getUserHighSchoolsByUserId|found list in cache|userId={}", userId);
@@ -116,6 +144,11 @@ public class UserHighSchoolService {
                         userHighSchoolRepository.findByUserId(userId)
                                 .filter(UserHighSchool::isPublic)
                                 .collectList()
+                                .onErrorMap(throwable -> new AppException(
+                                        ErrorCode.USER_HIGH_SCHOOL_FETCH_FAILED,
+                                        String.format("Fetch user high schools failed for userId=%s", userId),
+                                        throwable
+                                ))
                                 .doOnNext(highSchoolList -> {
                                     log.info("|UserHighSchoolService|getUserHighSchoolsByUserId|found {} public items in database|userId={}", highSchoolList.size(), userId);
                                     String jsonString = RedisUtil.serialize(highSchoolList);
@@ -135,7 +168,10 @@ public class UserHighSchoolService {
         String cacheKey = CACHE_PREFIX + id;
 
         return userHighSchoolRepository.findById(id)
-                .switchIfEmpty(Mono.error(new RuntimeException("UserHighSchool not found with id: " + id)))
+                .switchIfEmpty(Mono.error(new AppException(
+                        ErrorCode.USER_HIGH_SCHOOL_NOT_FOUND,
+                        String.format("User high school not found for id=%s", id)
+                )))
                 .flatMap(highSchool -> userHighSchoolRepository.deleteById(id)
                         .doOnSuccess(v -> {
                             log.info("|UserHighSchoolService|deleteUserHighSchool|deleted|id={}", id);
@@ -143,6 +179,13 @@ public class UserHighSchoolService {
                             reactiveRedisStringTemplate.opsForValue().delete(LIST_CACHE_PREFIX + highSchool.getUserId()).subscribe();
                         })
                         .doOnError(error -> log.error("|UserHighSchoolService|deleteUserHighSchool|failed to delete|id={}|error={}", id, error.getMessage()))
+                        .onErrorMap(throwable -> throwable instanceof AppException
+                                ? throwable
+                                : new AppException(
+                                        ErrorCode.USER_HIGH_SCHOOL_DELETE_FAILED,
+                                        String.format("Delete user high school failed for id=%s", id),
+                                        throwable
+                                ))
                 );
     }
 }

@@ -1,5 +1,7 @@
 package com.dauducbach.clone.modules.user.service;
 
+import com.dauducbach.clone.commons.exception.AppException;
+import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.user.dto.request.FollowRequest;
 import com.dauducbach.clone.modules.user.dto.response.FollowResponse;
 import com.dauducbach.clone.modules.user.dto.response.FollowerListResponse;
@@ -25,7 +27,7 @@ import reactor.kafka.sender.SenderRecord;
 public class UserFollowerService {
     UserFollowerRepository userFollowerRepository;
     R2dbcEntityTemplate r2dbcEntityTemplate;
-    KafkaSender<String, Object> kafkaSender;
+    KafkaSender<String, String> kafkaSender;
 
     private static final Logger log = LoggerFactory.getLogger(UserFollowerService.class);
     private static final int DEFAULT_PAGE_SIZE = 20;
@@ -36,18 +38,27 @@ public class UserFollowerService {
 
         // Validate: Không thể tự follow mình
         if (request.getFollowerId().equals(request.getFollowingId())) {
-            return Mono.error(new RuntimeException("Cannot follow yourself"));
+            return Mono.error(new AppException(
+                    ErrorCode.CANNOT_FOLLOW_SELF,
+                    String.format("Cannot follow yourself: followerId=%s, followingId=%s", request.getFollowerId(), request.getFollowingId())
+            ));
         }
 
-        // Build record to send to analysis-service
-        ProducerRecord<String, Object> producerRecord = new ProducerRecord<>("follow_event", request.getFollowerId(), request.toString());
-        SenderRecord<String, Object, String> senderRecord = SenderRecord.create(producerRecord, "Follow Event");
+        JsonObject payload = new JsonObject();
+        payload.addProperty("followerId", request.getFollowerId());
+        payload.addProperty("followingId", request.getFollowingId());
+
+        ProducerRecord<String, String> producerRecord = new ProducerRecord<>("follow_event", request.getFollowerId(), payload.toString());
+        SenderRecord<String, String, String> senderRecord = SenderRecord.create(producerRecord, "Follow Event");
 
         // Check nếu đã follow rồi thì báo lỗi
         return userFollowerRepository.existsByFollowerIdAndFollowingId(request.getFollowerId(), request.getFollowingId())
                 .flatMap(exists -> {
                     if (exists) {
-                        return Mono.error(new RuntimeException("Already following this user"));
+                        return Mono.error(new AppException(
+                                ErrorCode.ALREADY_FOLLOWING_USER,
+                                String.format("Already following this user: followerId=%s, followingId=%s", request.getFollowerId(), request.getFollowingId())
+                        ));
                     }
 
                     // Insert vào DB
@@ -65,6 +76,13 @@ public class UserFollowerService {
                                     .createdAt(saved.getCreatedAt())
                                     .message("Successfully followed user")
                                     .build())
+                            .onErrorMap(throwable -> throwable instanceof AppException
+                                    ? throwable
+                                    : new AppException(
+                                            ErrorCode.FOLLOW_SAVE_FAILED,
+                                            String.format("Follow user failed: followerId=%s, followingId=%s", request.getFollowerId(), request.getFollowingId()),
+                                            throwable
+                                    ))
                             .doOnSuccess(response -> log.info("|UserFollowerService|followUser|created|id={}", response.getId()))
                             .doOnError(error -> log.error("|UserFollowerService|followUser|failed to follow|error={}", error.getMessage()));
                 });
@@ -79,14 +97,17 @@ public class UserFollowerService {
         payload.addProperty("followerId", followerId);
         payload.addProperty("followingId", followingId);
 
-        ProducerRecord<String, Object> producerRecord = new ProducerRecord<>("un_follow_event", followerId, payload.toString());
-        SenderRecord<String, Object, String> senderRecord = SenderRecord.create(producerRecord, "Unfollow Event");
+        ProducerRecord<String, String> producerRecord = new ProducerRecord<>("un_follow_event", followerId, payload.toString());
+        SenderRecord<String, String, String> senderRecord = SenderRecord.create(producerRecord, "Unfollow Event");
 
         // Check relationship
         return userFollowerRepository.existsByFollowerIdAndFollowingId(followerId, followingId)
                 .flatMap(exists -> {
                     if (!exists) {
-                        return Mono.error(new RuntimeException("Not following this user"));
+                        return Mono.error(new AppException(
+                                ErrorCode.NOT_FOLLOWING_USER,
+                                String.format("Not following this user: followerId=%s, followingId=%s", followerId, followingId)
+                        ));
                     }
 
                     // Delete vào DB
@@ -96,6 +117,13 @@ public class UserFollowerService {
                                     .doOnError(error -> log.error("|UserFollowerService|unfollowUser|failed to send Kafka message for unfollow event|error={}", error.getMessage()))
                                     .then())
                             .then(Mono.just("Successfully unfollowed user"))
+                            .onErrorMap(throwable -> throwable instanceof AppException
+                                    ? throwable
+                                    : new AppException(
+                                            ErrorCode.UNFOLLOW_FAILED,
+                                            String.format("Unfollow user failed: followerId=%s, followingId=%s", followerId, followingId),
+                                            throwable
+                                    ))
                             .doOnSuccess(message -> log.info("|UserFollowerService|unfollowUser|unfollowed|followerId={}|followingId={}", followerId, followingId))
                             .doOnError(error -> log.error("|UserFollowerService|unfollowUser|failed to unfollow|error={}", error.getMessage()));
                 });
@@ -106,7 +134,17 @@ public class UserFollowerService {
         log.info("|UserFollowerService|getUserFollowerById|id={}", id);
 
         return userFollowerRepository.findById(id)
-                .switchIfEmpty(Mono.error(new RuntimeException("Follow relationship not found with id: " + id)))
+                .switchIfEmpty(Mono.error(new AppException(
+                        ErrorCode.FOLLOW_RELATIONSHIP_NOT_FOUND,
+                        String.format("Follow relationship not found for id=%s", id)
+                )))
+                .onErrorMap(throwable -> throwable instanceof AppException
+                        ? throwable
+                        : new AppException(
+                                ErrorCode.FOLLOW_RELATIONSHIP_FETCH_FAILED,
+                                String.format("Fetch follow relationship failed for id=%s", id),
+                                throwable
+                        ))
                 .map(follower -> FollowResponse.builder()
                         .id(follower.getId())
                         .followerId(follower.getFollowerId())
@@ -130,6 +168,11 @@ public class UserFollowerService {
                 .flatMap(totalCount -> {
                     // Get followers với pagination
                     return userFollowerRepository.findFollowersByUserId(userId, validatedSize, offset)
+                            .onErrorMap(throwable -> new AppException(
+                                    ErrorCode.FOLLOWERS_FETCH_FAILED,
+                                    String.format("Fetch followers failed for userId=%s", userId),
+                                    throwable
+                            ))
                             .map(follower -> FollowerListResponse.FollowerInfo.builder()
                                     .followId(follower.getId())
                                     .userId(follower.getFollowerId())
@@ -146,6 +189,13 @@ public class UserFollowerService {
                                     .build())
                             .doOnSuccess(response -> log.info("|UserFollowerService|getFollowers|found {} followers for userId={}", response.getFollowers().size(), userId));
                 })
+                .onErrorMap(throwable -> throwable instanceof AppException
+                        ? throwable
+                        : new AppException(
+                                ErrorCode.FOLLOWERS_FETCH_FAILED,
+                                String.format("Fetch followers failed for userId=%s", userId),
+                                throwable
+                        ))
                 .doOnError(error -> log.error("|UserFollowerService|getFollowers|failed|userId={}|error={}", userId, error.getMessage()));
     }
 
@@ -161,6 +211,11 @@ public class UserFollowerService {
                 .flatMap(totalCount -> {
                     // Get following với pagination
                     return userFollowerRepository.findFollowingByUserId(userId, validatedSize, offset)
+                            .onErrorMap(throwable -> new AppException(
+                                    ErrorCode.FOLLOWING_FETCH_FAILED,
+                                    String.format("Fetch following failed for userId=%s", userId),
+                                    throwable
+                            ))
                             .map(following -> FollowerListResponse.FollowerInfo.builder()
                                     .followId(following.getId())
                                     .userId(following.getFollowingId())
@@ -177,6 +232,13 @@ public class UserFollowerService {
                                     .build())
                             .doOnSuccess(response -> log.info("|UserFollowerService|getFollowing|found {} following for userId={}", response.getFollowers().size(), userId));
                 })
+                .onErrorMap(throwable -> throwable instanceof AppException
+                        ? throwable
+                        : new AppException(
+                                ErrorCode.FOLLOWING_FETCH_FAILED,
+                                String.format("Fetch following failed for userId=%s", userId),
+                                throwable
+                        ))
                 .doOnError(error -> log.error("|UserFollowerService|getFollowing|failed|userId={}|error={}", userId, error.getMessage()));
     }
 
@@ -185,6 +247,11 @@ public class UserFollowerService {
         log.info("|UserFollowerService|isFollowing|followerId={}|followingId={}", followerId, followingId);
 
         return userFollowerRepository.existsByFollowerIdAndFollowingId(followerId, followingId)
+                .onErrorMap(throwable -> new AppException(
+                        ErrorCode.FOLLOW_STATUS_CHECK_FAILED,
+                        String.format("Check following status failed: followerId=%s, followingId=%s", followerId, followingId),
+                        throwable
+                ))
                 .doOnSuccess(isFollowing -> log.info("|UserFollowerService|isFollowing|result={}|followerId={}|followingId={}", isFollowing, followerId, followingId));
     }
 
@@ -196,6 +263,11 @@ public class UserFollowerService {
                 userFollowerRepository.countFollowers(userId),
                 userFollowerRepository.countFollowing(userId)
         )
+        .onErrorMap(throwable -> new AppException(
+                ErrorCode.FOLLOW_COUNT_FAILED,
+                String.format("Fetch follower counts failed for userId=%s", userId),
+                throwable
+        ))
         .map(tuple -> FollowerCountResponse.builder()
                 .userId(userId)
                 .followersCount(tuple.getT1().intValue())

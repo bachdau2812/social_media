@@ -39,7 +39,7 @@ public class SocialLoginService extends DefaultReactiveOAuth2UserService {
 
     R2dbcEntityTemplate r2dbcEntityTemplate;
     UserCredentialsRepository userCredentialsRepository;
-    KafkaSender<String, Object> kafkaSender;
+    KafkaSender<String, String> kafkaSender;
     PasswordEncoder passwordEncoder;
     WebClient webClient;
 
@@ -128,8 +128,8 @@ public class SocialLoginService extends DefaultReactiveOAuth2UserService {
         payload.addProperty("providerId", newUser.getProviderId());
         payload.addProperty("avatarUrl", avatarUrl);
 
-        ProducerRecord<String, Object> record = new ProducerRecord<>("user_creation_social_media", newUser.getUserId(), payload.toString());
-        SenderRecord<String, Object, String> senderRecord = SenderRecord.create(record, "Send user information to identity service after creating new user from social media");
+        ProducerRecord<String, String> record = new ProducerRecord<>("user_creation_social_media", newUser.getUserId(), payload.toString());
+        SenderRecord<String, String, String> senderRecord = SenderRecord.create(record, "Send user information to identity service after creating new user from social media");
 
         /// insert user to database
         return r2dbcEntityTemplate.insert(UserCredentials.class)

@@ -1,5 +1,7 @@
 package com.dauducbach.clone.modules.user.service;
 
+import com.dauducbach.clone.commons.exception.AppException;
+import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.user.dto.request.UserJobRequest;
 import com.dauducbach.clone.modules.user.dto.request.UserJobUpdateRequest;
 import com.dauducbach.clone.modules.user.entity.UserJob;
@@ -53,6 +55,11 @@ public class UserJobService {
 
         return r2dbcEntityTemplate.insert(UserJob.class)
                 .using(userJob)
+                .onErrorMap(throwable -> new AppException(
+                        ErrorCode.USER_JOB_SAVE_FAILED,
+                        String.format("Save user job failed for userId=%s", request.getUserId()),
+                        throwable
+                ))
                 .doOnSuccess(savedJob -> {
                     log.info("|UserJobService|createUserJob|created user job|id={}", savedJob.getId());
                     // Cache the new job
@@ -73,7 +80,10 @@ public class UserJobService {
         String cacheKey = CACHE_PREFIX + request.getId();
 
         return userJobRepository.findById(request.getId())
-                .switchIfEmpty(Mono.error(new RuntimeException("UserJob not found with id: " + request.getId())))
+                .switchIfEmpty(Mono.error(new AppException(
+                        ErrorCode.USER_JOB_NOT_FOUND,
+                        String.format("User job not found for id=%s", request.getId())
+                )))
                 .flatMap(existingJob -> {
                     // Update non-null fields
                     if (request.getCompanyName() != null && !request.getCompanyName().isBlank()) {
@@ -94,6 +104,13 @@ public class UserJobService {
 
                     return userJobRepository.save(existingJob);
                 })
+                .onErrorMap(throwable -> throwable instanceof AppException
+                        ? throwable
+                        : new AppException(
+                                ErrorCode.USER_JOB_UPDATE_FAILED,
+                                String.format("Update user job failed for id=%s", request.getId()),
+                                throwable
+                        ))
                 .doOnSuccess(updatedJob -> {
                     log.info("|UserJobService|updateUserJob|updated user job|id={}", updatedJob.getId());
                     // Update cache
@@ -114,6 +131,10 @@ public class UserJobService {
         String cacheKey = CACHE_PREFIX + id;
 
         return reactiveRedisStringTemplate.opsForValue().get(cacheKey)
+                .onErrorResume(error -> {
+                    log.warn("|UserJobService|getUserJobById|cache read failed, fallback to database|id={}|error={}", id, error.getMessage());
+                    return Mono.empty();
+                })
                 .flatMap(cachedJsonString -> {
                     UserJob cachedJob = RedisUtil.deserialize(cachedJsonString, UserJob.class);
                     if (cachedJob != null) {
@@ -124,7 +145,17 @@ public class UserJobService {
                 })
                 .switchIfEmpty(
                         userJobRepository.findById(id)
-                                .switchIfEmpty(Mono.error(new RuntimeException("UserJob not found with id: " + id)))
+                                .switchIfEmpty(Mono.error(new AppException(
+                                        ErrorCode.USER_JOB_NOT_FOUND,
+                                        String.format("User job not found for id=%s", id)
+                                )))
+                                .onErrorMap(throwable -> throwable instanceof AppException
+                                        ? throwable
+                                        : new AppException(
+                                                ErrorCode.USER_JOB_FETCH_FAILED,
+                                                String.format("Fetch user job failed for id=%s", id),
+                                                throwable
+                                        ))
                                 .doOnSuccess(job -> {
                                     log.info("|UserJobService|getUserJobById|found in database|id={}", id);
                                     String jsonString = RedisUtil.serialize(job);
@@ -151,6 +182,10 @@ public class UserJobService {
 
         // Chỉ lấy public data, có thể cache
         return reactiveRedisStringTemplate.opsForValue().get(listCacheKey)
+                .onErrorResume(error -> {
+                    log.warn("|UserJobService|getUserJobsByUserId|cache read failed, fallback to database|userId={}|error={}", userId, error.getMessage());
+                    return Mono.empty();
+                })
                 .flatMapMany(cachedJsonString -> {
                     if (cachedJsonString != null) {
                         log.info("|UserJobService|getUserJobsByUserId|found list in cache|userId={}", userId);
@@ -164,6 +199,11 @@ public class UserJobService {
                         userJobRepository.findByUserId(userId)
                                 .filter(UserJob::isPublic)
                                 .collectList()
+                                .onErrorMap(throwable -> new AppException(
+                                        ErrorCode.USER_JOB_FETCH_FAILED,
+                                        String.format("Fetch user jobs failed for userId=%s", userId),
+                                        throwable
+                                ))
                                 .publishOn(Schedulers.boundedElastic())
                                 .doOnNext(jobs -> {
                                     log.info("|UserJobService|getUserJobsByUserId|found {} public jobs in database|userId={}", jobs.size(), userId);
@@ -184,7 +224,10 @@ public class UserJobService {
         String cacheKey = CACHE_PREFIX + id;
 
         return userJobRepository.findById(id)
-                .switchIfEmpty(Mono.error(new RuntimeException("UserJob not found with id: " + id)))
+                .switchIfEmpty(Mono.error(new AppException(
+                        ErrorCode.USER_JOB_NOT_FOUND,
+                        String.format("User job not found for id=%s", id)
+                )))
                 .flatMap(job -> userJobRepository.deleteById(id)
                         .doOnSuccess(v -> {
                             log.info("|UserJobService|deleteUserJob|deleted job|id={}", id);
@@ -194,6 +237,13 @@ public class UserJobService {
                             reactiveRedisStringTemplate.opsForValue().delete(LIST_CACHE_PREFIX + job.getUserId()).subscribe();
                         })
                         .doOnError(error -> log.error("|UserJobService|deleteUserJob|failed to delete job|id={}|error={}", id, error.getMessage()))
-                );
+                )
+                .onErrorMap(throwable -> throwable instanceof AppException
+                        ? throwable
+                        : new AppException(
+                                ErrorCode.USER_JOB_DELETE_FAILED,
+                                String.format("Delete user job failed for id=%s", id),
+                                throwable
+                        ));
     }
 }
