@@ -70,7 +70,7 @@ public class PostService {
         boolean hasMedia = !mediaList.isEmpty();
         log.info("|PostService|createPost|media resolved|count={}", mediaList.size());
 
-        String postStatus = hasMedia ? "PENDING_SCAN" : "VALID_POST";
+        String postStatus = hasMedia ? "PENDING_SCAN" : "APPROVED";
 
         String postId = UUID.randomUUID().toString();
         String content = sanitizeAndValidateContent(request.getContent());
@@ -124,8 +124,9 @@ public class PostService {
                 .thenReturn(PostCreateResponse.builder()
                         .postId(postId)
                         .message(hasMedia ? "Dang doi xu ly va duyet media" : "Post created")
-                        .build())
+                .build())
                 .doOnError(error -> {
+                    log.error("|PostService|createPost|failed|postId={}|userId={}|error={}", postId, request.getUserId(), error.getMessage());
                     if (!hasMedia) {
                         sendPostFailureSse(request.getUserId(), postId, "Create post failed");
                     }

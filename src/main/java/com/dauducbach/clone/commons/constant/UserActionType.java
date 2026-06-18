@@ -21,5 +21,8 @@ public enum UserActionType {
     RESET_PASSWORD,
     RESET_PASSWORD_AND_USERNAME,
     WELCOME_USER,
+    FOLLOW_EVENT,
+    AVATAR_UPDATE,
+    UP_STORY,
 
 }

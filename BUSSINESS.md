@@ -38,6 +38,20 @@ The app base path is `/app` and server port is `8888`. The main package is `com.
 - Manages user profile details, phone, job, high school, university, social media, user vectors, and follower relationships.
 - Follow/unfollow validates self-follow and duplicate relationships, writes to DB, and publishes Kafka events.
 - Follower/following listing uses manual page/size/offset and dedicated response DTOs.
+- Profile media operations live in `MediaForProfile`: avatar upload, story upload, profile music selection, current avatar, profile media history, and story history.
+- Avatar and story uploads reuse the same media validation pattern as post/comment: accept request, publish scan event, process asynchronously, save media metadata after scan passes, emit SSE for success/failure, then publish success events for notifications.
+- Story creation may include `musicUrl`, `musicStart`, and `musicEnd`; start/end are seconds, must be provided together, and `musicEnd` must be greater than `musicStart`.
+- Profile media rows use `media.owner_id = userId` for `AVATAR`, `STORY`, and `FEATURE_MUSIC`. Existing post media keeps `media.owner_id = postId`; user-level post media listing must query through `post_details`.
+- Profile music selection writes `user_music` and also records a `FEATURE_MUSIC` row in `media` so profile music history can be served from the media table.
+- Music catalog APIs live under `/app/musics`: manual create, paginated list/search/filter, detail by id, and Jamendo import.
+- User search lives under `/app/user-details/search` and returns paginated `userId` strings. DB search always matches `username`; optional `filter` is split by `+`, whitespace, or comma and only whitelisted fields may expand matching (`hobby`, `living_in`/`live_in`, `hometown`, `city`, `sex`).
+- Jamendo import only accepts `api.jamendo.com` HTTP(S) URLs, parses the `results` array, skips existing track ids, uploads audio to Cloudinary, stores `Musics.songUrl` from Cloudinary `secure_url`, and records uploaded audio in `media` with `owner_type = MUSIC` and `owner_id = Jamendo track id`.
+- Jamendo import should be resilient per track: one failed download/upload/save must increase `failedCount` without failing the whole batch.
+
+### Cloudinary Media URL
+
+- Cloudinary delivery URLs follow `https://res.cloudinary.com/<cloud_name>/<asset_type>/<delivery_type>/<transformations>/<version>/<public_id>.<ext>`.
+- `CloudinaryUtils` should be used when appending transformations such as audio story segments (`so_<start>,du_<duration>`) so URL handling stays centralized for image, video, and audio media.
 
 ### Post
 
@@ -49,6 +63,7 @@ The app base path is `/app` and server port is `8888`. The main package is `com.
 - Comments support root replies and child replies, content validation, Redis count increments/decrements, media scan events, immediate success SSE/Kafka events for text comments.
 - Likes support POST and COMMENT targets, duplicate prevention, count/status checks, paged liked target ids, and `like_event` publishing.
 - Post like/comment counts are cache-aside counters in Redis. Read count from cache first; on cache miss or expired key, load from DB and set Redis before returning/updating.
+- Post search lives under `/app/posts/search` and returns paginated `postId` strings. DB search matches `content` and `hashtag` for `APPROVED` posts only.
 
 ### Notification
 
@@ -60,6 +75,7 @@ The app base path is `/app` and server port is `8888`. The main package is `com.
 
 - `UserAuditService` and `UserActivities` capture cross-module user activity/audit style data.
 - Elasticsearch vector entities exist for posts and user details.
+- Semantic search uses `GetVectorEmbedding` first, then Elasticsearch `script_score` cosine similarity with threshold `0.80`; Elasticsearch query scores add `+1.0`, so the minimum score is `1.80`. User semantic search reads `user_long_term_vector` in `user_detail_vector`; post semantic search reads `content_vector` in `post_vector`.
 
 ## Like Business Rules
 

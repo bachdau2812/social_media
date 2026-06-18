@@ -5,5 +5,7 @@ public enum OwnerType {
     STORY,
     POST,
     FEATURED_PHOTO,
+    FEATURE_MUSIC,
+    MUSIC,
     COMMENT
 }

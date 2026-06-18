@@ -23,10 +23,7 @@ public class UserUniversityController {
                 .map(createdUniversity -> ApiResponse.<UserUniversity>builder()
                         .message("UserUniversity created successfully")
                         .result(createdUniversity)
-                        .build())
-                .onErrorResume(error -> Mono.just(ApiResponse.<UserUniversity>builder()
-                        .message("Error creating UserUniversity: " + error.getMessage())
-                        .build()));
+                        .build());
     }
 
     /// Lấy UserUniversity theo ID
@@ -36,10 +33,7 @@ public class UserUniversityController {
                 .map(university -> ApiResponse.<UserUniversity>builder()
                         .message("UserUniversity retrieved successfully")
                         .result(university)
-                        .build())
-                .onErrorResume(error -> Mono.just(ApiResponse.<UserUniversity>builder()
-                        .message("Error retrieving UserUniversity: " + error.getMessage())
-                        .build()));
+                        .build());
     }
 
     /// Lấy danh sách UserUniversity của user
@@ -57,9 +51,6 @@ public class UserUniversityController {
                 .then(Mono.just(ApiResponse.<String>builder()
                         .message("UserUniversity deleted successfully")
                         .result("UserUniversity with ID: " + id + " has been deleted")
-                        .build()))
-                .onErrorResume(error -> Mono.just(ApiResponse.<String>builder()
-                        .message("Error deleting UserUniversity: " + error.getMessage())
                         .build()));
     }
 }

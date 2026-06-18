@@ -23,10 +23,7 @@ public class UserFollowerController {
                 .map(response -> ApiResponse.<FollowResponse>builder()
                         .message(response.getMessage())
                         .result(response)
-                        .build())
-                .onErrorResume(error -> Mono.just(ApiResponse.<FollowResponse>builder()
-                        .message("Error following user: " + error.getMessage())
-                        .build()));
+                        .build());
     }
 
     /// 2. Bỏ theo dõi (Unfollow)
@@ -38,10 +35,7 @@ public class UserFollowerController {
                 .map(message -> ApiResponse.<String>builder()
                         .message(message)
                         .result(message)
-                        .build())
-                .onErrorResume(error -> Mono.just(ApiResponse.<String>builder()
-                        .message("Error unfollowing user: " + error.getMessage())
-                        .build()));
+                        .build());
     }
 
     /// 3. Lấy UserFollower theo ID
@@ -51,10 +45,7 @@ public class UserFollowerController {
                 .map(response -> ApiResponse.<FollowResponse>builder()
                         .message(response.getMessage())
                         .result(response)
-                        .build())
-                .onErrorResume(error -> Mono.just(ApiResponse.<FollowResponse>builder()
-                        .message("Error retrieving follow relationship: " + error.getMessage())
-                        .build()));
+                        .build());
     }
 
     /// 4. Lấy danh sách những người đang follow một user (Followers) với phân trang
@@ -67,10 +58,7 @@ public class UserFollowerController {
                 .map(response -> ApiResponse.<FollowerListResponse>builder()
                         .message("Followers retrieved successfully")
                         .result(response)
-                        .build())
-                .onErrorResume(error -> Mono.just(ApiResponse.<FollowerListResponse>builder()
-                        .message("Error retrieving followers: " + error.getMessage())
-                        .build()));
+                        .build());
     }
 
     /// 5. Lấy danh sách những người mà một user đang following (Following) với phân trang
@@ -83,10 +71,7 @@ public class UserFollowerController {
                 .map(response -> ApiResponse.<FollowerListResponse>builder()
                         .message("Following retrieved successfully")
                         .result(response)
-                        .build())
-                .onErrorResume(error -> Mono.just(ApiResponse.<FollowerListResponse>builder()
-                        .message("Error retrieving following: " + error.getMessage())
-                        .build()));
+                        .build());
     }
 
     /// Check xem user A có đang follow user B không
@@ -98,11 +83,7 @@ public class UserFollowerController {
                 .map(isFollowing -> ApiResponse.<Boolean>builder()
                         .message("Follow status checked successfully")
                         .result(isFollowing)
-                        .build())
-                .onErrorResume(error -> Mono.just(ApiResponse.<Boolean>builder()
-                        .message("Error checking follow status: " + error.getMessage())
-                        .result(false)
-                        .build()));
+                        .build());
     }
 
     /// Lấy follower counts
@@ -112,9 +93,6 @@ public class UserFollowerController {
                 .map(counts -> ApiResponse.<UserFollowerService.FollowerCountResponse>builder()
                         .message("Follower counts retrieved successfully")
                         .result(counts)
-                        .build())
-                .onErrorResume(error -> Mono.just(ApiResponse.<UserFollowerService.FollowerCountResponse>builder()
-                        .message("Error retrieving follower counts: " + error.getMessage())
-                        .build()));
+                        .build());
     }
 }

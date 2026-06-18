@@ -91,7 +91,8 @@ public class CommentService {
         return ensurePostCommentCountCache(request.getPostId())
                 .then(r2dbcEntityTemplate.insert(Comment.class).using(comment))
                 .doOnSuccess(comment1 -> log.info("|CommentService|createComment|insert_success={}", comment1.getId()))
-                .doOnError(throwable -> log.error("|CommentService|createComment|insert_error", throwable))
+                .doOnError(throwable -> log.error("|CommentService|createComment|insert_error|postId={}|userId={}|error={}",
+                        request.getPostId(), request.getUserId(), throwable.getMessage(), throwable))
                 .flatMap(saved -> {
                     Mono<Void> postSaveAction = hasMedia
                             ? waitKeyWrite.then(sendScanEvent)
@@ -105,6 +106,8 @@ public class CommentService {
                 })
                 .doOnSuccess(response -> log.info("|CommentService|createComment|success|commentId={}", response.getCommentId()))
                 .doOnError(error -> {
+                    log.error("|CommentService|createComment|failed|postId={}|userId={}|error={}",
+                            request.getPostId(), request.getUserId(), error.getMessage());
                     if (!hasMedia) {
                         sendTextCommentFailureSse(comment, "Create comment failed");
                     }
@@ -447,9 +450,10 @@ public class CommentService {
         if (error instanceof AppException) {
             return (AppException) error;
         }
+        log.error("|CommentService|wrapCreateError|postId={}|error={}", request.getPostId(), error.getMessage());
         return new AppException(
                 ErrorCode.COMMENT_CREATE_FAILED,
-                String.format("Create comment failed for postId=%s | ERROR:%s", request.getPostId(), error.getMessage()),
+                String.format("Create comment failed for postId=%s", request.getPostId()),
                 error
         );
     }

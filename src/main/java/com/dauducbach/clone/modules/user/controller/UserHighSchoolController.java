@@ -23,10 +23,7 @@ public class UserHighSchoolController {
                 .map(createdHighSchool -> ApiResponse.<UserHighSchool>builder()
                         .message("UserHighSchool created successfully")
                         .result(createdHighSchool)
-                        .build())
-                .onErrorResume(error -> Mono.just(ApiResponse.<UserHighSchool>builder()
-                        .message("Error creating UserHighSchool: " + error.getMessage())
-                        .build()));
+                        .build());
     }
 
     /// Lấy UserHighSchool theo ID
@@ -36,10 +33,7 @@ public class UserHighSchoolController {
                 .map(highSchool -> ApiResponse.<UserHighSchool>builder()
                         .message("UserHighSchool retrieved successfully")
                         .result(highSchool)
-                        .build())
-                .onErrorResume(error -> Mono.just(ApiResponse.<UserHighSchool>builder()
-                        .message("Error retrieving UserHighSchool: " + error.getMessage())
-                        .build()));
+                        .build());
     }
 
     /// Lấy danh sách UserHighSchool của user
@@ -57,9 +51,6 @@ public class UserHighSchoolController {
                 .then(Mono.just(ApiResponse.<String>builder()
                         .message("UserHighSchool deleted successfully")
                         .result("UserHighSchool with ID: " + id + " has been deleted")
-                        .build()))
-                .onErrorResume(error -> Mono.just(ApiResponse.<String>builder()
-                        .message("Error deleting UserHighSchool: " + error.getMessage())
                         .build()));
     }
 }

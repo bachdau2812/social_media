@@ -24,10 +24,7 @@ public class UserJobController {
                 .map(createdJob -> ApiResponse.<UserJob>builder()
                         .message("UserJob created successfully")
                         .result(createdJob)
-                        .build())
-                .onErrorResume(error -> Mono.just(ApiResponse.<UserJob>builder()
-                        .message("Error creating UserJob: " + error.getMessage())
-                        .build()));
+                        .build());
     }
 
     /// Cập nhật UserJob
@@ -37,10 +34,7 @@ public class UserJobController {
                 .map(updatedJob -> ApiResponse.<UserJob>builder()
                         .message("UserJob updated successfully")
                         .result(updatedJob)
-                        .build())
-                .onErrorResume(error -> Mono.just(ApiResponse.<UserJob>builder()
-                        .message("Error updating UserJob: " + error.getMessage())
-                        .build()));
+                        .build());
     }
 
     /// Lấy UserJob theo ID
@@ -50,10 +44,7 @@ public class UserJobController {
                 .map(job -> ApiResponse.<UserJob>builder()
                         .message("UserJob retrieved successfully")
                         .result(job)
-                        .build())
-                .onErrorResume(error -> Mono.just(ApiResponse.<UserJob>builder()
-                        .message("Error retrieving UserJob: " + error.getMessage())
-                        .build()));
+                        .build());
     }
 
     /// Lấy danh sách UserJob của user
@@ -71,9 +62,6 @@ public class UserJobController {
                 .then(Mono.just(ApiResponse.<String>builder()
                         .message("UserJob deleted successfully")
                         .result("UserJob with ID: " + id + " has been deleted")
-                        .build()))
-                .onErrorResume(error -> Mono.just(ApiResponse.<String>builder()
-                        .message("Error deleting UserJob: " + error.getMessage())
                         .build()));
     }
 }

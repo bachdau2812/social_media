@@ -64,13 +64,17 @@ public class LikeService {
         return likeRepository.findByActorIdAndTargetIdAndTargetType(actorId, request.targetId(), normalizedTargetType)
                 .flatMap(existing -> unlikeExisting(request.targetId(), normalizedTargetType, existing))
                 .switchIfEmpty(Mono.defer(() -> createLike(actorId, request.targetId(), normalizedTargetType)))
-                .onErrorMap(error -> error instanceof AppException
-                        ? error
-                        : new AppException(
-                                ErrorCode.LIKE_CREATE_FAILED,
-                                String.format("Toggle like failed: %s", error.getMessage()),
-                                error
-                        ));
+                .onErrorMap(error -> {
+                    log.error("|LikeService|like|failed|actorId={}|targetId={}|targetType={}|error={}",
+                            actorId, request.targetId(), normalizedTargetType, error.getMessage());
+                    return error instanceof AppException
+                            ? error
+                            : new AppException(
+                                    ErrorCode.LIKE_CREATE_FAILED,
+                                    "Toggle like failed",
+                                    error
+                            );
+                });
     }
     // Unlike là thao tác xóa quan hệ hiện có; nếu chưa like thì trả lỗi nghiệp vụ rõ ràng.
     private Mono<LikeToggleResponse> unlikeExisting(String targetId, String targetType, Like existing) {

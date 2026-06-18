@@ -23,10 +23,7 @@ public class UserSocialMediaController {
                 .map(createdSocialMedia -> ApiResponse.<UserSocialMedia>builder()
                         .message("UserSocialMedia created successfully")
                         .result(createdSocialMedia)
-                        .build())
-                .onErrorResume(error -> Mono.just(ApiResponse.<UserSocialMedia>builder()
-                        .message("Error creating UserSocialMedia: " + error.getMessage())
-                        .build()));
+                        .build());
     }
 
     /// Lấy UserSocialMedia theo ID
@@ -36,10 +33,7 @@ public class UserSocialMediaController {
                 .map(socialMedia -> ApiResponse.<UserSocialMedia>builder()
                         .message("UserSocialMedia retrieved successfully")
                         .result(socialMedia)
-                        .build())
-                .onErrorResume(error -> Mono.just(ApiResponse.<UserSocialMedia>builder()
-                        .message("Error retrieving UserSocialMedia: " + error.getMessage())
-                        .build()));
+                        .build());
     }
 
     /// Lấy danh sách UserSocialMedia của user
@@ -55,9 +49,6 @@ public class UserSocialMediaController {
                 .then(Mono.just(ApiResponse.<String>builder()
                         .message("UserSocialMedia deleted successfully")
                         .result("UserSocialMedia with ID: " + id + " has been deleted")
-                        .build()))
-                .onErrorResume(error -> Mono.just(ApiResponse.<String>builder()
-                        .message("Error deleting UserSocialMedia: " + error.getMessage())
                         .build()));
     }
 }

@@ -1,11 +1,13 @@
 package com.dauducbach.clone.modules.post.controller;
 
 import com.dauducbach.clone.commons.response.ApiResponse;
+import com.dauducbach.clone.commons.response.PageResponse;
 import com.dauducbach.clone.modules.post.dto.request.PostCreateRequest;
 import com.dauducbach.clone.modules.post.dto.request.PostUpdateRequest;
 import com.dauducbach.clone.modules.post.dto.response.PostCreateResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostNotificationMuteResponse;
 import com.dauducbach.clone.modules.post.entity.PostDetails;
+import com.dauducbach.clone.modules.post.service.PostSearchService;
 import com.dauducbach.clone.modules.post.service.PostService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -18,6 +20,7 @@ import reactor.core.publisher.Mono;
 @RequestMapping("/posts")
 public class PostController {
     private final PostService postService;
+    private final PostSearchService postSearchService;
 
     @PostMapping
     public Mono<ResponseEntity<ApiResponse<PostCreateResponse>>> createPost(@RequestBody PostCreateRequest request) {
@@ -34,10 +37,18 @@ public class PostController {
                 .map(updated -> ApiResponse.<PostDetails>builder()
                         .message("Post updated successfully")
                         .result(updated)
-                        .build())
-                .onErrorResume(error -> Mono.just(ApiResponse.<PostDetails>builder()
-                        .message("Error updating post: " + error.getMessage())
-                        .build()));
+                        .build());
+    }
+
+    @GetMapping("/search")
+    public Mono<ApiResponse<PageResponse<String>>> searchPosts(@RequestParam String query,
+                                                               @RequestParam(defaultValue = "0") int page,
+                                                               @RequestParam(defaultValue = "20") int limit) {
+        return postSearchService.searchPosts(query, page, limit)
+                .map(response -> ApiResponse.<PageResponse<String>>builder()
+                        .message("Posts searched successfully")
+                        .result(response)
+                        .build());
     }
 
     @GetMapping("/{postId}")
@@ -46,10 +57,7 @@ public class PostController {
                 .map(post -> ApiResponse.<PostDetails>builder()
                         .message("Post retrieved successfully")
                         .result(post)
-                        .build())
-                .onErrorResume(error -> Mono.just(ApiResponse.<PostDetails>builder()
-                        .message("Error retrieving post: " + error.getMessage())
-                        .build()));
+                        .build());
     }
 
     @GetMapping("/user/{userId}")
@@ -75,9 +83,6 @@ public class PostController {
                 .then(Mono.just(ApiResponse.<String>builder()
                         .message("Post deleted successfully")
                         .result("Deleted postId: " + postId)
-                        .build()))
-                .onErrorResume(error -> Mono.just(ApiResponse.<String>builder()
-                        .message("Error deleting post: " + error.getMessage())
                         .build()));
     }
 
@@ -87,9 +92,6 @@ public class PostController {
                 .then(Mono.just(ApiResponse.<String>builder()
                         .message("User posts deleted successfully")
                         .result("Deleted posts for userId: " + userId)
-                        .build()))
-                .onErrorResume(error -> Mono.just(ApiResponse.<String>builder()
-                        .message("Error deleting posts: " + error.getMessage())
                         .build()));
     }
 }

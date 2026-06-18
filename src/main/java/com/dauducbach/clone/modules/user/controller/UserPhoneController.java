@@ -23,10 +23,7 @@ public class UserPhoneController {
                 .map(createdPhone -> ApiResponse.<UserPhone>builder()
                         .message("UserPhone created successfully")
                         .result(createdPhone)
-                        .build())
-                .onErrorResume(error -> Mono.just(ApiResponse.<UserPhone>builder()
-                        .message("Error creating UserPhone: " + error.getMessage())
-                        .build()));
+                        .build());
     }
 
     /// Lấy UserPhone theo ID
@@ -36,10 +33,7 @@ public class UserPhoneController {
                 .map(phone -> ApiResponse.<UserPhone>builder()
                         .message("UserPhone retrieved successfully")
                         .result(phone)
-                        .build())
-                .onErrorResume(error -> Mono.just(ApiResponse.<UserPhone>builder()
-                        .message("Error retrieving UserPhone: " + error.getMessage())
-                        .build()));
+                        .build());
     }
 
     /// Lấy danh sách UserPhone của user
@@ -55,9 +49,6 @@ public class UserPhoneController {
                 .then(Mono.just(ApiResponse.<String>builder()
                         .message("UserPhone deleted successfully")
                         .result("UserPhone with ID: " + id + " has been deleted")
-                        .build()))
-                .onErrorResume(error -> Mono.just(ApiResponse.<String>builder()
-                        .message("Error deleting UserPhone: " + error.getMessage())
                         .build()));
     }
 }

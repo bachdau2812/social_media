@@ -1,7 +1,9 @@
 package com.dauducbach.clone.modules.post.repositoty;
 
 import com.dauducbach.clone.modules.post.entity.Media;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.r2dbc.repository.R2dbcRepository;
+import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -16,6 +18,30 @@ public interface MediaRepository extends R2dbcRepository<Media, String> {
      * @return Flux of Media
      */
     Flux<Media> findByOwnerIdAndOwnerType(String ownerId, com.dauducbach.clone.modules.post.constant.OwnerType ownerType);
+
+    Flux<Media> findByOwnerIdAndOwnerTypeOrderByCreatedAtDesc(String ownerId, com.dauducbach.clone.modules.post.constant.OwnerType ownerType, Pageable pageable);
+
+    Mono<Long> countByOwnerIdAndOwnerType(String ownerId, com.dauducbach.clone.modules.post.constant.OwnerType ownerType);
+
+    Mono<Media> findFirstByOwnerIdAndOwnerTypeOrderByCreatedAtDesc(String ownerId, com.dauducbach.clone.modules.post.constant.OwnerType ownerType);
+
+    @Query("""
+            SELECT m.*
+            FROM media m
+            JOIN post_details p ON p.post_id = m.owner_id
+            WHERE p.user_id = :userId AND m.owner_type = 'POST'
+            ORDER BY m.created_at DESC
+            LIMIT :#{#pageable.pageSize} OFFSET :#{#pageable.offset}
+            """)
+    Flux<Media> findPostMediaByUserId(String userId, Pageable pageable);
+
+    @Query("""
+            SELECT COUNT(*)
+            FROM media m
+            JOIN post_details p ON p.post_id = m.owner_id
+            WHERE p.user_id = :userId AND m.owner_type = 'POST'
+            """)
+    Mono<Long> countPostMediaByUserId(String userId);
 
     /**
      * Find all media by owner ID

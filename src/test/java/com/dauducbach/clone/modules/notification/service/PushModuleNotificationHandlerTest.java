@@ -9,6 +9,7 @@ import com.dauducbach.clone.modules.notification.repository.NotificationTemplate
 import com.dauducbach.clone.modules.post.entity.Comment;
 import com.dauducbach.clone.modules.post.entity.PostDetails;
 import com.dauducbach.clone.modules.post.service.CommentService;
+import com.dauducbach.clone.modules.post.service.LikeService;
 import com.dauducbach.clone.modules.post.service.PostService;
 import com.dauducbach.clone.modules.user.dto.response.FollowerListResponse;
 import com.dauducbach.clone.modules.user.entity.UserDetails;
@@ -21,17 +22,14 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
-import org.springframework.data.redis.core.ReactiveValueOperations;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.time.Duration;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -46,8 +44,6 @@ class PushModuleNotificationHandlerTest {
     @Mock
     ReactiveRedisTemplate<String, Object> redisTemplate;
     @Mock
-    ReactiveValueOperations<String, Object> valueOperations;
-    @Mock
     UserFollowerService userFollowerService;
     @Mock
     UserDetailsService userDetailsService;
@@ -55,15 +51,14 @@ class PushModuleNotificationHandlerTest {
     PostService postService;
     @Mock
     CommentService commentService;
+    @Mock
+    LikeService likeService;
 
     @Test
     void handlePostUploadEventSendsNewPostPushNotification() {
         PushModuleNotificationHandler handler = newHandler();
 
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(redisTemplate.hasKey(anyString())).thenReturn(Mono.just(false));
-        when(valueOperations.set(eq("notification:post_owner:post-1"), eq("owner-1"), any(Duration.class)))
-                .thenReturn(Mono.just(true));
         when(userDetailsService.getUserDetailsById("owner-1")).thenReturn(Mono.just(userDetails("owner-1", "Bach")));
         when(userFollowerService.getFollowers("owner-1", 0, 100))
                 .thenReturn(Mono.just(FollowerListResponse.builder()
@@ -103,10 +98,7 @@ class PushModuleNotificationHandlerTest {
     void handlePostLikeUsesCommentServiceForInteractedPeople() {
         PushModuleNotificationHandler handler = newHandler();
 
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(redisTemplate.hasKey(anyString())).thenReturn(Mono.just(false));
-        when(valueOperations.set(eq("notification:post_owner:post-1"), eq("owner-1"), any(Duration.class)))
-                .thenReturn(Mono.just(true));
         when(userDetailsService.getUserDetailsById("actor-1")).thenReturn(Mono.just(userDetails("actor-1", "Nam")));
         when(postService.getPostById("post-1")).thenReturn(Mono.just(post("post-1", "owner-1", "noi dung bai viet")));
         when(commentService.getDistinctCommenterUserIdsByPostId("post-1"))
@@ -156,19 +148,13 @@ class PushModuleNotificationHandlerTest {
     void handleCommentSuccessSendsOwnerParentOwnerAndInteractedPeopleWithoutOwners() {
         PushModuleNotificationHandler handler = newHandler();
 
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(redisTemplate.hasKey(anyString())).thenReturn(Mono.just(false));
-        when(valueOperations.set(eq("notification:comment_owner:comment-1"), eq("actor-1"), any(Duration.class)))
-                .thenReturn(Mono.just(true));
-        when(valueOperations.set(eq("notification:comment_post:comment-1"), eq("post-1"), any(Duration.class)))
-                .thenReturn(Mono.just(true));
-        when(valueOperations.set(eq("notification:comment_parent:comment-1"), eq("parent-1"), any(Duration.class)))
-                .thenReturn(Mono.just(true));
-        when(valueOperations.get("notification:post_owner:post-1")).thenReturn(Mono.just("owner-1"));
-        when(valueOperations.get("notification:comment_owner:parent-1")).thenReturn(Mono.just("parent-owner-1"));
-        when(valueOperations.get("post_comment_count:post-1")).thenReturn(Mono.just("3"));
         when(userDetailsService.getUserDetailsById("actor-1")).thenReturn(Mono.just(userDetails("actor-1", "Nam")));
+        when(postService.getPostOwnerIdByPostId("post-1")).thenReturn(Mono.just("owner-1"));
         when(postService.getPostById("post-1")).thenReturn(Mono.just(post("post-1", "owner-1", "noi dung bai viet")));
+        when(commentService.getCommentById("parent-1"))
+                .thenReturn(Mono.just(comment("parent-1", "parent-owner-1", "parent content")));
+        when(commentService.countCommentsByPostId("post-1")).thenReturn(Mono.just(3L));
         when(commentService.getDistinctCommenterUserIdsByPostId("post-1"))
                 .thenReturn(Flux.just("commenter-1", "owner-1", "parent-owner-1", "actor-1"));
         when(notificationTemplatesRepository.findByActionType(UserActionType.COMMENT))
@@ -220,9 +206,6 @@ class PushModuleNotificationHandlerTest {
     void handlePostLikeSkipsMutedPostRecipients() {
         PushModuleNotificationHandler handler = newHandler();
 
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.set(eq("notification:post_owner:post-1"), eq("owner-1"), any(Duration.class)))
-                .thenReturn(Mono.just(true));
         when(userDetailsService.getUserDetailsById("actor-1")).thenReturn(Mono.just(userDetails("actor-1", "Nam")));
         when(postService.getPostById("post-1")).thenReturn(Mono.just(post("post-1", "owner-1", "noi dung bai viet")));
         when(redisTemplate.hasKey(PostNotificationCacheKeys.mutedPostNotification("post-1", "owner-1")))
@@ -288,7 +271,8 @@ class PushModuleNotificationHandlerTest {
                 userFollowerService,
                 userDetailsService,
                 postService,
-                commentService
+                commentService,
+                likeService
         );
     }
 

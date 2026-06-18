@@ -8,6 +8,7 @@ import com.dauducbach.clone.modules.notification.dto.request.NotificationRequest
 import com.dauducbach.clone.modules.notification.entity.NotificationTemplates;
 import com.dauducbach.clone.modules.notification.repository.NotificationTemplatesRepository;
 import com.dauducbach.clone.modules.post.service.CommentService;
+import com.dauducbach.clone.modules.post.service.LikeService;
 import com.dauducbach.clone.modules.post.service.PostService;
 import com.dauducbach.clone.modules.user.dto.response.FollowerListResponse;
 import com.dauducbach.clone.modules.user.entity.UserDetails;
@@ -28,7 +29,6 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -40,13 +40,6 @@ import java.util.Objects;
 @RequiredArgsConstructor
 public class PushModuleNotificationHandler {
     private static final Logger log = LoggerFactory.getLogger(PushModuleNotificationHandler.class);
-    private static final String POST_OWNER_PREFIX = "notification:post_owner:";
-    private static final String COMMENT_OWNER_PREFIX = "notification:comment_owner:";
-    private static final String COMMENT_POST_PREFIX = "notification:comment_post:";
-    private static final String COMMENT_PARENT_PREFIX = "notification:comment_parent:";
-    private static final String POST_COMMENT_COUNT_PREFIX = "post_comment_count:";
-    private static final String POST_LIKE_COUNT_PREFIX = "post_like_count:";
-    private static final Duration CONTEXT_TTL = Duration.ofDays(7);
     private static final long MANY_INTERACTIONS_THRESHOLD = 10L;
     private static final int FOLLOWER_PAGE_SIZE = 100;
 
@@ -57,6 +50,7 @@ public class PushModuleNotificationHandler {
     UserDetailsService userDetailsService;
     PostService postService;
     CommentService commentService;
+    LikeService likeService;
 
     @KafkaListener(topics = "post_upload_event", groupId = "notification-service")
     public void handlePostUploadEvent(@Payload Object payload) {
@@ -73,8 +67,7 @@ public class PushModuleNotificationHandler {
         Map<String, String> metadata = baseMetadata(userId, postId, EntityType.POST.name());
         metadata.put("CONTENT", content);
 
-        cachePostOwner(postId, userId)
-                .then(enrichActorUsername(userId, metadata))
+        enrichActorUsername(userId, metadata)
                 .then(getFollowersOfUser(userId))
                 .flatMap(followers -> sendPush(UserActionType.NEW_POST, userId, postId, EntityType.POST.name(), followers, metadata, true))
                 .doOnSuccess(v -> log.info("|PushModuleNotificationHandler|handlePostUploadEvent|completed|postId={}|userId={}", postId, userId))
@@ -104,8 +97,7 @@ public class PushModuleNotificationHandler {
         metadata.put("COMMENT", content);
         metadata.put("REPLY", content);
 
-        cacheCommentContext(postId, commentId, userId, parentId)
-                .then(enrichActorUsername(userId, metadata))
+        enrichActorUsername(userId, metadata)
                 .then(enrichPostContent(postId, metadata))
                 .then(sendCommentNotifications(userId, postId, commentId, parentId, metadata))
                 .doOnSuccess(v -> log.info("|PushModuleNotificationHandler|handleCommentSuccessEvent|completed|commentId={}|postId={}", commentId, postId))
@@ -144,7 +136,7 @@ public class PushModuleNotificationHandler {
         Mono<String> parentOwner = parentId.isBlank()
                 ? Mono.just("")
                 : getCommentOwner(parentId).cache();
-        Mono<Void> notifyPostOwner = postOwner.flatMap(ownerId -> getLongValue(POST_COMMENT_COUNT_PREFIX + postId)
+        Mono<Void> notifyPostOwner = postOwner.flatMap(ownerId -> commentService.countCommentsByPostId(postId)
                 .defaultIfEmpty(0L)
                 .flatMap(commentCount -> {
                     metadata.put("COMMENT_COUNT", String.valueOf(Math.max(commentCount - 1, 0)));
@@ -172,11 +164,11 @@ public class PushModuleNotificationHandler {
 
         Mono<String> owner = targetOwnerId.isBlank()
                 ? getPostOwner(postId)
-                : Mono.just(targetOwnerId).flatMap(ownerId -> cachePostOwner(postId, ownerId).thenReturn(ownerId));
+                : Mono.just(targetOwnerId);
         Mono<String> postOwner = owner.cache();
 
         Mono<Long> count = eventLikeCount == null
-                ? getLongValue(POST_LIKE_COUNT_PREFIX + postId).defaultIfEmpty(0L)
+                ? likeService.countLikes(postId, EntityType.POST.name()).defaultIfEmpty(0L)
                 : Mono.just(eventLikeCount);
 
         return enrichActorUsername(actorId, metadata)
@@ -269,53 +261,24 @@ public class PushModuleNotificationHandler {
                 });
     }
 
-    private Mono<Void> cachePostOwner(String postId, String userId) {
-        return redisTemplate.opsForValue()
-                .set(POST_OWNER_PREFIX + postId, userId, CONTEXT_TTL)
-                .then();
-    }
-
-    private Mono<Void> cacheCommentContext(String postId, String commentId, String userId, String parentId) {
-        String normalizedParentId = parentId == null ? "" : parentId;
-        Mono<Boolean> commentOwner = redisTemplate.opsForValue()
-                .set(COMMENT_OWNER_PREFIX + commentId, userId, CONTEXT_TTL);
-        Mono<Boolean> commentPost = redisTemplate.opsForValue()
-                .set(COMMENT_POST_PREFIX + commentId, postId, CONTEXT_TTL);
-        Mono<Boolean> parentWrite = normalizedParentId.isBlank()
-                ? Mono.just(true)
-                : redisTemplate.opsForValue().set(COMMENT_PARENT_PREFIX + commentId, normalizedParentId, CONTEXT_TTL);
-
-        return Mono.when(commentOwner, commentPost, parentWrite).then();
-    }
-
     private Mono<String> getPostOwner(String postId) {
-        return getStringValue(POST_OWNER_PREFIX + postId)
-                .switchIfEmpty(Mono.defer(() -> postService.getPostOwnerIdByPostId(postId)
-                        .flatMap(ownerId -> cachePostOwner(postId, ownerId).thenReturn(ownerId))
-                        .onErrorResume(error -> {
-                            log.error("|PushModuleNotificationHandler|getPostOwner|failed|postId={}|error={}",
-                                    postId, error.getMessage());
-                            return Mono.empty();
-                        })));
+        return postService.getPostOwnerIdByPostId(postId)
+                .onErrorResume(error -> {
+                    log.error("|PushModuleNotificationHandler|getPostOwner|failed|postId={}|error={}",
+                            postId, error.getMessage());
+                    return Mono.empty();
+                });
     }
 
     private Mono<String> getCommentOwner(String commentId) {
-        return getStringValue(COMMENT_OWNER_PREFIX + commentId)
-                .switchIfEmpty(Mono.defer(() -> commentService.getCommentById(commentId)
-                        .flatMap(comment -> {
-                            String ownerId = comment.getUserId();
-                            if (ownerId == null || ownerId.isBlank()) {
-                                return Mono.empty();
-                            }
-                            return redisTemplate.opsForValue()
-                                    .set(COMMENT_OWNER_PREFIX + commentId, ownerId, CONTEXT_TTL)
-                                    .thenReturn(ownerId);
-                        })
-                        .onErrorResume(error -> {
-                            log.error("|PushModuleNotificationHandler|getCommentOwner|failed|commentId={}|error={}",
-                                    commentId, error.getMessage());
-                            return Mono.empty();
-                        })));
+        return commentService.getCommentById(commentId)
+                .map(comment -> comment.getUserId() == null ? "" : comment.getUserId())
+                .filter(ownerId -> !ownerId.isBlank())
+                .onErrorResume(error -> {
+                    log.error("|PushModuleNotificationHandler|getCommentOwner|failed|commentId={}|error={}",
+                            commentId, error.getMessage());
+                    return Mono.empty();
+                });
     }
 
     private Mono<List<String>> getPostCommenters(String postId) {
@@ -455,24 +418,6 @@ public class PushModuleNotificationHandler {
                 .map(String::trim)
                 .filter(userId -> !userId.isBlank())
                 .forEach(accumulated::add);
-    }
-
-    private Mono<String> getStringValue(String key) {
-        return redisTemplate.opsForValue()
-                .get(key)
-                .map(String::valueOf)
-                .filter(value -> !value.isBlank());
-    }
-
-    private Mono<Long> getLongValue(String key) {
-        return getStringValue(key)
-                .flatMap(value -> {
-                    try {
-                        return Mono.just(Long.parseLong(value));
-                    } catch (NumberFormatException ex) {
-                        return Mono.empty();
-                    }
-                });
     }
 
     private String processTemplate(NotificationTemplates template, Map<String, String> metadata) {

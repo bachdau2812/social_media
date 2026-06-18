@@ -19,6 +19,7 @@ import com.dauducbach.clone.modules.post.service.CloudinarySignatureService;
 import com.dauducbach.clone.modules.post.service.CommentService;
 import com.dauducbach.clone.modules.post.service.LikeService;
 import com.dauducbach.clone.modules.post.service.MediaService;
+import com.dauducbach.clone.modules.post.service.PostSearchService;
 import com.dauducbach.clone.modules.post.service.PostService;
 import com.dauducbach.clone.modules.post.service.PostSseService;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,6 +44,7 @@ class PostModuleControllerTest {
     CloudinarySignatureService cloudinarySignatureService;
     MediaService mediaService;
     PostSseService postSseService;
+    PostSearchService postSearchService;
     WebTestClient client;
 
     @BeforeEach
@@ -53,9 +55,10 @@ class PostModuleControllerTest {
         cloudinarySignatureService = mock(CloudinarySignatureService.class);
         mediaService = mock(MediaService.class);
         postSseService = mock(PostSseService.class);
+        postSearchService = mock(PostSearchService.class);
 
         client = WebTestClient.bindToController(
-                        new PostController(postService),
+                        new PostController(postService, postSearchService),
                         new CommentController(commentService),
                         new LikeController(likeService),
                         new MediaUploadController(cloudinarySignatureService, mediaService),
@@ -94,6 +97,20 @@ class PostModuleControllerTest {
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.result.postId").isEqualTo("post-1");
+    }
+
+    @Test
+    void searchPostsReturnsPagedPostIds() {
+        when(postSearchService.searchPosts("hello", 0, 20))
+                .thenReturn(Mono.just(PageResponse.of(List.of("post-1", "post-2"), 0, 2, 20)));
+
+        client.get()
+                .uri("/posts/search?query=hello")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.result.content[0]").isEqualTo("post-1")
+                .jsonPath("$.result.totalElements").isEqualTo(2);
     }
 
     @Test

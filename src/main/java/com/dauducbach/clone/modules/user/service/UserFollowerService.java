@@ -153,7 +153,7 @@ public class UserFollowerService {
                         .message("Follow relationship found")
                         .build())
                 .doOnSuccess(response -> log.info("|UserFollowerService|getUserFollowerById|found|id={}", id))
-                .doOnError(error -> log.error("|UserFollowerService|getUserFollowerById|not found|id={}", id));
+                .doOnError(error -> log.error("|UserFollowerService|getUserFollowerById|failed|id={}|error={}", id, error.getMessage()));
     }
 
     /// 4. Lấy danh sách những người đang follow một người (Followers) với phân trang

@@ -1,6 +1,7 @@
 package com.dauducbach.clone.modules.post.repositoty;
 
 import com.dauducbach.clone.modules.post.entity.PostDetails;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.data.repository.reactive.ReactiveCrudRepository;
 import org.springframework.stereotype.Repository;
@@ -16,6 +17,28 @@ public interface PostDetailsRepository extends ReactiveCrudRepository<PostDetail
     Flux<PostDetails> findByUserId(String userId, int limit, int offset);
 
     Flux<PostDetails> findAllByUserId(String userId);
+
+    @Query("""
+            SELECT post_id FROM post_details
+            WHERE validate_status = 'APPROVED'
+              AND (
+                LOWER(COALESCE(content, '')) LIKE CONCAT('%', LOWER(:query), '%')
+                OR LOWER(COALESCE(hashtag, '')) LIKE CONCAT('%', LOWER(:query), '%')
+              )
+            ORDER BY created_at DESC, post_id DESC
+            LIMIT :#{#pageable.pageSize} OFFSET :#{#pageable.offset}
+            """)
+    Flux<String> searchApprovedPostIds(String query, Pageable pageable);
+
+    @Query("""
+            SELECT COUNT(*) FROM post_details
+            WHERE validate_status = 'APPROVED'
+              AND (
+                LOWER(COALESCE(content, '')) LIKE CONCAT('%', LOWER(:query), '%')
+                OR LOWER(COALESCE(hashtag, '')) LIKE CONCAT('%', LOWER(:query), '%')
+              )
+            """)
+    Mono<Long> countSearchApprovedPostIds(String query);
 
     Mono<Void> deleteByUserId(String userId);
 }
