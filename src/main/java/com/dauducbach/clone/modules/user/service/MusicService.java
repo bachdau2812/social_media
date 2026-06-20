@@ -62,17 +62,27 @@ public class MusicService {
         return Mono.defer(() -> {
                     URI uri = validateJamendoUri(request == null ? null : request.url());
                     String category = resolveCategory(request.category(), categoryParam, uri);
+                    log.info("|MusicService|importFromJamendo|start|host={}|category={}", uri.getHost(), category);
 
                     return webClient.get()
                             .uri(uri)
                             .retrieve()
                             .bodyToMono(String.class)
                             .map(this::extractResults)
+                            .doOnSuccess(results -> log.info("|MusicService|importFromJamendo|fetched|host={}|itemCount={}",
+                                    uri.getHost(), results.size()))
                             .flatMap(results -> Flux.fromIterable(results)
                                     .concatMap(item -> importJamendoTrack(item, category))
                                     .collectList()
                                     .flatMap(resultsPerTrack -> evictMusicListCache()
                                             .thenReturn(toImportResponse(results.size(), resultsPerTrack))));
+                })
+                .doOnError(error -> {
+                    if (error instanceof AppException) {
+                        log.warn("|MusicService|importFromJamendo|business failed|error={}", error.getMessage());
+                    } else {
+                        log.error("|MusicService|importFromJamendo|failed|error={}", error.getMessage());
+                    }
                 })
                 .onErrorMap(error -> error instanceof AppException
                         ? error
@@ -82,6 +92,8 @@ public class MusicService {
     public Mono<Musics> createMusic(MusicCreateRequest request) {
         validateCreateRequest(request);
 
+        log.info("|MusicService|createMusic|displayNameLength={}|category={}",
+                request.displayName().trim().length(), normalizeOptional(request.category()));
         Musics music = Musics.builder()
                 .id(UUID.randomUUID().toString())
                 .displayName(request.displayName().trim())
@@ -98,6 +110,8 @@ public class MusicService {
         return r2dbcEntityTemplate.insert(Musics.class).using(music)
                 .flatMap(saved -> evictMusicListCache().thenReturn(saved))
                 .doOnSuccess(saved -> log.info("|MusicService|createMusic|saved|musicId={}|slugName={}", saved.getId(), saved.getSlugName()))
+                .doOnError(error -> log.error("|MusicService|createMusic|failed|slugName={}|error={}",
+                        music.getSlugName(), error.getMessage()))
                 .onErrorMap(error -> error instanceof AppException
                         ? error
                         : new AppException(ErrorCode.MUSIC_SAVE_FAILED, "Create music failed", error));
@@ -126,8 +140,14 @@ public class MusicService {
             musicFlux = musicsRepository.findPage(pageable);
         }
 
+        log.info("|MusicService|getMusics|page={}|size={}|hasKeyword={}|category={}",
+                pageNumber, pageSize, normalizedKeyword != null, normalizedCategory);
         return countMono.flatMap(total -> musicFlux.collectList()
+                        .doOnSuccess(items -> log.info("|MusicService|getMusics|dbResult|page={}|count={}|total={}",
+                                pageNumber, items.size(), total))
                         .map(items -> PageResponse.of(items, pageNumber, total, pageSize)))
+                .doOnError(error -> log.error("|MusicService|getMusics|failed|page={}|size={}|error={}",
+                        pageNumber, pageSize, error.getMessage()))
                 .onErrorMap(error -> new AppException(ErrorCode.MUSIC_FETCH_FAILED, "Fetch musics failed", error));
     }
 
@@ -136,11 +156,16 @@ public class MusicService {
             return Mono.error(new AppException(ErrorCode.MUSIC_REQUEST_INVALID, "musicId is required"));
         }
 
+        log.info("|MusicService|getMusicById|musicId={}", musicId);
         return musicsRepository.findById(musicId.trim())
                 .switchIfEmpty(Mono.error(new AppException(
                         ErrorCode.MUSIC_NOT_FOUND,
                         String.format("Music not found for musicId=%s", musicId)
                 )))
+                .doOnSuccess(music -> log.info("|MusicService|getMusicById|success|musicId={}|slugName={}",
+                        music.getId(), music.getSlugName()))
+                .doOnError(error -> log.error("|MusicService|getMusicById|failed|musicId={}|error={}",
+                        musicId, error.getMessage()))
                 .onErrorMap(error -> error instanceof AppException
                         ? error
                         : new AppException(ErrorCode.MUSIC_FETCH_FAILED, "Fetch music detail failed", error));
@@ -155,14 +180,17 @@ public class MusicService {
         return musicsRepository.existsById(musicId)
                 .flatMap(exists -> {
                     if (Boolean.TRUE.equals(exists)) {
+                        log.info("|MusicService|importJamendoTrack|skipped existing|musicId={}", musicId);
                         return Mono.just(ImportTrackResult.SKIPPED);
                     }
 
                     String audioUrl = resolveAudioDownloadUrl(item);
                     if (audioUrl.isBlank()) {
+                        log.warn("|MusicService|importJamendoTrack|skipped missing audio|musicId={}", musicId);
                         return Mono.just(ImportTrackResult.SKIPPED);
                     }
 
+                    log.info("|MusicService|importJamendoTrack|processing|musicId={}|category={}", musicId, category);
                     return downloadAudio(audioUrl)
                             .flatMap(bytes -> uploadAudioToCloudinary(bytes, musicId, KafkaUtils.extractString(item, "name")))
                             .flatMap(uploadResult -> saveImportedMusic(item, category, uploadResult)
@@ -205,13 +233,17 @@ public class MusicService {
     }
 
     private Mono<byte[]> downloadAudio(String audioUrl) {
+        log.info("|MusicService|downloadAudio|start|urlHost={}", URI.create(audioUrl).getHost());
         return webClient.get()
                 .uri(audioUrl)
                 .retrieve()
-                .bodyToMono(byte[].class);
+                .bodyToMono(byte[].class)
+                .doOnSuccess(bytes -> log.info("|MusicService|downloadAudio|success|bytes={}", bytes.length))
+                .doOnError(error -> log.error("|MusicService|downloadAudio|failed|error={}", error.getMessage()));
     }
 
     private Mono<Map<String, Object>> uploadAudioToCloudinary(byte[] bytes, String musicId, String displayName) {
+        log.info("|MusicService|uploadAudioToCloudinary|start|musicId={}|bytes={}", musicId, bytes.length);
         return Mono.fromCallable(() -> {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> result = cloudinary.uploader().upload(bytes, ObjectUtils.asMap(
@@ -221,7 +253,11 @@ public class MusicService {
                     ));
                     return result;
                 })
-                .subscribeOn(Schedulers.boundedElastic());
+                .subscribeOn(Schedulers.boundedElastic())
+                .doOnSuccess(result -> log.info("|MusicService|uploadAudioToCloudinary|success|musicId={}|publicId={}",
+                        musicId, stringValue(result.get("public_id"), null)))
+                .doOnError(error -> log.error("|MusicService|uploadAudioToCloudinary|failed|musicId={}|error={}",
+                        musicId, error.getMessage()));
     }
 
     private URI validateJamendoUri(String rawUrl) {

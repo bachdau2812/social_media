@@ -195,6 +195,7 @@ public class PostService {
     public Mono<PostDetails> getPostById(String postId) {
         String cacheKey = POST_CACHE_PREFIX + postId;
 
+        log.info("|PostService|getPostById|postId={}", postId);
         return reactiveRedisStringTemplate.opsForValue().get(cacheKey)
                 .onErrorResume(error -> {
                     log.warn("|PostService|getPostById|cache read failed, fallback to database|postId={}|error={}", postId, error.getMessage());
@@ -203,8 +204,10 @@ public class PostService {
                 .flatMap(cacheValue -> {
                     PostDetails cached = RedisUtil.deserialize(cacheValue, PostDetails.class);
                     if (cached != null) {
+                        log.info("|PostService|getPostById|cache hit|postId={}", postId);
                         return Mono.just(cached);
                     }
+                    log.warn("|PostService|getPostById|cache deserialize failed|postId={}", postId);
                     return Mono.empty();
                 })
                 .switchIfEmpty(postDetailsRepository.findById(postId)
@@ -218,8 +221,9 @@ public class PostService {
                                         ErrorCode.POST_FETCH_FAILED,
                                         String.format("Fetch post failed for postId=%s", postId),
                                         throwable
-                                ))
+                        ))
                         .doOnSuccess(post -> {
+                            log.info("|PostService|getPostById|database hit|postId={}|userId={}", postId, post.getUserId());
                             String cacheValue = RedisUtil.serialize(post);
                             if (cacheValue != null) {
                                 reactiveRedisStringTemplate.opsForValue().set(cacheKey, cacheValue, CACHE_TTL).subscribe();
@@ -233,6 +237,7 @@ public class PostService {
             return Mono.error(new AppException(ErrorCode.POST_FETCH_FAILED, "postId is required"));
         }
 
+        log.info("|PostService|getPostOwnerIdByPostId|postId={}", postId);
         return postDetailsRepository.findUserIdByPostId(postId)
                 .filter(userId -> userId != null && !userId.isBlank())
                 .switchIfEmpty(Mono.error(new AppException(
@@ -245,13 +250,16 @@ public class PostService {
                                 ErrorCode.POST_FETCH_FAILED,
                                 String.format("Fetch post owner failed for postId=%s", postId),
                                 throwable
-                        ));
+                        ))
+                .doOnSuccess(userId -> log.info("|PostService|getPostOwnerIdByPostId|success|postId={}|ownerId={}", postId, userId))
+                .doOnError(error -> log.error("|PostService|getPostOwnerIdByPostId|failed|postId={}|error={}", postId, error.getMessage()));
     }
 
     public Mono<PostNotificationMuteResponse> mutePostNotifications(String postId, String userId) {
         validatePostNotificationMuteRequest(postId, userId);
 
         String cacheKey = PostNotificationCacheKeys.mutedPostNotification(postId, userId);
+        log.info("|PostService|mutePostNotifications|postId={}|userId={}", postId, userId);
         return postDetailsRepository.existsById(postId)
                 .flatMap(exists -> {
                     if (!Boolean.TRUE.equals(exists)) {
@@ -267,6 +275,8 @@ public class PostService {
                 })
                 .doOnSuccess(response -> log.info("|PostService|mutePostNotifications|postId={}|userId={}|mutedDays={}",
                         response.postId(), response.userId(), response.mutedDays()))
+                .doOnError(error -> log.error("|PostService|mutePostNotifications|failed|postId={}|userId={}|error={}",
+                        postId, userId, error.getMessage()))
                 .onErrorMap(throwable -> throwable instanceof AppException
                         ? throwable
                         : new AppException(
@@ -280,7 +290,13 @@ public class PostService {
         int limit = size <= 0 ? 10 : Math.min(size, 50);
         int offset = Math.max(page, 0) * limit;
 
+        log.info("|PostService|getPostsByUserId|userId={}|page={}|size={}|limit={}|offset={}",
+                userId, page, size, limit, offset);
         return postDetailsRepository.findByUserId(userId, limit, offset)
+                .doOnComplete(() -> log.info("|PostService|getPostsByUserId|completed|userId={}|limit={}|offset={}",
+                        userId, limit, offset))
+                .doOnError(error -> log.error("|PostService|getPostsByUserId|failed|userId={}|error={}",
+                        userId, error.getMessage()))
                 .onErrorMap(throwable -> new AppException(
                         ErrorCode.POST_LIST_FETCH_FAILED,
                         String.format("Fetch posts failed for userId=%s", userId),
@@ -292,6 +308,7 @@ public class PostService {
         String cacheKey = POST_CACHE_PREFIX + postId;
         String waitKey = WAIT_UPLOAD_PREFIX + postId;
 
+        log.info("|PostService|deletePostById|postId={}", postId);
         return postDetailsRepository.findById(postId)
                 .switchIfEmpty(Mono.error(new AppException(
                         ErrorCode.POST_NOT_FOUND,
@@ -301,6 +318,8 @@ public class PostService {
                         .then(reactiveRedisStringTemplate.opsForValue().delete(cacheKey).then())
                         .then(reactiveRedisStringTemplate.opsForValue().delete(waitKey).then())
                 )
+                .doOnSuccess(v -> log.info("|PostService|deletePostById|deleted|postId={}", postId))
+                .doOnError(error -> log.error("|PostService|deletePostById|failed|postId={}|error={}", postId, error.getMessage()))
                 .onErrorMap(throwable -> throwable instanceof AppException
                         ? throwable
                         : new AppException(
@@ -311,9 +330,11 @@ public class PostService {
     }
 
     public Mono<Void> deletePostsByUserId(String userId) {
+        log.info("|PostService|deletePostsByUserId|userId={}", userId);
         return postDetailsRepository.findAllByUserId(userId)
                 .collectList()
                 .flatMap(posts -> {
+                    log.info("|PostService|deletePostsByUserId|found posts|userId={}|count={}", userId, posts.size());
                     Mono<Void> cacheRemoval = Flux.fromIterable(posts)
                             .flatMap(post -> {
                                 String cacheKey = POST_CACHE_PREFIX + post.getPostId();
@@ -326,6 +347,8 @@ public class PostService {
 
                     return cacheRemoval.then(postDetailsRepository.deleteByUserId(userId));
                 })
+                .doOnSuccess(v -> log.info("|PostService|deletePostsByUserId|deleted|userId={}", userId))
+                .doOnError(error -> log.error("|PostService|deletePostsByUserId|failed|userId={}|error={}", userId, error.getMessage()))
                 .onErrorMap(throwable -> new AppException(
                         ErrorCode.POST_DELETE_FAILED,
                         String.format("Delete posts failed for userId=%s", userId),
@@ -368,6 +391,7 @@ public class PostService {
 
         kafkaSender.send(Mono.just(record))
                 .doOnError(error -> log.error("|PostService|publishPostEvent|topic={}|error={}", topic, error.getMessage()))
+                .doOnComplete(() -> log.info("|PostService|publishPostEvent|sent|topic={}|postId={}", topic, postDetails.getPostId()))
                 .subscribe();
     }
 
@@ -381,6 +405,8 @@ public class PostService {
 
         return kafkaSender.send(Mono.just(record))
                 .doOnError(error -> log.error("|PostService|sendPostUploadEvent|postId={}|error={}", postDetails.getPostId(), error.getMessage()))
+                .doOnComplete(() -> log.info("|PostService|sendPostUploadEvent|sent|postId={}|userId={}",
+                        postDetails.getPostId(), postDetails.getUserId()))
                 .then();
     }
 
@@ -399,6 +425,7 @@ public class PostService {
         payload.addProperty("result", "SUCCESSED");
         payload.addProperty("message", "Post approved");
         postSseService.sendToUser(postDetails.getUserId(), "post_upload", payload.toString());
+        log.info("|PostService|sendPostSuccessSse|sent|postId={}|userId={}", postDetails.getPostId(), postDetails.getUserId());
         return Mono.empty();
     }
 
@@ -412,6 +439,7 @@ public class PostService {
         payload.addProperty("result", "FAILED");
         payload.addProperty("message", message);
         postSseService.sendToUser(userId, "post_upload", payload.toString());
+        log.info("|PostService|sendPostFailureSse|sent|postId={}|userId={}", postId, userId);
     }
 
     private Mono<Void> sendCheckMediaEvent(String postId, String userId, List<MediaUploadRequest> mediaList) {
@@ -427,6 +455,8 @@ public class PostService {
 
         return kafkaSender.send(Mono.just(record))
                 .doOnError(error -> log.error("|PostService|sendCheckMediaEvent|postId={}|error={}", postId, error.getMessage()))
+                .doOnComplete(() -> log.info("|PostService|sendCheckMediaEvent|sent|postId={}|userId={}|mediaCount={}",
+                        postId, userId, mediaList.size()))
                 .then();
     }
 }

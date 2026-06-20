@@ -39,8 +39,6 @@ public class UserDetailsService {
     /// Listen event and create profile for new user
     @KafkaListener(topics = "profile_creation_event", groupId = "user-service")
     public void createUserDetails (@Payload String payload) {
-        log.info("|UserDetailsService|createUserDetails|received payload={}", payload);
-
         JsonObject payloadJson = GsonUtils.fromString(payload);
 
         var userDetails = UserDetails.builder()
@@ -52,6 +50,8 @@ public class UserDetailsService {
                 .sex(KafkaUtils.extractString(payloadJson, "sex"))
                 .build();
         userDetails.setHobbyList(KafkaUtils.extractStringList(payloadJson, "hobbieList"));
+        log.info("|UserDetailsService|createUserDetails|received|userId={}|username={}",
+                userDetails.getUserId(), userDetails.getUsername());
 
         insertUserDetails(userDetails)
                 .subscribe(
@@ -107,6 +107,7 @@ public class UserDetailsService {
                     return userDetailsRepository.findById(request.getUserId());
                 })
                 .flatMap(existingUserDetails -> {
+                    log.info("|UserDetailsService|updateUserDetails|found|userId={}", request.getUserId());
                     // Update only non-null and non-empty fields
                     if (request.getUsername() != null && !request.getUsername().isBlank()) {
                         existingUserDetails.setUsername(request.getUsername());

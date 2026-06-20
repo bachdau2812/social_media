@@ -7,6 +7,8 @@ import com.dauducbach.clone.infrastructure.service.SemanticVectorSearchService;
 import com.dauducbach.clone.modules.user.repositoty.UserDetailsRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -22,6 +24,7 @@ import java.util.Set;
 @RequiredArgsConstructor
 @FieldDefaults(level = lombok.AccessLevel.PRIVATE, makeFinal = true)
 public class UserSearchService {
+    private static final Logger log = LoggerFactory.getLogger(UserSearchService.class);
     private static final int DEFAULT_PAGE_SIZE = 20;
     private static final int MAX_PAGE_SIZE = 100;
     private static final int SEMANTIC_FILL_THRESHOLD = 10;
@@ -35,6 +38,9 @@ public class UserSearchService {
         int pageNumber = Math.max(page, 0);
         int pageSize = normalizeLimit(limit);
         Pageable pageable = PageRequest.of(pageNumber, pageSize);
+
+        log.info("|UserSearchService|searchUsers|queryLength={}|filter={}|page={}|limit={}",
+                normalizedQuery.length(), filter, pageNumber, pageSize);
 
         return userDetailsRepository.countSearchUserIds(
                         normalizedQuery,
@@ -52,8 +58,14 @@ public class UserSearchService {
                                 pageable
                         )
                         .collectList()
+                        .doOnSuccess(dbUserIds -> log.info("|UserSearchService|searchUsers|dbResult|page={}|dbCount={}|dbTotal={}",
+                                pageNumber, dbUserIds.size(), total))
                         .flatMap(dbUserIds -> fillUsersBySemanticSearch(normalizedQuery, dbUserIds, pageSize)
                                 .map(content -> buildPage(content, dbUserIds.size(), pageNumber, pageSize, total))))
+                .doOnSuccess(response -> log.info("|UserSearchService|searchUsers|completed|page={}|resultCount={}|totalElements={}",
+                        pageNumber, response.content().size(), response.totalElements()))
+                .doOnError(error -> log.error("|UserSearchService|searchUsers|failed|page={}|limit={}|error={}",
+                        pageNumber, pageSize, error.getMessage()))
                 .onErrorMap(error -> error instanceof AppException
                         ? error
                         : new AppException(
@@ -72,7 +84,14 @@ public class UserSearchService {
         int required = pageSize - dbUserIds.size();
         Set<String> excludedIds = new LinkedHashSet<>(dbUserIds);
 
+        log.info("|UserSearchService|fillUsersBySemanticSearch|start|dbCount={}|required={}",
+                dbUserIds.size(), required);
+
         return semanticVectorSearchService.searchUserIds(query, required, excludedIds)
+                .doOnSuccess(semanticUserIds -> log.info("|UserSearchService|fillUsersBySemanticSearch|completed|semanticCount={}",
+                        semanticUserIds.size()))
+                .doOnError(error -> log.error("|UserSearchService|fillUsersBySemanticSearch|failed|required={}|error={}",
+                        required, error.getMessage()))
                 .map(semanticUserIds -> mergeIds(dbUserIds, semanticUserIds, pageSize));
     }
 

@@ -17,6 +17,7 @@ public class PostSseService {
     private final Map<String, Sinks.Many<ServerSentEvent<String>>> userSinks = new ConcurrentHashMap<>();
 
     public Flux<ServerSentEvent<String>> subscribe(String userId) {
+        log.info("|PostSseService|subscribe|userId={}", userId);
         Sinks.Many<ServerSentEvent<String>> sink = userSinks.computeIfAbsent(userId, key ->
                 Sinks.many().multicast().onBackpressureBuffer()
         );
@@ -41,9 +42,11 @@ public class PostSseService {
 
         Sinks.EmitResult result = sink.tryEmitNext(message);
         if (result.isFailure()) {
-            log.warn("|PostSseService|sendToUser|emit failed|userId={}|result={}", userId, result);
+            log.warn("|PostSseService|sendToUser|emit failed|userId={}|event={}|dataLength={}|result={}",
+                    userId, event, data == null ? 0 : data.length(), result);
         } else if (result.isSuccess()) {
-            log.info("|PostSseService|sendToUser|emit success|userId={}|result={}", userId, result);
+            log.info("|PostSseService|sendToUser|emit success|userId={}|event={}|dataLength={}|result={}",
+                    userId, event, data == null ? 0 : data.length(), result);
         }
     }
 

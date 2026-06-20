@@ -80,6 +80,8 @@ public class MediaService {
             return Mono.error(new AppException(ErrorCode.MEDIA_SAVE_FAILED, "publicId, ownerId and ownerType are required"));
         }
 
+        log.info("|MediaService|saveCloudinaryMedia|start|publicId={}|ownerId={}|ownerType={}",
+                publicId, ownerId, ownerType);
         return cloudinaryMediaService.fetchMediaByPublicId(publicId.trim())
                 .doOnNext(media -> {
                     media.setOwnerId(ownerId.trim());
@@ -87,6 +89,10 @@ public class MediaService {
                     media.setUpdatedAt(Instant.now());
                 })
                 .flatMap(media -> r2dbcEntityTemplate.insert(Media.class).using(media))
+                .doOnSuccess(saved -> log.info("|MediaService|saveCloudinaryMedia|saved|publicId={}|assetId={}|ownerId={}|ownerType={}",
+                        publicId, saved.getAssetId(), ownerId, ownerType))
+                .doOnError(error -> log.error("|MediaService|saveCloudinaryMedia|failed|publicId={}|ownerId={}|ownerType={}|error={}",
+                        publicId, ownerId, ownerType, error.getMessage()))
                 .onErrorMap(error -> error instanceof AppException
                         ? error
                         : new AppException(
@@ -101,6 +107,7 @@ public class MediaService {
             return Mono.error(new AppException(ErrorCode.MEDIA_SAVE_FAILED, "userId is required"));
         }
 
+        log.info("|MediaService|saveFeatureMusic|start|userId={}|musicId={}|slugName={}", userId, musicId, slugName);
         Instant now = Instant.now();
         Media media = Media.builder()
                 .assetId(UUID.randomUUID().toString())
@@ -119,6 +126,10 @@ public class MediaService {
                 .build();
 
         return r2dbcEntityTemplate.insert(Media.class).using(media)
+                .doOnSuccess(saved -> log.info("|MediaService|saveFeatureMusic|saved|userId={}|musicId={}|assetId={}",
+                        userId, musicId, saved.getAssetId()))
+                .doOnError(error -> log.error("|MediaService|saveFeatureMusic|failed|userId={}|musicId={}|error={}",
+                        userId, musicId, error.getMessage()))
                 .onErrorMap(error -> new AppException(
                         ErrorCode.MEDIA_SAVE_FAILED,
                         String.format("Save feature music media failed for userId=%s", userId),
@@ -131,6 +142,7 @@ public class MediaService {
             return Mono.error(new AppException(ErrorCode.MEDIA_SAVE_FAILED, "musicId and uploadResult are required"));
         }
 
+        log.info("|MediaService|saveImportedMusicMedia|start|musicId={}", musicId);
         Instant now = Instant.now();
         Media media = Media.builder()
                 .assetId(stringValue(uploadResult.get("asset_id"), UUID.randomUUID().toString()))
@@ -152,6 +164,10 @@ public class MediaService {
                 .build();
 
         return r2dbcEntityTemplate.insert(Media.class).using(media)
+                .doOnSuccess(saved -> log.info("|MediaService|saveImportedMusicMedia|saved|musicId={}|assetId={}|publicId={}",
+                        musicId, saved.getAssetId(), saved.getPublicId()))
+                .doOnError(error -> log.error("|MediaService|saveImportedMusicMedia|failed|musicId={}|error={}",
+                        musicId, error.getMessage()))
                 .onErrorMap(error -> new AppException(
                         ErrorCode.MEDIA_SAVE_FAILED,
                         String.format("Save imported music media failed for musicId=%s", musicId),
@@ -179,8 +195,14 @@ public class MediaService {
                 ? mediaRepository.findPostMediaByUserId(userId, pageable)
                 : mediaRepository.findByOwnerIdAndOwnerTypeOrderByCreatedAtDesc(userId, ownerType, pageable);
 
+        log.info("|MediaService|getProfileMedia|start|userId={}|ownerType={}|page={}|size={}",
+                userId, ownerType, pageNumber, pageSize);
         return countMono.flatMap(total -> mediaFlux.collectList()
+                        .doOnSuccess(items -> log.info("|MediaService|getProfileMedia|dbResult|userId={}|ownerType={}|count={}|total={}",
+                                userId, ownerType, items.size(), total))
                         .map(items -> PageResponse.of(items, pageNumber, total, pageSize)))
+                .doOnError(error -> log.error("|MediaService|getProfileMedia|failed|userId={}|ownerType={}|error={}",
+                        userId, ownerType, error.getMessage()))
                 .onErrorMap(error -> error instanceof AppException
                         ? error
                         : new AppException(
@@ -195,18 +217,30 @@ public class MediaService {
             return Mono.error(new AppException(ErrorCode.MEDIA_FETCH_FAILED, "userId is required"));
         }
 
+        log.info("|MediaService|getCurrentAvatar|start|userId={}", userId);
         return mediaRepository.findFirstByOwnerIdAndOwnerTypeOrderByCreatedAtDesc(userId, OwnerType.AVATAR)
                 .switchIfEmpty(Mono.error(new AppException(
                         ErrorCode.MEDIA_NOT_FOUND,
                         String.format("Current avatar not found for userId=%s", userId)
-                )));
+                )))
+                .doOnSuccess(media -> log.info("|MediaService|getCurrentAvatar|success|userId={}|assetId={}",
+                        userId, media.getAssetId()))
+                .doOnError(error -> log.error("|MediaService|getCurrentAvatar|failed|userId={}|error={}",
+                        userId, error.getMessage()));
     }
 
     public Mono<List<Media>> saveCloudinaryMediaList(List<String> publicIds, String ownerId, OwnerType ownerType) {
+        int publicIdCount = publicIds == null ? 0 : publicIds.size();
+        log.info("|MediaService|saveCloudinaryMediaList|start|ownerId={}|ownerType={}|publicIdCount={}",
+                ownerId, ownerType, publicIdCount);
         return Flux.fromIterable(publicIds == null ? List.<String>of() : publicIds)
                 .filter(publicId -> publicId != null && !publicId.isBlank())
                 .concatMap(publicId -> saveCloudinaryMedia(publicId, ownerId, ownerType))
-                .collectList();
+                .collectList()
+                .doOnSuccess(saved -> log.info("|MediaService|saveCloudinaryMediaList|completed|ownerId={}|ownerType={}|savedCount={}",
+                        ownerId, ownerType, saved.size()))
+                .doOnError(error -> log.error("|MediaService|saveCloudinaryMediaList|failed|ownerId={}|ownerType={}|error={}",
+                        ownerId, ownerType, error.getMessage()));
     }
 
     private String stringValue(Object value, String fallback) {

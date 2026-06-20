@@ -14,27 +14,20 @@ import com.dauducbach.clone.modules.post.repositoty.MediaRepository;
 import com.dauducbach.clone.modules.post.repositoty.PostDetailsRepository;
 import com.dauducbach.clone.utils.GsonUtils;
 import com.dauducbach.clone.utils.KafkaUtils;
+import com.dauducbach.clone.utils.MediaScanUtils;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
-import lombok.experimental.NonFinal;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.ByteArrayResource;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
-import org.springframework.http.MediaType;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Service;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
-import org.springframework.web.reactive.function.BodyInserters;
-import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -44,7 +37,6 @@ import reactor.kafka.sender.SenderRecord;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 @Service
 @RequiredArgsConstructor
@@ -56,20 +48,16 @@ public class ImageScanWorker {
     private static final String POST_COMMENT_COUNT_PREFIX = "post_comment_count:";
     private static final String REPLY_COUNT_PREFIX = "reply_count:";
 
-    @NonFinal
-    @Value("${post.media.scan.api-url:http://localhost:8000/api/v1/scan}")
-    String scanApiUrl;
-
     PostDetailsRepository postDetailsRepository;
     CommentRepository commentRepository;
     MediaRepository mediaRepository;
     ReactiveRedisTemplate<String, String> reactiveRedisStringTemplate;
     PostSseService postSseService;
     KafkaSender<String, String> kafkaSender;
-    WebClient webClient;
     Cloudinary cloudinary;
     CloudinaryMediaService cloudinaryMediaService;
     R2dbcEntityTemplate r2dbcEntityTemplate;
+    MediaScanUtils mediaScanUtils;
 
     @KafkaListener(topics = "check_media_event", groupId = "post-service")
     public void handlePostScanEvent(@Payload String payload) {
@@ -124,110 +112,12 @@ public class ImageScanWorker {
 
     private Mono<Boolean> scanMediaList(List<MediaUploadRequest> mediaList) {
         return Flux.fromIterable(mediaList)
-                .concatMap(this::scanSingleMedia)
-                .any(ScanResult::isNsfw)
+                .concatMap(item -> mediaScanUtils.scanMedia(item.getSecureUrl(), item.getPublicId()))
+                .any(MediaScanUtils.ScanResult::isNsfw)
                 .onErrorResume(error -> {
                     log.error("|ImageScanWorker|scanMediaList|failed|error={}", error.getMessage());
                     return Mono.just(true);
                 });
-    }
-
-    private Mono<ScanResult> scanSingleMedia(MediaUploadRequest item) {
-        if (item.getSecureUrl() == null || item.getSecureUrl().isBlank()) {
-            return Mono.just(new ScanResult(true));
-        }
-
-        return webClient.get()
-                .uri(item.getSecureUrl())
-                .retrieve()
-                .bodyToMono(byte[].class)
-                .flatMap(bytes -> callScanApi(bytes, item.getPublicId(), item.getSecureUrl()))
-                .onErrorResume(error -> {
-                    log.error("|ImageScanWorker|scanSingleMedia|download or scan failed|url={}|error={}", item.getSecureUrl(), error.getMessage());
-                    return Mono.just(new ScanResult(true));
-                });
-    }
-
-    private Mono<ScanResult> callScanApi(byte[] bytes, String publicId, String secureUrl) {
-        String filename = buildScanFilename(publicId, secureUrl);
-        MultiValueMap<String, Object> formData = new LinkedMultiValueMap<>();
-        formData.add("file", new ByteArrayResource(bytes) {
-            @Override
-            public String getFilename() {
-                return filename;
-            }
-        });
-
-        return webClient.post()
-                .uri(scanApiUrl)
-                .contentType(MediaType.MULTIPART_FORM_DATA)
-                .body(BodyInserters.fromMultipartData(formData))
-                .retrieve()
-                .bodyToMono(String.class)
-                .doOnSuccess(s -> log.info("SCAN_RES={}", s))
-                .map(this::parseScanResponse)
-                .onErrorResume(error -> {
-                    log.error("|ImageScanWorker|callScanApi|failed|error={}", error.getMessage());
-                    return Mono.just(new ScanResult(true));
-                });
-    }
-
-    private String buildScanFilename(String publicId, String secureUrl) {
-        String filename = basename(publicId);
-        if (filename.isBlank()) {
-            filename = basename(secureUrl);
-        }
-        if (filename.isBlank()) {
-            filename = "media";
-        }
-
-        filename = filename.replaceAll("[^A-Za-z0-9._-]", "_");
-        if (!hasExtension(filename)) {
-            filename = filename + resolveExtension(secureUrl);
-        }
-        return filename;
-    }
-
-    private String basename(String value) {
-        if (value == null || value.isBlank()) {
-            return "";
-        }
-
-        String clean = value;
-        int queryIndex = clean.indexOf('?');
-        if (queryIndex >= 0) {
-            clean = clean.substring(0, queryIndex);
-        }
-
-        int slashIndex = Math.max(clean.lastIndexOf('/'), clean.lastIndexOf('\\'));
-        return slashIndex >= 0 ? clean.substring(slashIndex + 1) : clean;
-    }
-
-    private boolean hasExtension(String filename) {
-        int dotIndex = filename.lastIndexOf('.');
-        return dotIndex > 0 && dotIndex < filename.length() - 1;
-    }
-
-    private String resolveExtension(String secureUrl) {
-        String filenameFromUrl = basename(secureUrl);
-        int dotIndex = filenameFromUrl.lastIndexOf('.');
-        if (dotIndex > 0 && dotIndex < filenameFromUrl.length() - 1) {
-            String extension = filenameFromUrl.substring(dotIndex).toLowerCase(Locale.ROOT);
-            if (extension.matches("\\.[a-z0-9]{1,8}")) {
-                return extension;
-            }
-        }
-        return ".jpg";
-    }
-
-    private ScanResult parseScanResponse(String rawResponse) {
-        JsonObject json = GsonUtils.fromString(rawResponse);
-        JsonObject data = json.getAsJsonObject("data");
-        if (data == null) {
-            return new ScanResult(true);
-        }
-        boolean isNsfw = data.has("is_nsfw") && data.get("is_nsfw").getAsBoolean();
-        return new ScanResult(isNsfw);
     }
 
     private Mono<Void> handlePostScanFailed(String postId, List<MediaUploadRequest> mediaList) {
@@ -239,31 +129,6 @@ public class ImageScanWorker {
                         .then(sendPostFailureSse(userId, postId))
                         .then(reactiveRedisStringTemplate.opsForValue().delete(waitKey).then()))
                 .doOnError(error -> log.error("|ImageScanWorker|handlePostScanFailed|postId={}|error={}", postId, error.getMessage()))
-                .onErrorResume(error -> Mono.empty());
-    }
-
-    private Mono<Void> handlePostScanSuccess(String postId) {
-        String waitKey = WAIT_UPLOAD_POST_PREFIX + postId;
-        return postDetailsRepository.findById(postId)
-                .switchIfEmpty(Mono.error(new AppException(
-                        ErrorCode.POST_NOT_FOUND,
-                        String.format("Post not found for postId=%s", postId)
-                )))
-                .flatMap(post -> {
-                    log.info("|ImageScanWorker|handlePostScanSuccess|updating post status|postId={}|status=APPROVED", postId);
-
-                    post.setValidateStatus("APPROVED");
-                    post.setUpdatedAt(Instant.now());
-                    return postDetailsRepository.save(post);
-                })
-                .flatMap(post -> reactiveRedisStringTemplate.opsForValue().get(waitKey)
-                        .defaultIfEmpty("")
-                        .flatMap(userId -> sendPostSuccessSse(userId, post)
-                                .then(sendPostUploadEvent(post))
-                                .then()))
-                .then(reactiveRedisStringTemplate.opsForValue().delete(waitKey).then())
-                .doOnSuccess(v -> log.info("|ImageScanWorker|handlePostScanSuccess|completed|postId={}", postId))
-                .doOnError(error -> log.error("|ImageScanWorker|handlePostScanSuccess|failed|postId={}|error={}", postId, error.getMessage()))
                 .onErrorResume(error -> Mono.empty());
     }
 
@@ -589,17 +454,5 @@ public class ImageScanWorker {
         }
 
         return mediaList;
-    }
-
-    private static class ScanResult {
-        private final boolean nsfw;
-
-        private ScanResult(boolean nsfw) {
-            this.nsfw = nsfw;
-        }
-
-        private boolean isNsfw() {
-            return nsfw;
-        }
     }
 }

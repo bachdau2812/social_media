@@ -38,6 +38,7 @@ public class UserFollowerService {
 
         // Validate: Không thể tự follow mình
         if (request.getFollowerId().equals(request.getFollowingId())) {
+            log.warn("|UserFollowerService|followUser|validation failed|reason=self_follow|followerId={}", request.getFollowerId());
             return Mono.error(new AppException(
                     ErrorCode.CANNOT_FOLLOW_SELF,
                     String.format("Cannot follow yourself: followerId=%s, followingId=%s", request.getFollowerId(), request.getFollowingId())
@@ -55,6 +56,8 @@ public class UserFollowerService {
         return userFollowerRepository.existsByFollowerIdAndFollowingId(request.getFollowerId(), request.getFollowingId())
                 .flatMap(exists -> {
                     if (exists) {
+                        log.warn("|UserFollowerService|followUser|validation failed|reason=already_following|followerId={}|followingId={}",
+                                request.getFollowerId(), request.getFollowingId());
                         return Mono.error(new AppException(
                                 ErrorCode.ALREADY_FOLLOWING_USER,
                                 String.format("Already following this user: followerId=%s, followingId=%s", request.getFollowerId(), request.getFollowingId())
@@ -65,8 +68,12 @@ public class UserFollowerService {
                     UserFollower userFollower = UserFollower.create(request.getFollowerId(), request.getFollowingId());
                     return r2dbcEntityTemplate.insert(UserFollower.class)
                             .using(userFollower)
+                            .doOnSuccess(saved -> log.info("|UserFollowerService|followUser|saved relationship|id={}|followerId={}|followingId={}",
+                                    saved.getId(), saved.getFollowerId(), saved.getFollowingId()))
                             .flatMap(userFollower1 -> kafkaSender.send(Mono.just(senderRecord))
                                     .doOnError(error -> log.error("|UserFollowerService|followUser|failed to send Kafka message|error={}", error.getMessage()))
+                                    .doOnComplete(() -> log.info("|UserFollowerService|followUser|sent Kafka message|followerId={}|followingId={}",
+                                            request.getFollowerId(), request.getFollowingId()))
                                     .then(Mono.just(userFollower1))
                             )
                             .map(saved -> FollowResponse.builder()
@@ -104,6 +111,8 @@ public class UserFollowerService {
         return userFollowerRepository.existsByFollowerIdAndFollowingId(followerId, followingId)
                 .flatMap(exists -> {
                     if (!exists) {
+                        log.warn("|UserFollowerService|unfollowUser|validation failed|reason=not_following|followerId={}|followingId={}",
+                                followerId, followingId);
                         return Mono.error(new AppException(
                                 ErrorCode.NOT_FOLLOWING_USER,
                                 String.format("Not following this user: followerId=%s, followingId=%s", followerId, followingId)

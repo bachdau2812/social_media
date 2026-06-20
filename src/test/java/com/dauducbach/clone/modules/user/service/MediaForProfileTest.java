@@ -15,6 +15,7 @@ import com.dauducbach.clone.modules.user.repositoty.MusicsRepository;
 import com.dauducbach.clone.modules.user.repositoty.UserDetailsRepository;
 import com.dauducbach.clone.modules.user.repositoty.UserStoriesRepository;
 import com.dauducbach.clone.utils.GsonUtils;
+import com.dauducbach.clone.utils.MediaScanUtils;
 import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -23,7 +24,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.reactivestreams.Publisher;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
 import org.springframework.data.r2dbc.core.ReactiveInsertOperation;
-import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.kafka.sender.KafkaSender;
@@ -54,9 +54,9 @@ class MediaForProfileTest {
     @Mock
     R2dbcEntityTemplate r2dbcEntityTemplate;
     @Mock
-    WebClient webClient;
-    @Mock
     Cloudinary cloudinary;
+    @Mock
+    MediaScanUtils mediaScanUtils;
 
     @Test
     void uploadAvatarPublishesScanEventWithResolvedPublicId() {
@@ -178,8 +178,8 @@ class MediaForProfileTest {
                 postSseService,
                 kafkaSender,
                 r2dbcEntityTemplate,
-                webClient,
-                cloudinary
+                cloudinary,
+                mediaScanUtils
         );
     }
 }

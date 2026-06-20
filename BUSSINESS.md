@@ -44,7 +44,10 @@ The app base path is `/app` and server port is `8888`. The main package is `com.
 - Profile media rows use `media.owner_id = userId` for `AVATAR`, `STORY`, and `FEATURE_MUSIC`. Existing post media keeps `media.owner_id = postId`; user-level post media listing must query through `post_details`.
 - Profile music selection writes `user_music` and also records a `FEATURE_MUSIC` row in `media` so profile music history can be served from the media table.
 - Music catalog APIs live under `/app/musics`: manual create, paginated list/search/filter, detail by id, and Jamendo import.
-- User search lives under `/app/user-details/search` and returns paginated `userId` strings. DB search always matches `username`; optional `filter` is split by `+`, whitespace, or comma and only whitelisted fields may expand matching (`hobby`, `living_in`/`live_in`, `hometown`, `city`, `sex`).
+- User search lives only under `/app/search` and returns paginated `userId` strings. DB search always matches `username`; optional `filter` is split by `+`, whitespace, or comma and only whitelisted fields may expand matching (`hobby`, `living_in`/`live_in`, `hometown`, `city`, `sex`). Do not expose a duplicate search endpoint from `UserDetailsController`.
+- Search suggestion code lives in the user module under `/app/search`. `/app/search/suggestions` returns text suggestions only, prioritizing user history, then global suggestions, then trending/global popular fallback. `/app/search` records the submitted keyword before returning user search results. `/app/search/history` deletes one keyword or clears all history.
+- Search suggestion MySQL source-of-truth tables are `user_search_histories` and `search_keywords`; Redis is only a fast/cache layer. Redis keys are `search:history:{userId}`, `search:suggest:global:{prefix}:{limit}`, and `search:trending:{yyyy-MM-dd}`.
+- Search history cache score must be `last_searched_at` timestamp, not `search_count`. Submitting real search text through `/app/search` must upsert both `user_search_histories` and `search_keywords`; existing rows increment `search_count` in both tables. Global suggestions are public only when `search_keywords.user_count >= 3`.
 - Jamendo import only accepts `api.jamendo.com` HTTP(S) URLs, parses the `results` array, skips existing track ids, uploads audio to Cloudinary, stores `Musics.songUrl` from Cloudinary `secure_url`, and records uploaded audio in `media` with `owner_type = MUSIC` and `owner_id = Jamendo track id`.
 - Jamendo import should be resilient per track: one failed download/upload/save must increase `failedCount` without failing the whole batch.
 
@@ -59,6 +62,7 @@ The app base path is `/app` and server port is `8888`. The main package is `com.
 - Post content is sanitized with Jsoup before persistence.
 - Post creation writes a pending record, stores wait-for-upload state in Redis, and publishes `check_media_event`.
 - Media scan downloads are buffered by WebClient with configurable limit `post.media.scan.max-in-memory-size` and default `10MB`. Scan API URL is configured by `post.media.scan.api-url`.
+- Media scan logic is centralized in `MediaScanUtils`; post, comment, avatar, and story flows should pass media URL/publicId to this utility and treat scan/download/API failures as rejected media.
 - Multipart filename sent to scan API must be a safe basename, not the full Cloudinary `publicId`, because `publicId` may contain `/`.
 - Comments support root replies and child replies, content validation, Redis count increments/decrements, media scan events, immediate success SSE/Kafka events for text comments.
 - Likes support POST and COMMENT targets, duplicate prevention, count/status checks, paged liked target ids, and `like_event` publishing.

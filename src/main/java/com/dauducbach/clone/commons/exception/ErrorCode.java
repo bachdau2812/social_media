@@ -77,6 +77,8 @@ public enum ErrorCode {
     MUSIC_REQUEST_INVALID(1062, "Music request is invalid", HttpStatus.BAD_REQUEST),
     USER_SEARCH_FAILED(1063, "Search users failed", HttpStatus.INTERNAL_SERVER_ERROR),
     SEARCH_REQUEST_INVALID(1064, "Search request is invalid", HttpStatus.BAD_REQUEST),
+    SEARCH_SUGGESTION_FAILED(1065, "Fetch search suggestions failed", HttpStatus.INTERNAL_SERVER_ERROR),
+    SEARCH_HISTORY_UPDATE_FAILED(1066, "Update search history failed", HttpStatus.INTERNAL_SERVER_ERROR),
 
     POST_NOT_FOUND(1100, "Post not found", HttpStatus.NOT_FOUND),
     POST_CREATE_FAILED(1101, "Create post failed", HttpStatus.INTERNAL_SERVER_ERROR),

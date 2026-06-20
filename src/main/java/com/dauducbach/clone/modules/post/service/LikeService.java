@@ -78,13 +78,18 @@ public class LikeService {
     }
     // Unlike là thao tác xóa quan hệ hiện có; nếu chưa like thì trả lỗi nghiệp vụ rõ ràng.
     private Mono<LikeToggleResponse> unlikeExisting(String targetId, String targetType, Like existing) {
+        log.info("|LikeService|unlikeExisting|likeId={}|actorId={}|targetId={}|targetType={}",
+                existing.getId(), existing.getActorId(), targetId, targetType);
         return ensurePostLikeCountCache(targetId, targetType)
                 .then(likeRepository.delete(existing))
                 .then(updatePostLikeCountCache(targetId, targetType, -1))
-                .thenReturn(new LikeToggleResponse(targetId, targetType, false, existing.getId()));
+                .thenReturn(new LikeToggleResponse(targetId, targetType, false, existing.getId()))
+                .doOnSuccess(response -> log.info("|LikeService|unlikeExisting|completed|likeId={}|targetId={}|targetType={}",
+                        existing.getId(), targetId, targetType));
     }
 
     private Mono<LikeToggleResponse> createLike(String actorId, String targetId, String targetType) {
+        log.info("|LikeService|createLike|actorId={}|targetId={}|targetType={}", actorId, targetId, targetType);
         return resolveTargetContext(targetId, targetType)
                 .flatMap(targetContext -> {
                     Instant now = Instant.now();
@@ -113,7 +118,9 @@ public class LikeService {
                                                 now
                                         );
                                         return publishLikeEvent(payload)
-                                                .thenReturn(new LikeToggleResponse(targetId, targetType, true, saved.getId()));
+                                                .thenReturn(new LikeToggleResponse(targetId, targetType, true, saved.getId()))
+                                                .doOnSuccess(response -> log.info("|LikeService|createLike|completed|likeId={}|actorId={}|targetId={}|targetType={}|likeCount={}",
+                                                        saved.getId(), actorId, targetId, targetType, likeCount));
                                     }));
                 });
     }
@@ -124,6 +131,10 @@ public class LikeService {
         validateRequiredIds(actorId, targetId);
 
         return likeRepository.existsByActorIdAndTargetIdAndTargetType(actorId, targetId, normalizedTargetType)
+                .doOnSuccess(exists -> log.info("|LikeService|hasLiked|actorId={}|targetId={}|targetType={}|result={}",
+                        actorId, targetId, normalizedTargetType, exists))
+                .doOnError(error -> log.error("|LikeService|hasLiked|failed|actorId={}|targetId={}|targetType={}|error={}",
+                        actorId, targetId, normalizedTargetType, error.getMessage()))
                 .onErrorMap(error -> new AppException(
                         ErrorCode.LIKE_FETCH_FAILED,
                         String.format("Check like status failed: actorId=%s targetId=%s targetType=%s", actorId, targetId, normalizedTargetType),
@@ -141,6 +152,10 @@ public class LikeService {
                 : likeRepository.countByTargetIdAndTargetType(targetId, normalizedTargetType);
 
         return countSource
+                .doOnSuccess(count -> log.info("|LikeService|countLikes|targetId={}|targetType={}|count={}",
+                        targetId, normalizedTargetType, count))
+                .doOnError(error -> log.error("|LikeService|countLikes|failed|targetId={}|targetType={}|error={}",
+                        targetId, normalizedTargetType, error.getMessage()))
                 .onErrorMap(error -> new AppException(
                         ErrorCode.LIKE_FETCH_FAILED,
                         String.format("Count likes failed: targetId=%s targetType=%s", targetId, normalizedTargetType),
@@ -161,6 +176,10 @@ public class LikeService {
                 .flatMap(totalElements -> likeRepository.findTargetIdByActorIdAndTargetType(actorId, normalizedTargetType, pageable)
                         .collectList()
                         .map(content -> PageResponse.of(content, pageNumber, totalElements, pageSize)))
+                .doOnSuccess(response -> log.info("|LikeService|getLikedTargets|actorId={}|targetType={}|page={}|resultCount={}|totalElements={}",
+                        actorId, normalizedTargetType, pageNumber, response.content().size(), response.totalElements()))
+                .doOnError(error -> log.error("|LikeService|getLikedTargets|failed|actorId={}|targetType={}|error={}",
+                        actorId, normalizedTargetType, error.getMessage()))
                 .onErrorMap(error -> new AppException(
                         ErrorCode.LIKE_FETCH_FAILED,
                         String.format("Fetch liked targets failed: actorId=%s targetType=%s", actorId, normalizedTargetType),
@@ -211,6 +230,8 @@ public class LikeService {
 
         return kafkaSender.send(Mono.just(record))
                 .doOnError(error -> log.error("|LikeService|publishLikeEvent|targetId={}|error={}", payload.targetId(), error.getMessage()))
+                .doOnComplete(() -> log.info("|LikeService|publishLikeEvent|sent|actorId={}|targetId={}|targetType={}|postId={}|likeCount={}",
+                        payload.actorId(), payload.targetId(), payload.targetType(), payload.postId(), payload.likeCount()))
                 .then();
     }
 
@@ -218,8 +239,10 @@ public class LikeService {
     private Mono<Long> getPostLikeCountFromCache(String postId) {
         String cacheKey = postLikeCountKey(postId);
         return readLongCache(cacheKey)
+                .doOnNext(count -> log.info("|LikeService|getPostLikeCountFromCache|cache hit|postId={}|count={}", postId, count))
                 .switchIfEmpty(Mono.defer(() -> withCountLock(POST_LIKE_COUNT_LOCK_PREFIX + postId,
                         () -> readLongCache(cacheKey)
+                                .doOnNext(count -> log.info("|LikeService|getPostLikeCountFromCache|cache hit after lock|postId={}|count={}", postId, count))
                                 .switchIfEmpty(loadAndSetCountCache(cacheKey,
                                         () -> likeRepository.countByTargetIdAndTargetType(postId, EntityType.POST.name()))),
                         ErrorCode.LIKE_FETCH_FAILED,
@@ -268,6 +291,8 @@ public class LikeService {
 
     private Mono<Long> loadAndSetCountCache(String cacheKey, Supplier<Mono<Long>> dbCountSupplier) {
         return dbCountSupplier.get()
+                .doOnSuccess(count -> log.info("|LikeService|loadAndSetCountCache|database count loaded|cacheKey={}|count={}",
+                        cacheKey, count))
                 .flatMap(count -> reactiveRedisStringTemplate.opsForValue()
                         .set(cacheKey, String.valueOf(count), COUNT_CACHE_TTL)
                         .thenReturn(count));

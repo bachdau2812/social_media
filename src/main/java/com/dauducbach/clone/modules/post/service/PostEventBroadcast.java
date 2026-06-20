@@ -38,11 +38,17 @@ public class PostEventBroadcast {
         String content = KafkaUtils.extractString(payloadJson, "content");
 
         if (postId.isBlank() || content.isBlank()) {
-            log.warn("|PostEventBroadcast|handlePostEmbeddingEvent|missing data|payload={}", payload);
+            log.warn("|PostEventBroadcast|handlePostEmbeddingEvent|missing data|hasPostId={}|hasContent={}",
+                    !postId.isBlank(), !content.isBlank());
             return;
         }
 
-        postVectorService.processPostEmbedding(postId, content).subscribe();
+        log.info("|PostEventBroadcast|handlePostEmbeddingEvent|received|postId={}|contentLength={}",
+                postId, content.length());
+        postVectorService.processPostEmbedding(postId, content)
+                .doOnError(error -> log.error("|PostEventBroadcast|handlePostEmbeddingEvent|failed|postId={}|error={}",
+                        postId, error.getMessage()))
+                .subscribe();
     }
 
 }

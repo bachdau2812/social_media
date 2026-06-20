@@ -7,6 +7,8 @@ import com.dauducbach.clone.infrastructure.service.SemanticVectorSearchService;
 import com.dauducbach.clone.modules.post.repositoty.PostDetailsRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -20,6 +22,7 @@ import java.util.Set;
 @RequiredArgsConstructor
 @FieldDefaults(level = lombok.AccessLevel.PRIVATE, makeFinal = true)
 public class PostSearchService {
+    private static final Logger log = LoggerFactory.getLogger(PostSearchService.class);
     private static final int DEFAULT_PAGE_SIZE = 20;
     private static final int MAX_PAGE_SIZE = 100;
     private static final int SEMANTIC_FILL_THRESHOLD = 10;
@@ -33,11 +36,20 @@ public class PostSearchService {
         int pageSize = normalizeLimit(limit);
         Pageable pageable = PageRequest.of(pageNumber, pageSize);
 
+        log.info("|PostSearchService|searchPosts|queryLength={}|page={}|limit={}",
+                normalizedQuery.length(), pageNumber, pageSize);
+
         return postDetailsRepository.countSearchApprovedPostIds(normalizedQuery)
                 .flatMap(total -> postDetailsRepository.searchApprovedPostIds(normalizedQuery, pageable)
                         .collectList()
+                        .doOnSuccess(dbPostIds -> log.info("|PostSearchService|searchPosts|dbResult|page={}|dbCount={}|dbTotal={}",
+                                pageNumber, dbPostIds.size(), total))
                         .flatMap(dbPostIds -> fillPostsBySemanticSearch(normalizedQuery, dbPostIds, pageSize)
                                 .map(content -> buildPage(content, dbPostIds.size(), pageNumber, pageSize, total))))
+                .doOnSuccess(response -> log.info("|PostSearchService|searchPosts|completed|page={}|resultCount={}|totalElements={}",
+                        pageNumber, response.content().size(), response.totalElements()))
+                .doOnError(error -> log.error("|PostSearchService|searchPosts|failed|page={}|limit={}|error={}",
+                        pageNumber, pageSize, error.getMessage()))
                 .onErrorMap(error -> error instanceof AppException
                         ? error
                         : new AppException(
@@ -56,7 +68,14 @@ public class PostSearchService {
         int required = pageSize - dbPostIds.size();
         Set<String> excludedIds = new LinkedHashSet<>(dbPostIds);
 
+        log.info("|PostSearchService|fillPostsBySemanticSearch|start|dbCount={}|required={}",
+                dbPostIds.size(), required);
+
         return semanticVectorSearchService.searchPostIds(query, required, excludedIds)
+                .doOnSuccess(semanticPostIds -> log.info("|PostSearchService|fillPostsBySemanticSearch|completed|semanticCount={}",
+                        semanticPostIds.size()))
+                .doOnError(error -> log.error("|PostSearchService|fillPostsBySemanticSearch|failed|required={}|error={}",
+                        required, error.getMessage()))
                 .map(semanticPostIds -> mergeIds(dbPostIds, semanticPostIds, pageSize));
     }
 
