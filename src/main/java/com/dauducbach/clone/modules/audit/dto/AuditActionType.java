@@ -1,0 +1,28 @@
+package com.dauducbach.clone.modules.audit.dto;
+
+public enum AuditActionType {
+    REGISTER,
+    LOGIN,
+    LOGOUT,
+    REFRESH_TOKEN,
+    CHANGE_PASSWORD,
+    FORGET_PASSWORD,
+    RESET_PASSWORD,
+    CREATE_POST,
+    UPDATE_POST,
+    DELETE_POST,
+    LIKE_POST,
+    UNLIKE_POST,
+    LIKE_COMMENT,
+    UNLIKE_COMMENT,
+    COMMENT_POST,
+    COMMENT_REPLY,
+    FOLLOW,
+    UNFOLLOW,
+    UPLOAD_AVATAR,
+    UPLOAD_STORY,
+    SELECT_PROFILE_MUSIC,
+    UPDATE_USER_DETAILS,
+    MUTE_POST_NOTIFICATIONS,
+    SUBMIT_SEARCH
+}

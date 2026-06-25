@@ -2,10 +2,14 @@ package com.dauducbach.clone.modules.user.service;
 
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
+import com.dauducbach.clone.modules.audit.dto.AuditActionType;
+import com.dauducbach.clone.modules.audit.entity.AuditLogs;
+import com.dauducbach.clone.modules.audit.service.UserAuditService;
 import com.dauducbach.clone.modules.user.dto.request.UserUniversityRequest;
 import com.dauducbach.clone.modules.user.entity.UserUniversity;
 import com.dauducbach.clone.modules.user.repositoty.UserUniversityRepository;
 import com.dauducbach.clone.utils.RedisUtil;
+import com.google.gson.JsonObject;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
@@ -27,6 +31,8 @@ public class UserUniversityService {
     UserUniversityRepository userUniversityRepository;
     R2dbcEntityTemplate r2dbcEntityTemplate;
     ReactiveRedisTemplate<String, String> reactiveRedisStringTemplate;
+    UserAuditService userAuditService;
+    UserProfileVectorEventPublisher userProfileVectorEventPublisher;
 
     private static final Logger log = LoggerFactory.getLogger(UserUniversityService.class);
     private static final String CACHE_PREFIX = "user_university:";
@@ -59,6 +65,9 @@ public class UserUniversityService {
                         String.format("Save user university failed for userId=%s", request.getUserId()),
                         throwable
                 ))
+                .flatMap(savedUniversity -> saveProfileComponentAudit(savedUniversity.getUserId(), "USER_UNIVERSITY", savedUniversity.getId(), "CREATE").thenReturn(savedUniversity))
+                .flatMap(savedUniversity -> publishProfileVectorRefresh(savedUniversity.getUserId(), "USER_UNIVERSITY", "CREATE", savedUniversity.getId())
+                        .thenReturn(savedUniversity))
                 .doOnSuccess(savedUniversity -> {
                     log.info("|UserUniversityService|createUserUniversity|created|id={}", savedUniversity.getId());
                     String jsonString = RedisUtil.serialize(savedUniversity);
@@ -71,6 +80,29 @@ public class UserUniversityService {
     }
 
     /// Lấy UserUniversity theo ID
+    private Mono<Void> saveProfileComponentAudit(String userId, String component, String resourceId, String operation) {
+        JsonObject metadata = new JsonObject();
+        metadata.addProperty("component", component);
+        metadata.addProperty("operation", operation);
+        return userAuditService.save(AuditLogs.builder()
+                .actorId(userId)
+                .action(AuditActionType.UPDATE_USER_DETAILS)
+                .resourceType(component)
+                .resourceId(resourceId)
+                .status("SUCCESS")
+                .metadata(metadata.toString())
+                .build());
+    }
+
+    private Mono<Void> publishProfileVectorRefresh(String userId, String source, String operation, String resourceId) {
+        return userProfileVectorEventPublisher.publishRefreshEvent(userId, source, operation, resourceId)
+                .onErrorResume(error -> {
+                    log.warn("|UserUniversityService|publishProfileVectorRefresh|failed|userId={}|source={}|operation={}|error={}",
+                            userId, source, operation, error.getMessage());
+                    return Mono.empty();
+                });
+    }
+
     public Mono<UserUniversity> getUserUniversityById(String id) {
         log.info("|UserUniversityService|getUserUniversityById|id={}", id);
 

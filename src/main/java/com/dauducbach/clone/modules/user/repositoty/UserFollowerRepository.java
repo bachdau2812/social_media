@@ -16,6 +16,9 @@ public interface UserFollowerRepository extends ReactiveCrudRepository<UserFollo
     @Query("SELECT * FROM user_follower WHERE following_id = :userId ORDER BY created_at DESC LIMIT :limit OFFSET :offset")
     Flux<UserFollower> findFollowersByUserId(String userId, int limit, int offset);
 
+    @Query("SELECT follower_id FROM user_follower WHERE following_id = :userId ORDER BY created_at DESC LIMIT :limit OFFSET :offset")
+    Flux<String> findFollowerIdsByUserId(String userId, int limit, int offset);
+
     // Get all users that a user is following
     @Query("SELECT * FROM user_follower WHERE follower_id = :userId ORDER BY created_at DESC LIMIT :limit OFFSET :offset")
     Flux<UserFollower> findFollowingByUserId(String userId, int limit, int offset);

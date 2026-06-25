@@ -3,7 +3,7 @@ package com.dauducbach.clone.modules.post.service;
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.commons.response.PageResponse;
-import com.dauducbach.clone.infrastructure.service.SemanticVectorSearchService;
+import com.dauducbach.clone.infrastructure.SemanticVectorSearchService;
 import com.dauducbach.clone.modules.post.repositoty.PostDetailsRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;

@@ -1,4 +1,4 @@
-package com.dauducbach.clone.infrastructure.service;
+package com.dauducbach.clone.infrastructure;
 
 import com.dauducbach.clone.modules.post.elastic.PostVector;
 import com.dauducbach.clone.modules.user.entity.UserDetailVector;

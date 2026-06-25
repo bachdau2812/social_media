@@ -32,6 +32,7 @@ The app base path is `/app` and server port is `8888`. The main package is `com.
 - Handles local credential registration/login, email verification, password reset, refresh tokens, logout, JWT verification, introspection, OAuth2 login success/failure, and social account loading.
 - Public endpoints are under `/auth/**`, `/login/**`, and `/oauth2/**`.
 - User provider constants live in `modules.auth.constant.UserProvider`.
+- `CreateUserRequest` accepts `hobbyList`; after email verification, `profile_creation_event` must carry this field so the user module can persist it into `user_details.hobby_list`.
 
 ### User
 
@@ -50,6 +51,7 @@ The app base path is `/app` and server port is `8888`. The main package is `com.
 - Search history cache score must be `last_searched_at` timestamp, not `search_count`. Submitting real search text through `/app/search` must upsert both `user_search_histories` and `search_keywords`; existing rows increment `search_count` in both tables. Global suggestions are public only when `search_keywords.user_count >= 3`.
 - Jamendo import only accepts `api.jamendo.com` HTTP(S) URLs, parses the `results` array, skips existing track ids, uploads audio to Cloudinary, stores `Musics.songUrl` from Cloudinary `secure_url`, and records uploaded audio in `media` with `owner_type = MUSIC` and `owner_id = Jamendo track id`.
 - Jamendo import should be resilient per track: one failed download/upload/save must increase `failedCount` without failing the whole batch.
+- User vector creation for a newly registered user must use the profile snapshot from the creation event. Only profile update refreshes should query DB profile component tables such as job, high school, and university.
 
 ### Cloudinary Media URL
 
@@ -78,6 +80,8 @@ The app base path is `/app` and server port is `8888`. The main package is `com.
 ### Infrastructure
 
 - `UserAuditService` and `UserActivities` capture cross-module user activity/audit style data.
+- Audit logging lives in the audit module and writes `audit_logs` through `UserAuditService`. Existing domain success events (`post_upload_event`, `comment_success_event`, `like_event`, `follow_event`, `un_follow_event`, `avatar_update_event`, `story_success_event`, auth password events, and profile creation) should be consumed by audit listeners; flows without a dedicated event should build `AuditLogs` and call `UserAuditService.save`.
+- Audit failures are fail-soft: log the persistence error but do not break the primary user action. Audit metadata must never contain passwords, raw tokens, OTP/code values, secrets, or full unsafe payloads.
 - Elasticsearch vector entities exist for posts and user details.
 - Semantic search uses `GetVectorEmbedding` first, then Elasticsearch `script_score` cosine similarity with threshold `0.80`; Elasticsearch query scores add `+1.0`, so the minimum score is `1.80`. User semantic search reads `user_long_term_vector` in `user_detail_vector`; post semantic search reads `content_vector` in `post_vector`.
 

@@ -4,6 +4,9 @@ import com.dauducbach.clone.commons.constant.EntityType;
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.commons.response.PageResponse;
+import com.dauducbach.clone.modules.audit.dto.AuditActionType;
+import com.dauducbach.clone.modules.audit.entity.AuditLogs;
+import com.dauducbach.clone.modules.audit.service.UserAuditService;
 import com.dauducbach.clone.modules.post.dto.event.LikeEventPayload;
 import com.dauducbach.clone.modules.post.dto.request.LikeRequest;
 import com.dauducbach.clone.modules.post.dto.response.LikeToggleResponse;
@@ -53,6 +56,7 @@ public class LikeService {
     KafkaSender<String, String> kafkaSender;
     ReactiveRedisTemplate<String, String> reactiveRedisStringTemplate;
     R2dbcEntityTemplate r2dbcEntityTemplate;
+    UserAuditService userAuditService;
 
     // Luồng like phải kiểm tra target trước khi ghi DB để không tạo like mồ côi.
     public Mono<LikeToggleResponse> like(String actorId, LikeRequest request) {
@@ -83,6 +87,7 @@ public class LikeService {
         return ensurePostLikeCountCache(targetId, targetType)
                 .then(likeRepository.delete(existing))
                 .then(updatePostLikeCountCache(targetId, targetType, -1))
+                .then(saveUnlikeAudit(existing.getActorId(), targetId, targetType))
                 .thenReturn(new LikeToggleResponse(targetId, targetType, false, existing.getId()))
                 .doOnSuccess(response -> log.info("|LikeService|unlikeExisting|completed|likeId={}|targetId={}|targetType={}",
                         existing.getId(), targetId, targetType));
@@ -236,6 +241,22 @@ public class LikeService {
     }
 
     // Chuẩn hóa targetType tại biên service để toàn bộ repository query dùng cùng một format.
+    private Mono<Void> saveUnlikeAudit(String actorId, String targetId, String targetType) {
+        AuditActionType action = EntityType.COMMENT.name().equals(targetType)
+                ? AuditActionType.UNLIKE_COMMENT
+                : AuditActionType.UNLIKE_POST;
+        JsonObject metadata = new JsonObject();
+        metadata.addProperty("targetType", targetType);
+        return userAuditService.save(AuditLogs.builder()
+                .actorId(actorId)
+                .action(action)
+                .resourceType(targetType)
+                .resourceId(targetId)
+                .status("SUCCESS")
+                .metadata(metadata.toString())
+                .build());
+    }
+
     private Mono<Long> getPostLikeCountFromCache(String postId) {
         String cacheKey = postLikeCountKey(postId);
         return readLongCache(cacheKey)

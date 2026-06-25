@@ -1,6 +1,8 @@
 package com.dauducbach.clone.modules.user.service;
 
 import com.cloudinary.Cloudinary;
+import com.dauducbach.clone.modules.audit.entity.AuditLogs;
+import com.dauducbach.clone.modules.audit.service.UserAuditService;
 import com.dauducbach.clone.modules.post.constant.OwnerType;
 import com.dauducbach.clone.modules.post.entity.Media;
 import com.dauducbach.clone.modules.post.service.MediaService;
@@ -35,6 +37,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -57,6 +60,8 @@ class MediaForProfileTest {
     Cloudinary cloudinary;
     @Mock
     MediaScanUtils mediaScanUtils;
+    @Mock
+    UserAuditService userAuditService;
 
     @Test
     void uploadAvatarPublishesScanEventWithResolvedPublicId() {
@@ -170,6 +175,7 @@ class MediaForProfileTest {
     }
 
     private MediaForProfile newService() {
+        lenient().when(userAuditService.save(any(AuditLogs.class))).thenReturn(Mono.empty());
         return new MediaForProfile(
                 userDetailsRepository,
                 musicsRepository,
@@ -179,7 +185,8 @@ class MediaForProfileTest {
                 kafkaSender,
                 r2dbcEntityTemplate,
                 cloudinary,
-                mediaScanUtils
+                mediaScanUtils,
+                userAuditService
         );
     }
 }

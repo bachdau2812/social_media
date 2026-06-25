@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 import lombok.experimental.FieldDefaults;
 
 import java.util.Date;
+import java.util.List;
 
 @Data
 @NoArgsConstructor
@@ -30,6 +31,7 @@ public class CreateUserRequest {
     String sex;
     String livingIn;
     String hometown;
+    List<String> hobbyList;
 
     @Builder.Default
     String role = "USER";

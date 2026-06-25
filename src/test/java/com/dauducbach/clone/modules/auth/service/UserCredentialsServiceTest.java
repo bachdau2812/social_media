@@ -4,6 +4,7 @@ import com.dauducbach.clone.modules.auth.dto.request.CreateUserRequest;
 import com.dauducbach.clone.modules.auth.dto.request.EmailVerifyRequest;
 import com.dauducbach.clone.modules.auth.entity.UserCredentials;
 import com.dauducbach.clone.modules.auth.repository.UserCredentialsRepository;
+import com.dauducbach.clone.modules.audit.service.UserAuditService;
 import com.dauducbach.clone.utils.GsonUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.gson.JsonObject;
@@ -23,6 +24,8 @@ import reactor.core.publisher.Mono;
 import reactor.kafka.sender.KafkaSender;
 import reactor.kafka.sender.SenderRecord;
 import reactor.test.StepVerifier;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -45,6 +48,8 @@ class UserCredentialsServiceTest {
     UserCredentialsRepository userCredentialsRepository;
     @Mock
     ReactiveInsertOperation.ReactiveInsert<UserCredentials> insertSpec;
+    @Mock
+    UserAuditService userAuditService;
 
     @Test
     void emailVerifyAndCreateUserPublishesProfileEventWithInsertedUserId() {
@@ -53,6 +58,7 @@ class UserCredentialsServiceTest {
                 .username("bach")
                 .password("password")
                 .email("bach@example.com")
+                .hobbyList(List.of("music", "backend"))
                 .role("USER")
                 .build();
         UserCredentials createdUser = UserCredentials.builder()
@@ -93,6 +99,7 @@ class UserCredentialsServiceTest {
         JsonObject payload = GsonUtils.fromString(producerRecord.value());
         assertThat(payload.get("userId").getAsString()).isEqualTo(expectedUserId);
         assertThat(payload.get("username").getAsString()).isEqualTo("bach");
+        assertThat(payload.getAsJsonArray("hobbyList")).hasSize(2);
     }
 
     private UserCredentialsService newService() {
@@ -102,7 +109,8 @@ class UserCredentialsServiceTest {
                 reactiveRedisTemplate,
                 kafkaSender,
                 userCredentialsRepository,
-                new ObjectMapper()
+                new ObjectMapper(),
+                userAuditService
         );
     }
 }

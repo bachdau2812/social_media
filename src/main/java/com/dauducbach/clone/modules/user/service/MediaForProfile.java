@@ -5,6 +5,9 @@ import com.cloudinary.utils.ObjectUtils;
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.commons.response.PageResponse;
+import com.dauducbach.clone.modules.audit.dto.AuditActionType;
+import com.dauducbach.clone.modules.audit.entity.AuditLogs;
+import com.dauducbach.clone.modules.audit.service.UserAuditService;
 import com.dauducbach.clone.modules.post.constant.OwnerType;
 import com.dauducbach.clone.modules.post.entity.Media;
 import com.dauducbach.clone.modules.post.service.MediaService;
@@ -69,6 +72,7 @@ public class MediaForProfile {
     R2dbcEntityTemplate r2dbcEntityTemplate;
     Cloudinary cloudinary;
     MediaScanUtils mediaScanUtils;
+    UserAuditService userAuditService;
 
     public Mono<ProfileMediaUploadResponse> uploadAvatar(AvatarUploadRequest request) {
         String userId = normalizeRequired(request.userId(), "userId");
@@ -148,6 +152,7 @@ public class MediaForProfile {
                                         music.getSlugName(),
                                         music.getSongUrl(),
                                         music.getDisplayImages())
+                                .then(saveProfileMusicAudit(userId, userMusic, music))
                                 .thenReturn(userMusic)))
                 .doOnSuccess(userMusic -> log.info("|MediaForProfile|selectProfileMusic|saved|userId={}|musicId={}|userMusicId={}",
                         userId, userMusic.getMusicId(), userMusic.getId()))
@@ -272,7 +277,8 @@ public class MediaForProfile {
     private Mono<Void> handleAvatarFailed(String userId, String avatarUrl, String publicId) {
         log.warn("|MediaForProfile|handleAvatarFailed|userId={}|publicId={}", userId, publicId);
         return deleteCloudinaryMedia(publicId)
-                .then(sendProfileFailureSse(userId, "avatar_upload_event", userId, OwnerType.AVATAR, avatarUrl, "Avatar rejected due to invalid media"));
+                .then(sendProfileFailureSse(userId, "avatar_upload_event", userId, OwnerType.AVATAR, avatarUrl, "Avatar rejected due to invalid media"))
+                .then(saveProfileMediaAudit(userId, AuditActionType.UPLOAD_AVATAR, "AVATAR", userId, "FAILURE", publicId));
     }
 
     private Mono<Void> handleStorySuccess(String storyId, String userId, String mediaUrl, String publicId) {
@@ -298,7 +304,42 @@ public class MediaForProfile {
                     return userStoriesRepository.save(story);
                 })
                 .then(deleteCloudinaryMedia(publicId))
-                .then(sendProfileFailureSse(userId, "story_upload_event", storyId, OwnerType.STORY, mediaUrl, "Story rejected due to invalid media"));
+                .then(sendProfileFailureSse(userId, "story_upload_event", storyId, OwnerType.STORY, mediaUrl, "Story rejected due to invalid media"))
+                .then(saveProfileMediaAudit(userId, AuditActionType.UPLOAD_STORY, "STORY", storyId, "FAILURE", publicId));
+    }
+
+    private Mono<Void> saveProfileMediaAudit(String userId,
+                                             AuditActionType action,
+                                             String resourceType,
+                                             String resourceId,
+                                             String status,
+                                             String publicId) {
+        JsonObject metadata = new JsonObject();
+        metadata.addProperty("publicId", publicId);
+        metadata.addProperty("reason", "MEDIA_SCAN_REJECTED");
+        return userAuditService.save(AuditLogs.builder()
+                .actorId(userId)
+                .action(action)
+                .resourceType(resourceType)
+                .resourceId(resourceId)
+                .status(status)
+                .metadata(metadata.toString())
+                .build());
+    }
+
+    private Mono<Void> saveProfileMusicAudit(String userId, UserMusics userMusic, Musics music) {
+        JsonObject metadata = new JsonObject();
+        metadata.addProperty("musicId", music.getId());
+        metadata.addProperty("slugName", music.getSlugName());
+        metadata.addProperty("displayName", music.getDisplayName());
+        return userAuditService.save(AuditLogs.builder()
+                .actorId(userId)
+                .action(AuditActionType.SELECT_PROFILE_MUSIC)
+                .resourceType("FEATURE_MUSIC")
+                .resourceId(userMusic.getId())
+                .status("SUCCESS")
+                .metadata(metadata.toString())
+                .build());
     }
 
     private Mono<Void> sendAvatarScanEvent(String userId, String avatarUrl, String publicId) {

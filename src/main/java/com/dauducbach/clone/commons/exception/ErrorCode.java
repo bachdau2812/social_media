@@ -114,6 +114,9 @@ public enum ErrorCode {
     LIKE_DELETE_FAILED(1135, "Delete like failed", HttpStatus.INTERNAL_SERVER_ERROR),
     LIKE_FETCH_FAILED(1136, "Fetch like failed", HttpStatus.INTERNAL_SERVER_ERROR),
 
+    FEED_REQUEST_INVALID(1200, "Feed request is invalid", HttpStatus.BAD_REQUEST),
+    FEED_LONG_TERM_VECTOR_REFRESH_FAILED(1201, "Refresh feed long term vector failed", HttpStatus.INTERNAL_SERVER_ERROR),
+
     KAFKA_SEND_MESSAGE_FOR_EVENT_FAIL(3000, "Send message fail", HttpStatus.BAD_REQUEST),
 
     REFRESH_TOKEN_INVALID(4000, "User haven't had valid refresh token", HttpStatus.FORBIDDEN),

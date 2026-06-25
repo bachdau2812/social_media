@@ -2,6 +2,9 @@ package com.dauducbach.clone.modules.user.service;
 
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
+import com.dauducbach.clone.modules.audit.dto.AuditActionType;
+import com.dauducbach.clone.modules.audit.entity.AuditLogs;
+import com.dauducbach.clone.modules.audit.service.UserAuditService;
 import com.dauducbach.clone.modules.user.dto.request.UserDetailsUpdateRequest;
 import com.dauducbach.clone.modules.user.entity.UserDetails;
 import com.dauducbach.clone.modules.user.repositoty.UserDetailsRepository;
@@ -31,6 +34,8 @@ public class UserDetailsService {
     UserDetailsRepository userDetailsRepository;
     R2dbcEntityTemplate r2dbcEntityTemplate;
     ReactiveRedisTemplate<String, String> reactiveRedisStringTemplate;
+    UserAuditService userAuditService;
+    UserProfileVectorEventPublisher userProfileVectorEventPublisher;
 
     private static final Logger log = LoggerFactory.getLogger(UserDetailsService.class);
     private static final String USER_DETAILS_CACHE_PREFIX = "user_details_info:";
@@ -49,7 +54,7 @@ public class UserDetailsService {
                 .livingIn(KafkaUtils.extractString(payloadJson, "livingIn"))
                 .sex(KafkaUtils.extractString(payloadJson, "sex"))
                 .build();
-        userDetails.setHobbyList(KafkaUtils.extractStringList(payloadJson, "hobbieList"));
+        userDetails.setHobbyList(extractHobbyList(payloadJson));
         log.info("|UserDetailsService|createUserDetails|received|userId={}|username={}",
                 userDetails.getUserId(), userDetails.getUsername());
 
@@ -73,6 +78,8 @@ public class UserDetailsService {
                         String.format("Save user details failed for userId=%s", userDetails.getUserId()),
                         throwable
                 ))
+                .flatMap(savedUserDetails -> publishProfileVectorRefreshForCreate(savedUserDetails)
+                        .thenReturn(savedUserDetails))
                 .doOnSuccess(savedUserDetails -> {
                     log.info("|UserDetailsService|insertUserDetails|saved userDetails to database|userId={}", savedUserDetails.getUserId());
                     // Cache the saved user details as JSON string
@@ -130,6 +137,9 @@ public class UserDetailsService {
 
                     return userDetailsRepository.save(existingUserDetails);
                 })
+                .flatMap(updated -> saveUpdateUserDetailsAudit(request, updated.getUserId()).thenReturn(updated))
+                .flatMap(updated -> publishProfileVectorRefresh(updated.getUserId(), "USER_DETAILS", "UPDATE", updated.getUserId())
+                        .thenReturn(updated))
                 .onErrorMap(throwable -> throwable instanceof AppException
                         ? throwable
                         : new AppException(
@@ -150,6 +160,56 @@ public class UserDetailsService {
                     }
                 })
                 .doOnError(error -> log.error("|UserDetailsService|updateUserDetails|failed to update userDetails|error={}", error.getMessage()));
+    }
+
+    private Mono<Void> saveUpdateUserDetailsAudit(UserDetailsUpdateRequest request, String userId) {
+        JsonObject metadata = new JsonObject();
+        metadata.addProperty("usernameChanged", request.getUsername() != null && !request.getUsername().isBlank());
+        metadata.addProperty("dobChanged", request.getDob() != null);
+        metadata.addProperty("hometownChanged", request.getHomeTown() != null && !request.getHomeTown().isBlank());
+        metadata.addProperty("livingInChanged", request.getLivingIn() != null && !request.getLivingIn().isBlank());
+        metadata.addProperty("sexChanged", request.getSex() != null && !request.getSex().isBlank());
+        metadata.addProperty("hobbyChanged", request.getHobbieList() != null && !request.getHobbieList().isEmpty());
+
+        return userAuditService.save(AuditLogs.builder()
+                .actorId(userId)
+                .action(AuditActionType.UPDATE_USER_DETAILS)
+                .resourceType("USER_DETAILS")
+                .resourceId(userId)
+                .status("SUCCESS")
+                .metadata(metadata.toString())
+                .build());
+    }
+
+    private java.util.List<String> extractHobbyList(JsonObject payloadJson) {
+        java.util.List<String> hobbyList = KafkaUtils.extractStringList(payloadJson, "hobbyList");
+        if (!hobbyList.isEmpty()) {
+            return hobbyList;
+        }
+        return KafkaUtils.extractStringList(payloadJson, "hobbieList");
+    }
+
+    private Mono<Void> publishProfileVectorRefreshForCreate(UserDetails userDetails) {
+        return userProfileVectorEventPublisher.publishRefreshEventForCreatedUser(
+                        userDetails.getUserId(),
+                        "USER_DETAILS",
+                        "CREATE",
+                        userDetails.getUserId(),
+                        userDetails)
+                .onErrorResume(error -> {
+                    log.warn("|UserDetailsService|publishProfileVectorRefreshForCreate|failed|userId={}|error={}",
+                            userDetails.getUserId(), error.getMessage());
+                    return Mono.empty();
+                });
+    }
+
+    private Mono<Void> publishProfileVectorRefresh(String userId, String source, String operation, String resourceId) {
+        return userProfileVectorEventPublisher.publishRefreshEvent(userId, source, operation, resourceId)
+                .onErrorResume(error -> {
+                    log.warn("|UserDetailsService|publishProfileVectorRefresh|failed|userId={}|source={}|operation={}|error={}",
+                            userId, source, operation, error.getMessage());
+                    return Mono.empty();
+                });
     }
 
     /// Get UserDetails by userId with caching

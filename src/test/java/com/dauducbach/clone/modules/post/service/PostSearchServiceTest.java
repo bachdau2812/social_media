@@ -1,6 +1,6 @@
 package com.dauducbach.clone.modules.post.service;
 
-import com.dauducbach.clone.infrastructure.service.SemanticVectorSearchService;
+import com.dauducbach.clone.infrastructure.SemanticVectorSearchService;
 import com.dauducbach.clone.modules.post.repositoty.PostDetailsRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

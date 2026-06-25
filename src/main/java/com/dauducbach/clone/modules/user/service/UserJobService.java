@@ -2,11 +2,15 @@ package com.dauducbach.clone.modules.user.service;
 
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
+import com.dauducbach.clone.modules.audit.dto.AuditActionType;
+import com.dauducbach.clone.modules.audit.entity.AuditLogs;
+import com.dauducbach.clone.modules.audit.service.UserAuditService;
 import com.dauducbach.clone.modules.user.dto.request.UserJobRequest;
 import com.dauducbach.clone.modules.user.dto.request.UserJobUpdateRequest;
 import com.dauducbach.clone.modules.user.entity.UserJob;
 import com.dauducbach.clone.modules.user.repositoty.UserJobRepository;
 import com.dauducbach.clone.utils.RedisUtil;
+import com.google.gson.JsonObject;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
@@ -29,6 +33,8 @@ public class UserJobService {
     UserJobRepository userJobRepository;
     R2dbcEntityTemplate r2dbcEntityTemplate;
     ReactiveRedisTemplate<String, String> reactiveRedisStringTemplate;
+    UserAuditService userAuditService;
+    UserProfileVectorEventPublisher userProfileVectorEventPublisher;
 
     private static final Logger log = LoggerFactory.getLogger(UserJobService.class);
     private static final String CACHE_PREFIX = "user_job:";
@@ -60,6 +66,8 @@ public class UserJobService {
                         String.format("Save user job failed for userId=%s", request.getUserId()),
                         throwable
                 ))
+                .flatMap(savedJob -> saveProfileComponentAudit(savedJob.getUserId(), "USER_JOB", savedJob.getId(), "CREATE").thenReturn(savedJob))
+                .flatMap(savedJob -> publishProfileVectorRefresh(savedJob.getUserId(), "USER_JOB", "CREATE", savedJob.getId()).thenReturn(savedJob))
                 .doOnSuccess(savedJob -> {
                     log.info("|UserJobService|createUserJob|created user job|id={}", savedJob.getId());
                     // Cache the new job
@@ -104,6 +112,8 @@ public class UserJobService {
 
                     return userJobRepository.save(existingJob);
                 })
+                .flatMap(updatedJob -> saveProfileComponentAudit(updatedJob.getUserId(), "USER_JOB", updatedJob.getId(), "UPDATE").thenReturn(updatedJob))
+                .flatMap(updatedJob -> publishProfileVectorRefresh(updatedJob.getUserId(), "USER_JOB", "UPDATE", updatedJob.getId()).thenReturn(updatedJob))
                 .onErrorMap(throwable -> throwable instanceof AppException
                         ? throwable
                         : new AppException(
@@ -125,6 +135,29 @@ public class UserJobService {
     }
 
     /// Lấy UserJob theo ID
+    private Mono<Void> saveProfileComponentAudit(String userId, String component, String resourceId, String operation) {
+        JsonObject metadata = new JsonObject();
+        metadata.addProperty("component", component);
+        metadata.addProperty("operation", operation);
+        return userAuditService.save(AuditLogs.builder()
+                .actorId(userId)
+                .action(AuditActionType.UPDATE_USER_DETAILS)
+                .resourceType(component)
+                .resourceId(resourceId)
+                .status("SUCCESS")
+                .metadata(metadata.toString())
+                .build());
+    }
+
+    private Mono<Void> publishProfileVectorRefresh(String userId, String source, String operation, String resourceId) {
+        return userProfileVectorEventPublisher.publishRefreshEvent(userId, source, operation, resourceId)
+                .onErrorResume(error -> {
+                    log.warn("|UserJobService|publishProfileVectorRefresh|failed|userId={}|source={}|operation={}|error={}",
+                            userId, source, operation, error.getMessage());
+                    return Mono.empty();
+                });
+    }
+
     public Mono<UserJob> getUserJobById(String id) {
         log.info("|UserJobService|getUserJobById|id={}", id);
 

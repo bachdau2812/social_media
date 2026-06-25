@@ -31,6 +31,14 @@ public interface PostDetailsRepository extends ReactiveCrudRepository<PostDetail
     Flux<String> searchApprovedPostIds(String query, Pageable pageable);
 
     @Query("""
+            SELECT * FROM post_details
+            WHERE validate_status = 'APPROVED'
+            ORDER BY created_at DESC, post_id DESC
+            LIMIT :limit
+            """)
+    Flux<PostDetails> findRecentApprovedPosts(int limit);
+
+    @Query("""
             SELECT COUNT(*) FROM post_details
             WHERE validate_status = 'APPROVED'
               AND (

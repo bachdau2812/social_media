@@ -2,6 +2,9 @@ package com.dauducbach.clone.modules.auth.service;
 
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
+import com.dauducbach.clone.modules.audit.dto.AuditActionType;
+import com.dauducbach.clone.modules.audit.entity.AuditLogs;
+import com.dauducbach.clone.modules.audit.service.UserAuditService;
 import com.dauducbach.clone.modules.auth.dto.request.CreateUserRequest;
 import com.dauducbach.clone.modules.auth.dto.request.EmailVerifyRequest;
 import com.dauducbach.clone.modules.auth.entity.UserCredentials;
@@ -38,6 +41,7 @@ public class UserCredentialsService {
     KafkaSender<String, String> kafkaSender;
     UserCredentialsRepository userCredentialsRepository;
     ObjectMapper objectMapper;
+    UserAuditService userAuditService;
 
     public Mono<Void> preRegister(CreateUserRequest request) {
         logger.info("|UserCredentialsService|preRegister|request={}", request.toString());
@@ -153,7 +157,15 @@ public class UserCredentialsService {
                             .then(reactiveRedisTemplate.opsForValue().set("forget_password:" + email, code, Duration.ofMinutes(2)));
 
                 })
-                .thenReturn("Check email and send code success");
+                .thenReturn("Check email and send code success")
+                .onErrorResume(error -> saveAudit(
+                        email,
+                        AuditActionType.FORGET_PASSWORD,
+                        "PASSWORD",
+                        email,
+                        "FAILURE",
+                        emailMetadata(email, error.getMessage())
+                ).then(Mono.error(error)));
     }
 
     @Transactional
@@ -200,7 +212,15 @@ public class UserCredentialsService {
                                         })
                                         .then(Mono.just("New password was set and sent to your email successfully"));
                             });
-                });
+                })
+                .onErrorResume(error -> saveAudit(
+                        request.getEmail(),
+                        AuditActionType.RESET_PASSWORD,
+                        "PASSWORD",
+                        request.getEmail(),
+                        "FAILURE",
+                        emailMetadata(request.getEmail(), error.getMessage())
+                ).then(Mono.error(error)));
     }
 
     @Transactional
@@ -247,7 +267,15 @@ public class UserCredentialsService {
                                         })
                                         .then(Mono.just("New password was set and sent to your email successfully"));
                             });
-                });
+                })
+                .onErrorResume(error -> saveAudit(
+                        request.getEmail(),
+                        AuditActionType.RESET_PASSWORD,
+                        "PASSWORD",
+                        request.getEmail(),
+                        "FAILURE",
+                        emailMetadata(request.getEmail(), error.getMessage())
+                ).then(Mono.error(error)));
     }
 
     /// Utils
@@ -272,5 +300,31 @@ public class UserCredentialsService {
                     return Mono.error(new AppException(ErrorCode.CODE_CREATION_FAILED));
                 });
 
+    }
+
+    private Mono<Void> saveAudit(String actorId,
+                                 AuditActionType action,
+                                 String resourceType,
+                                 String resourceId,
+                                 String status,
+                                 JsonObject metadata) {
+        return userAuditService.save(AuditLogs.builder()
+                .actorId(actorId)
+                .actorType("EMAIL")
+                .action(action)
+                .resourceType(resourceType)
+                .resourceId(resourceId)
+                .status(status)
+                .metadata(metadata == null ? null : metadata.toString())
+                .build());
+    }
+
+    private JsonObject emailMetadata(String email, String reason) {
+        JsonObject metadata = new JsonObject();
+        metadata.addProperty("email", email);
+        if (reason != null && !reason.isBlank()) {
+            metadata.addProperty("reason", reason);
+        }
+        return metadata;
     }
 }

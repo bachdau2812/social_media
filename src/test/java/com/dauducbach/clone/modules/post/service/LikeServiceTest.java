@@ -2,6 +2,8 @@ package com.dauducbach.clone.modules.post.service;
 
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
+import com.dauducbach.clone.modules.audit.entity.AuditLogs;
+import com.dauducbach.clone.modules.audit.service.UserAuditService;
 import com.dauducbach.clone.modules.post.dto.request.LikeRequest;
 import com.dauducbach.clone.modules.post.entity.Like;
 import com.dauducbach.clone.modules.post.entity.PostDetails;
@@ -52,6 +54,8 @@ class LikeServiceTest {
     R2dbcEntityTemplate r2dbcEntityTemplate;
     @Mock
     ReactiveInsertOperation.ReactiveInsert<Like> likeInsertSpec;
+    @Mock
+    UserAuditService userAuditService;
 
     @Test
     void likeSavesRecordAndPublishesEvent() {
@@ -193,7 +197,8 @@ class LikeServiceTest {
     }
 
     private LikeService newService() {
-        return new LikeService(likeRepository, postDetailsRepository, commentRepository, kafkaSender, reactiveRedisStringTemplate, r2dbcEntityTemplate);
+        lenient().when(userAuditService.save(any(AuditLogs.class))).thenReturn(Mono.empty());
+        return new LikeService(likeRepository, postDetailsRepository, commentRepository, kafkaSender, reactiveRedisStringTemplate, r2dbcEntityTemplate, userAuditService);
     }
 
     private void mockPostLikeCacheUpdate(long currentCount, long updatedCount) {

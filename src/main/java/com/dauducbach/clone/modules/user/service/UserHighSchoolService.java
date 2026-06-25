@@ -2,10 +2,14 @@ package com.dauducbach.clone.modules.user.service;
 
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
+import com.dauducbach.clone.modules.audit.dto.AuditActionType;
+import com.dauducbach.clone.modules.audit.entity.AuditLogs;
+import com.dauducbach.clone.modules.audit.service.UserAuditService;
 import com.dauducbach.clone.modules.user.dto.request.UserHighSchoolRequest;
 import com.dauducbach.clone.modules.user.entity.UserHighSchool;
 import com.dauducbach.clone.modules.user.repositoty.UserHighSchoolRepository;
 import com.dauducbach.clone.utils.RedisUtil;
+import com.google.gson.JsonObject;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
@@ -28,6 +32,8 @@ public class UserHighSchoolService {
     UserHighSchoolRepository userHighSchoolRepository;
     R2dbcEntityTemplate r2dbcEntityTemplate;
     ReactiveRedisTemplate<String, String> reactiveRedisStringTemplate;
+    UserAuditService userAuditService;
+    UserProfileVectorEventPublisher userProfileVectorEventPublisher;
 
     private static final Logger log = LoggerFactory.getLogger(UserHighSchoolService.class);
     private static final String CACHE_PREFIX = "user_high_school:";
@@ -59,6 +65,9 @@ public class UserHighSchoolService {
                         String.format("Save user high school failed for userId=%s", request.getUserId()),
                         throwable
                 ))
+                .flatMap(savedHighSchool -> saveProfileComponentAudit(savedHighSchool.getUserId(), "USER_HIGH_SCHOOL", savedHighSchool.getId(), "CREATE").thenReturn(savedHighSchool))
+                .flatMap(savedHighSchool -> publishProfileVectorRefresh(savedHighSchool.getUserId(), "USER_HIGH_SCHOOL", "CREATE", savedHighSchool.getId())
+                        .thenReturn(savedHighSchool))
                 .publishOn(Schedulers.boundedElastic())
                 .doOnSuccess(savedHighSchool -> {
                     log.info("|UserHighSchoolService|createUserHighSchool|created|id={}", savedHighSchool.getId());
@@ -72,6 +81,29 @@ public class UserHighSchoolService {
     }
 
     /// Lấy UserHighSchool theo ID
+    private Mono<Void> saveProfileComponentAudit(String userId, String component, String resourceId, String operation) {
+        JsonObject metadata = new JsonObject();
+        metadata.addProperty("component", component);
+        metadata.addProperty("operation", operation);
+        return userAuditService.save(AuditLogs.builder()
+                .actorId(userId)
+                .action(AuditActionType.UPDATE_USER_DETAILS)
+                .resourceType(component)
+                .resourceId(resourceId)
+                .status("SUCCESS")
+                .metadata(metadata.toString())
+                .build());
+    }
+
+    private Mono<Void> publishProfileVectorRefresh(String userId, String source, String operation, String resourceId) {
+        return userProfileVectorEventPublisher.publishRefreshEvent(userId, source, operation, resourceId)
+                .onErrorResume(error -> {
+                    log.warn("|UserHighSchoolService|publishProfileVectorRefresh|failed|userId={}|source={}|operation={}|error={}",
+                            userId, source, operation, error.getMessage());
+                    return Mono.empty();
+                });
+    }
+
     public Mono<UserHighSchool> getUserHighSchoolById(String id) {
         log.info("|UserHighSchoolService|getUserHighSchoolById|id={}", id);
 

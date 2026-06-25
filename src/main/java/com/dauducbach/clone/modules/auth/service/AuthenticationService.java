@@ -2,6 +2,9 @@ package com.dauducbach.clone.modules.auth.service;
 
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
+import com.dauducbach.clone.modules.audit.dto.AuditActionType;
+import com.dauducbach.clone.modules.audit.entity.AuditLogs;
+import com.dauducbach.clone.modules.audit.service.UserAuditService;
 import com.dauducbach.clone.modules.auth.dto.request.IntrospectRequest;
 import com.dauducbach.clone.modules.auth.dto.response.AuthenticationResponse;
 import com.dauducbach.clone.modules.auth.dto.request.LoginRequest;
@@ -11,6 +14,7 @@ import com.dauducbach.clone.modules.auth.dto.response.IntrospectResponse;
 import com.dauducbach.clone.modules.auth.entity.RefreshTokens;
 import com.dauducbach.clone.modules.auth.repository.RefreshTokensRepository;
 import com.dauducbach.clone.modules.auth.repository.UserCredentialsRepository;
+import com.google.gson.JsonObject;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
@@ -40,16 +44,31 @@ public class AuthenticationService {
     PasswordEncoder passwordEncoder;
     R2dbcEntityTemplate r2dbcEntityTemplate;
     ReactiveRedisTemplate<String, String> redisTemplate;
+    UserAuditService userAuditService;
 
     public Mono<AuthenticationResponse> login(LoginRequest loginRequest) {
         logger.info("|AuthenticationService|login|request={}", loginRequest);
 
         return userCredentialsRepository.findByUsername(loginRequest.getUsername())
-            .switchIfEmpty(Mono.error(new AppException(ErrorCode.USER_NOT_FOUND)))
+            .switchIfEmpty(Mono.defer(() -> saveAudit(
+                    loginRequest.getUsername(),
+                    AuditActionType.LOGIN,
+                    "AUTH_SESSION",
+                    loginRequest.getUsername(),
+                    "FAILURE",
+                    authMetadata(loginRequest.getUsername(), loginRequest.getDeviceInfo(), "USER_NOT_FOUND")
+            ).then(Mono.error(new AppException(ErrorCode.USER_NOT_FOUND)))))
             .flatMap(userCredentials -> {
                 if (!passwordEncoder.matches(loginRequest.getPassword(), userCredentials.getUserPassword())) {
                     logger.info("|AuthenticationService|login|password incorrect for userId={}", userCredentials.getUserId());
-                    return Mono.error(new AppException(ErrorCode.PASSWORD_INCORRECT));
+                    return saveAudit(
+                            userCredentials.getUserId(),
+                            AuditActionType.LOGIN,
+                            "AUTH_SESSION",
+                            userCredentials.getUserId(),
+                            "FAILURE",
+                            authMetadata(loginRequest.getUsername(), loginRequest.getDeviceInfo(), "PASSWORD_INCORRECT")
+                    ).then(Mono.error(new AppException(ErrorCode.PASSWORD_INCORRECT)));
                 }
 
                 logger.info("|AuthenticationService|login|valid password for userId={}", userCredentials.getUserId());
@@ -81,6 +100,14 @@ public class AuthenticationService {
                                         logger.error("|AuthenticationService|login|failed to save refresh token for userId={}, error={}", userCredentials.getUserId(), e.getMessage());
                                         return new AppException(ErrorCode.AUTHENTICATION_FAILED);
                                     })
+                                    .then(saveAudit(
+                                            userCredentials.getUserId(),
+                                            AuditActionType.LOGIN,
+                                            "AUTH_SESSION",
+                                            userCredentials.getUserId(),
+                                            "SUCCESS",
+                                            authMetadata(loginRequest.getUsername(), loginRequest.getDeviceInfo(), null)
+                                    ))
                                     .thenReturn(response);
                         });
             });
@@ -92,18 +119,39 @@ public class AuthenticationService {
         String tokenHash = RefreshTokenGenerator.sha256(request.getRefreshToken());
 
         return refreshTokensRepository.getCurrentValidToken(tokenHash, request.getDeviceInfo())
-                .switchIfEmpty(Mono.error(new AppException(ErrorCode.REFRESH_TOKEN_INVALID, "Refresh token is invalid or expired. Please login again.")))
+                .switchIfEmpty(Mono.defer(() -> saveAudit(
+                        "UNKNOWN",
+                        AuditActionType.REFRESH_TOKEN,
+                        "AUTH_SESSION",
+                        request.getDeviceInfo(),
+                        "FAILURE",
+                        authMetadata(null, request.getDeviceInfo(), "REFRESH_TOKEN_INVALID")
+                ).then(Mono.error(new AppException(ErrorCode.REFRESH_TOKEN_INVALID, "Refresh token is invalid or expired. Please login again.")))))
                 .flatMap(refreshTokenEntity -> {
                     logger.info("|AuthenticationService|refreshToken|valid refresh token found for userId={}, refreshTokenId={}", refreshTokenEntity.getUserId(), refreshTokenEntity.getId());
 
                     return userCredentialsRepository.findById(refreshTokenEntity.getUserId())
                             .doOnError(e -> logger.error("|AuthenticationService|refreshToken|failed to get user credentials for userId={}, error={}", refreshTokenEntity.getUserId(), e.getMessage()))
-                            .switchIfEmpty(Mono.error(new AppException(ErrorCode.USER_NOT_FOUND, "User not found. Please login again.")))
+                            .switchIfEmpty(Mono.defer(() -> saveAudit(
+                                    refreshTokenEntity.getUserId(),
+                                    AuditActionType.REFRESH_TOKEN,
+                                    "AUTH_SESSION",
+                                    refreshTokenEntity.getUserId(),
+                                    "FAILURE",
+                                    authMetadata(null, request.getDeviceInfo(), "USER_NOT_FOUND")
+                            ).then(Mono.error(new AppException(ErrorCode.USER_NOT_FOUND, "User not found. Please login again.")))))
                             .flatMap(userCredentials -> refreshTokensRepository.checkAndRevokedAnyActiveRefreshTokenOnThisDevice(tokenHash, request.getDeviceInfo())
                                     .flatMap(revokedCount -> {
                                         if (revokedCount == 0) {
                                             logger.info("|AuthenticationService|refreshToken|refresh token not found or already revoked for tokenHash={}, deviceInfo={}", tokenHash, request.getDeviceInfo());
-                                            return Mono.error(new AppException(ErrorCode.REFRESH_TOKEN_INVALID, "Refresh token is no longer valid. Please login again."));
+                                            return saveAudit(
+                                                    userCredentials.getUserId(),
+                                                    AuditActionType.REFRESH_TOKEN,
+                                                    "AUTH_SESSION",
+                                                    userCredentials.getUserId(),
+                                                    "FAILURE",
+                                                    authMetadata(null, request.getDeviceInfo(), "REFRESH_TOKEN_REVOKED")
+                                            ).then(Mono.error(new AppException(ErrorCode.REFRESH_TOKEN_INVALID, "Refresh token is no longer valid. Please login again.")));
                                         }
 
                                         logger.info("|AuthenticationService|refreshToken|refresh token revoked for userId={}, tokenHash={}, deviceInfo={}", userCredentials.getUserId(), tokenHash, request.getDeviceInfo());
@@ -127,11 +175,21 @@ public class AuthenticationService {
                                                     return r2dbcEntityTemplate.insert(RefreshTokens.class)
                                                             .using(newRefreshToken)
                                                             .doOnSuccess(savedToken -> logger.info("|AuthenticationService|refreshToken|new refresh token saved for userId={}, refreshTokenId={}", userCredentials.getUserId(), savedToken.getId()))
-                                                            .map(savedToken -> AuthenticationResponse.builder()
-                                                                    .accessToken(accessToken)
-                                                                    .refreshToken(newToken)
-                                                                    .deviceInfo(request.getDeviceInfo())
-                                                                    .build());
+                                                            .flatMap(savedToken -> {
+                                                                AuthenticationResponse response = AuthenticationResponse.builder()
+                                                                        .accessToken(accessToken)
+                                                                        .refreshToken(newToken)
+                                                                        .deviceInfo(request.getDeviceInfo())
+                                                                        .build();
+                                                                return saveAudit(
+                                                                        userCredentials.getUserId(),
+                                                                        AuditActionType.REFRESH_TOKEN,
+                                                                        "AUTH_SESSION",
+                                                                        userCredentials.getUserId(),
+                                                                        "SUCCESS",
+                                                                        authMetadata(null, request.getDeviceInfo(), null)
+                                                                ).thenReturn(response);
+                                                            });
                                                 });
                                     })
                                     .onErrorResume(error -> revokeAndFailRefresh(userCredentials.getUserId(), error))
@@ -145,17 +203,30 @@ public class AuthenticationService {
         String accessToken = logoutRequest.getAccessToken();
         String tokenHash = RefreshTokenGenerator.sha256(logoutRequest.getRefreshToken());
 
-        /// Revoke access token by pushing to redis with key "logout:{token}" and set expired time same as token's expired time
-        return redisTemplate.opsForValue().set("logout:" + accessToken, "REVOKED", REVOKE_ACCESS_TIME)
-                .doOnError(e -> logger.error("|AuthenticationService|logout|failed to revoke access token in redis for accessToken={}, error={}", accessToken, e.getMessage()))
-                .onErrorMap(success -> {
-                    logger.info("|AuthenticationService|logout|access token revoked in) redis for accessToken={}", accessToken);
-
-                    return new AppException(ErrorCode.LOGOUT_FAILED);
-                })
-                /// Revoke refresh token
-                .then(refreshTokensRepository.checkAndRevokedAnyActiveRefreshTokenOnThisDevice(tokenHash, logoutRequest.getDeviceInfo()))
-                .thenReturn("Logout successful");
+        return refreshTokensRepository.getCurrentValidToken(tokenHash, logoutRequest.getDeviceInfo())
+                .map(RefreshTokens::getUserId)
+                .defaultIfEmpty("UNKNOWN")
+                .flatMap(userId -> redisTemplate.opsForValue().set("logout:" + accessToken, "REVOKED", REVOKE_ACCESS_TIME)
+                        .doOnError(e -> logger.error("|AuthenticationService|logout|failed to revoke access token in redis|error={}", e.getMessage()))
+                        .onErrorMap(error -> new AppException(ErrorCode.LOGOUT_FAILED, "Logout failed", error))
+                        .then(refreshTokensRepository.checkAndRevokedAnyActiveRefreshTokenOnThisDevice(tokenHash, logoutRequest.getDeviceInfo()))
+                        .then(saveAudit(
+                                userId,
+                                AuditActionType.LOGOUT,
+                                "AUTH_SESSION",
+                                userId,
+                                "SUCCESS",
+                                authMetadata(null, logoutRequest.getDeviceInfo(), null)
+                        ))
+                        .thenReturn("Logout successful")
+                        .onErrorResume(error -> saveAudit(
+                                userId,
+                                AuditActionType.LOGOUT,
+                                "AUTH_SESSION",
+                                userId,
+                                "FAILURE",
+                                authMetadata(null, logoutRequest.getDeviceInfo(), error.getMessage())
+                        ).then(Mono.error(error))));
     }
 
     public Mono<IntrospectResponse> introspect(IntrospectRequest introspectRequest) {
@@ -179,10 +250,48 @@ public class AuthenticationService {
                 .doOnSuccess(revokedCount -> logger.info("|AuthenticationService|refreshToken|revoked active refresh tokens for userId={}, revokedCount={}", userId, revokedCount))
                 .doOnError(revokeError -> logger.error("|AuthenticationService|refreshToken|failed to revoke active refresh tokens for userId={}, error={}", userId, revokeError.getMessage(), revokeError))
                 .onErrorResume(revokeError -> Mono.empty())
+                .then(saveAudit(
+                        userId,
+                        AuditActionType.REFRESH_TOKEN,
+                        "AUTH_SESSION",
+                        userId,
+                        "FAILURE",
+                        authMetadata(null, null, error.getMessage())
+                ))
                 .then(Mono.error(new AppException(
                         ErrorCode.REFRESH_TOKEN_FAILED,
                         "Failed to refresh token. Your session has been revoked. Please login again.",
                         error
                 )));
+    }
+
+    private Mono<Void> saveAudit(String actorId,
+                                 AuditActionType action,
+                                 String resourceType,
+                                 String resourceId,
+                                 String status,
+                                 JsonObject metadata) {
+        return userAuditService.save(AuditLogs.builder()
+                .actorId(actorId)
+                .action(action)
+                .resourceType(resourceType)
+                .resourceId(resourceId)
+                .status(status)
+                .metadata(metadata == null ? null : metadata.toString())
+                .build());
+    }
+
+    private JsonObject authMetadata(String username, String deviceInfo, String reason) {
+        JsonObject metadata = new JsonObject();
+        if (username != null && !username.isBlank()) {
+            metadata.addProperty("username", username);
+        }
+        if (deviceInfo != null && !deviceInfo.isBlank()) {
+            metadata.addProperty("deviceInfo", deviceInfo);
+        }
+        if (reason != null && !reason.isBlank()) {
+            metadata.addProperty("reason", reason);
+        }
+        return metadata;
     }
 }

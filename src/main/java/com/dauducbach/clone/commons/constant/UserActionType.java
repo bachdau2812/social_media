@@ -24,5 +24,4 @@ public enum UserActionType {
     FOLLOW_EVENT,
     AVATAR_UPDATE,
     UP_STORY,
-
 }

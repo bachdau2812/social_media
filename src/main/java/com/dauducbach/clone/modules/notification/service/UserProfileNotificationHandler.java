@@ -56,7 +56,7 @@ public class UserProfileNotificationHandler {
         metadata.put("FOLLOWING_ID", followingId);
 
         enrichActorUsername(followerId, metadata)
-                .then(sendPush(UserActionType.FOLLOW_EVENT, followerId, followingId, EntityType.USER.name(), List.of(followingId), metadata, true))
+                .then(sendPush(UserActionType.FOLLOW_EVENT, followerId, followingId, EntityType.USER.name(), List.of(followingId), metadata))
                 .doOnSuccess(v -> log.info("|UserProfileNotificationHandler|handleFollowEvent|completed|followerId={}|followingId={}", followerId, followingId))
                 .doOnError(error -> log.error("|UserProfileNotificationHandler|handleFollowEvent|failed|followerId={}|followingId={}|error={}",
                         followerId, followingId, error.getMessage()))
@@ -81,7 +81,7 @@ public class UserProfileNotificationHandler {
 
         enrichActorUsername(userId, metadata)
                 .then(getFollowersOfUser(userId))
-                .flatMap(followers -> sendPush(UserActionType.AVATAR_UPDATE, userId, userId, EntityType.USER.name(), followers, metadata, true))
+                .flatMap(followers -> sendPush(UserActionType.AVATAR_UPDATE, userId, userId, EntityType.USER.name(), followers, metadata))
                 .doOnSuccess(v -> log.info("|UserProfileNotificationHandler|handleAvatarUpdateEvent|completed|userId={}", userId))
                 .doOnError(error -> log.error("|UserProfileNotificationHandler|handleAvatarUpdateEvent|failed|userId={}|error={}", userId, error.getMessage()))
                 .subscribe();
@@ -109,7 +109,7 @@ public class UserProfileNotificationHandler {
 
         enrichActorUsername(userId, metadata)
                 .then(getFollowersOfUser(userId))
-                .flatMap(followers -> sendPush(UserActionType.UP_STORY, userId, storyId, EntityType.STORY.name(), followers, metadata, true))
+                .flatMap(followers -> sendPush(UserActionType.UP_STORY, userId, storyId, EntityType.STORY.name(), followers, metadata))
                 .doOnSuccess(v -> log.info("|UserProfileNotificationHandler|handleStorySuccessEvent|completed|storyId={}|userId={}", storyId, userId))
                 .doOnError(error -> log.error("|UserProfileNotificationHandler|handleStorySuccessEvent|failed|storyId={}|error={}", storyId, error.getMessage()))
                 .subscribe();
@@ -121,8 +121,7 @@ public class UserProfileNotificationHandler {
             String entityId,
             String entityType,
             List<String> recipientIds,
-            Map<String, String> metadata,
-            boolean excludeActor
+            Map<String, String> metadata
     ) {
         List<String> recipients = recipientIds == null
                 ? List.of()
@@ -130,7 +129,7 @@ public class UserProfileNotificationHandler {
                 .filter(Objects::nonNull)
                 .map(String::trim)
                 .filter(recipient -> !recipient.isBlank())
-                .filter(recipient -> !excludeActor || !recipient.equals(actorId))
+                .filter(recipient -> !recipient.equals(actorId))
                 .distinct()
                 .toList();
 

@@ -31,6 +31,7 @@ public class UserFollowerService {
 
     private static final Logger log = LoggerFactory.getLogger(UserFollowerService.class);
     private static final int DEFAULT_PAGE_SIZE = 20;
+    private static final int FEED_BROADCAST_PAGE_SIZE = 500;
 
     /// 1. Theo dõi user (Follow) - Insert vào DB
     public Mono<FollowResponse> followUser(FollowRequest request) {
@@ -262,6 +263,34 @@ public class UserFollowerService {
                         throwable
                 ))
                 .doOnSuccess(isFollowing -> log.info("|UserFollowerService|isFollowing|result={}|followerId={}|followingId={}", isFollowing, followerId, followingId));
+    }
+
+    public Flux<String> getFollowerIdsForFeedBroadcast(String userId) {
+        if (userId == null || userId.isBlank()) {
+            return Flux.empty();
+        }
+
+        return userFollowerRepository.countFollowers(userId)
+                .flatMapMany(total -> {
+                    int pageCount = (int) Math.ceil((double) total / FEED_BROADCAST_PAGE_SIZE);
+                    if (pageCount <= 0) {
+                        return Flux.empty();
+                    }
+                    return Flux.range(0, pageCount)
+                            .concatMap(page -> userFollowerRepository.findFollowerIdsByUserId(
+                                    userId,
+                                    FEED_BROADCAST_PAGE_SIZE,
+                                    page * FEED_BROADCAST_PAGE_SIZE
+                            ));
+                })
+                .filter(followerId -> followerId != null && !followerId.isBlank())
+                .distinct()
+                .doOnComplete(() -> log.info("|UserFollowerService|getFollowerIdsForFeedBroadcast|completed|userId={}", userId))
+                .onErrorResume(error -> {
+                    log.error("|UserFollowerService|getFollowerIdsForFeedBroadcast|failed|userId={}|error={}",
+                            userId, error.getMessage());
+                    return Flux.empty();
+                });
     }
 
     /// Get follower counts
