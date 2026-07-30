@@ -33,4 +33,15 @@ build/
 .vscode/
 
 **/social-app.json
+/docs
+/BUSSINESS.md
+/build.log
+/FEED_FLOW_SUMMARY.md
+/chat-service-architecture-and-database.md
+/Postman_Collection_User_APIs.json
+/compile-boundary.log
+/compile-mutations.log
+/test-compile.log
+/visibility-red.log
+
 logs/
