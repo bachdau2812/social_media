@@ -1,9 +1,9 @@
 package com.dauducbach.clone.modules.user.service;
 
-import com.cloudinary.Cloudinary;
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
-import com.dauducbach.clone.modules.post.service.MediaService;
+import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
+import com.dauducbach.clone.modules.media.service.MediaService;
 import com.dauducbach.clone.modules.user.dto.request.JamendoMusicImportRequest;
 import com.dauducbach.clone.modules.user.dto.request.MusicCreateRequest;
 import com.dauducbach.clone.modules.user.entity.Musics;
@@ -40,7 +40,7 @@ class MusicServiceTest {
     @Mock
     WebClient webClient;
     @Mock
-    Cloudinary cloudinary;
+    MediaCompatibilityFacade mediaFacade;
 
     @Test
     void createMusicSavesManualMusicAndEvictsListCache() {
@@ -118,7 +118,7 @@ class MusicServiceTest {
                 r2dbcEntityTemplate,
                 redisTemplate,
                 webClient,
-                cloudinary
+                mediaFacade
         );
     }
 }

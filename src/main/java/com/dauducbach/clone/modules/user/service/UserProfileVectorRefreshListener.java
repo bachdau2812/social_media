@@ -6,7 +6,6 @@ import com.dauducbach.clone.modules.user.entity.UserDetails;
 import com.dauducbach.clone.modules.user.entity.UserHighSchool;
 import com.dauducbach.clone.modules.user.entity.UserJob;
 import com.dauducbach.clone.modules.user.entity.UserUniversity;
-import com.dauducbach.clone.modules.user.repositoty.UserDetailVectorRepository;
 import com.dauducbach.clone.modules.user.repositoty.UserDetailsRepository;
 import com.dauducbach.clone.modules.user.repositoty.UserHighSchoolRepository;
 import com.dauducbach.clone.modules.user.repositoty.UserJobRepository;
@@ -19,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.elasticsearch.core.ReactiveElasticsearchOperations;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Service;
@@ -26,6 +26,7 @@ import reactor.core.publisher.Mono;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 @Service
 @RequiredArgsConstructor
@@ -37,11 +38,11 @@ public class UserProfileVectorRefreshListener {
     UserJobRepository userJobRepository;
     UserHighSchoolRepository userHighSchoolRepository;
     UserUniversityRepository userUniversityRepository;
-    UserDetailVectorRepository userDetailVectorRepository;
+    ReactiveElasticsearchOperations elasticsearchOperations;
     GetVectorEmbedding getVectorEmbedding;
 
     @KafkaListener(topics = UserProfileVectorTopics.PROFILE_VECTOR_REFRESH, groupId = "user-service")
-    public void handleProfileVectorRefreshEvent(@Payload String payload) {
+    public CompletableFuture<Void> handleProfileVectorRefreshEvent(@Payload String payload) {
         JsonObject json = GsonUtils.fromString(payload);
         String userId = KafkaUtils.extractString(json, "userId");
         String source = KafkaUtils.extractString(json, "source");
@@ -51,12 +52,12 @@ public class UserProfileVectorRefreshListener {
                 ? refreshCreatedUserVector(json.getAsJsonObject("profile"))
                 : refreshUserVector(userId);
 
-        refreshFlow
+        return refreshFlow
                 .doOnSuccess(unused -> log.info("|UserProfileVectorRefreshListener|handleProfileVectorRefreshEvent|success|userId={}|source={}",
                         userId, source))
                 .doOnError(error -> log.error("|UserProfileVectorRefreshListener|handleProfileVectorRefreshEvent|failed|userId={}|source={}|error={}",
                         userId, source, error.getMessage()))
-                .subscribe();
+                .toFuture();
     }
 
     public Mono<Void> refreshUserVector(String userId) {
@@ -91,6 +92,7 @@ public class UserProfileVectorRefreshListener {
         UserDetails details = UserDetails.builder()
                 .userId(userId)
                 .username(KafkaUtils.extractString(profileJson, "username"))
+                .fullName(KafkaUtils.extractString(profileJson, "fullName"))
                 .hometown(KafkaUtils.extractString(profileJson, "hometown"))
                 .livingIn(KafkaUtils.extractString(profileJson, "livingIn"))
                 .sex(KafkaUtils.extractString(profileJson, "sex"))
@@ -131,10 +133,10 @@ public class UserProfileVectorRefreshListener {
     }
 
     private Mono<Void> saveUserVector(String userId, List<Double> vector) {
-        return userDetailVectorRepository.findById(userId)
+        return elasticsearchOperations.get(userId, UserDetailVector.class)
                 .defaultIfEmpty(UserDetailVector.builder().userId(userId).build())
                 .doOnNext(userDetailVector -> userDetailVector.setUserVector(vector))
-                .flatMap(userDetailVectorRepository::save)
+                .flatMap(elasticsearchOperations::save)
                 .then();
     }
 
@@ -144,6 +146,7 @@ public class UserProfileVectorRefreshListener {
                                     List<UserUniversity> universities) {
         StringBuilder builder = new StringBuilder();
 
+        append(builder, "full_name", details.getFullName());
         append(builder, "username", details.getUsername());
         append(builder, "hometown", details.getHometown());
         append(builder, "living_in", details.getLivingIn());

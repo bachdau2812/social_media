@@ -2,14 +2,19 @@ package com.dauducbach.clone.modules.post.controller;
 
 import com.dauducbach.clone.commons.response.ApiResponse;
 import com.dauducbach.clone.commons.response.PageResponse;
+import com.dauducbach.clone.commons.security.ActorIdentity;
+import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import com.dauducbach.clone.modules.post.dto.request.PostCreateRequest;
 import com.dauducbach.clone.modules.post.dto.request.PostUpdateRequest;
 import com.dauducbach.clone.modules.post.dto.response.PostCreateResponse;
+import com.dauducbach.clone.modules.post.dto.response.PostDetailResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostNotificationMuteResponse;
 import com.dauducbach.clone.modules.post.entity.PostDetails;
 import com.dauducbach.clone.modules.post.service.PostSearchService;
+import com.dauducbach.clone.modules.post.service.PostDetailQueryService;
 import com.dauducbach.clone.modules.post.service.PostService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.http.ResponseEntity;
 import reactor.core.publisher.Flux;
@@ -21,20 +26,24 @@ import reactor.core.publisher.Mono;
 public class PostController {
     private final PostService postService;
     private final PostSearchService postSearchService;
+    private final PostDetailQueryService postDetailQueryService;
 
     @PostMapping
-    public Mono<ResponseEntity<ApiResponse<PostCreateResponse>>> createPost(@RequestBody PostCreateRequest request) {
+    public Mono<ApiResponse<PostCreateResponse>> createPost(@RequestBody PostCreateRequest request, Authentication authentication) {
+        request.setUserId(ActorIdentity.require(authentication.getName(), request.getUserId()));
         return postService.createPost(request)
-                .map(response -> ResponseEntity.accepted().body(ApiResponse.<PostCreateResponse>builder()
+                .map(response -> ApiResponse.<PostCreateResponse>builder()
                         .message(response.getMessage())
                         .result(response)
-                        .build()));
+                        .build());
     }
 
     @PutMapping
-    public Mono<ApiResponse<PostDetails>> updatePost(@RequestBody PostUpdateRequest request) {
+    public Mono<ApiResponse<PostDetailResponse>> updatePost(@RequestBody PostUpdateRequest request, Authentication authentication) {
+        request.setUserId(ActorIdentity.require(authentication.getName(), request.getUserId()));
         return postService.updatePost(request)
-                .map(updated -> ApiResponse.<PostDetails>builder()
+                .flatMap(updated -> postDetailQueryService.getPostDetail(updated.getPostId(), MediaDisplayType.POST))
+                .map(updated -> ApiResponse.<PostDetailResponse>builder()
                         .message("Post updated successfully")
                         .result(updated)
                         .build());
@@ -52,9 +61,12 @@ public class PostController {
     }
 
     @GetMapping("/{postId}")
-    public Mono<ApiResponse<PostDetails>> getPostById(@PathVariable String postId) {
-        return postService.getPostById(postId)
-                .map(post -> ApiResponse.<PostDetails>builder()
+    public Mono<ApiResponse<PostDetailResponse>> getPostById(
+            @PathVariable String postId,
+            @RequestParam(defaultValue = "POST") MediaDisplayType mediaType
+    ) {
+        return postDetailQueryService.getPostDetail(postId, mediaType)
+                .map(post -> ApiResponse.<PostDetailResponse>builder()
                         .message("Post retrieved successfully")
                         .result(post)
                         .build());
@@ -69,7 +81,9 @@ public class PostController {
 
     @PostMapping("/{postId}/notifications/mute/users/{userId}")
     public Mono<ApiResponse<PostNotificationMuteResponse>> mutePostNotifications(@PathVariable String postId,
+                                                                                 Authentication authentication,
                                                                                  @PathVariable String userId) {
+        userId = ActorIdentity.require(authentication.getName(), userId);
         return postService.mutePostNotifications(postId, userId)
                 .map(response -> ApiResponse.<PostNotificationMuteResponse>builder()
                         .message("Post notifications muted successfully")
@@ -78,8 +92,8 @@ public class PostController {
     }
 
     @DeleteMapping("/{postId}")
-    public Mono<ApiResponse<String>> deletePost(@PathVariable String postId) {
-        return postService.deletePostById(postId)
+    public Mono<ApiResponse<String>> deletePost(@PathVariable String postId, Authentication authentication) {
+        return postService.deletePostById(postId, authentication.getName())
                 .then(Mono.just(ApiResponse.<String>builder()
                         .message("Post deleted successfully")
                         .result("Deleted postId: " + postId)
@@ -87,7 +101,8 @@ public class PostController {
     }
 
     @DeleteMapping("/user/{userId}")
-    public Mono<ApiResponse<String>> deletePostsByUserId(@PathVariable String userId) {
+    public Mono<ApiResponse<String>> deletePostsByUserId(@PathVariable String userId, Authentication authentication) {
+        userId = ActorIdentity.require(authentication.getName(), userId);
         return postService.deletePostsByUserId(userId)
                 .then(Mono.just(ApiResponse.<String>builder()
                         .message("User posts deleted successfully")
@@ -95,5 +110,3 @@ public class PostController {
                         .build()));
     }
 }
-
-

@@ -12,7 +12,7 @@ public interface CommentRepository extends ReactiveCrudRepository<Comment, Strin
     @Query("SELECT * FROM comments WHERE post_id = :postId AND parent_id IS NULL ORDER BY timestamp DESC LIMIT :limit OFFSET :offset")
     Flux<Comment> findRootByPostId(String postId, int limit, int offset);
 
-    @Query("SELECT * FROM comments WHERE parent_id = :parentId ORDER BY timestamp ASC LIMIT :limit OFFSET :offset")
+    @Query("SELECT * FROM comments WHERE parent_id = :parentId ORDER BY timestamp DESC LIMIT :limit OFFSET :offset")
     Flux<Comment> findByParentId(String parentId, int limit, int offset);
 
     @Query("SELECT * FROM comments WHERE post_id = :postId ORDER BY timestamp DESC")
@@ -27,6 +27,8 @@ public interface CommentRepository extends ReactiveCrudRepository<Comment, Strin
     @Query("SELECT COUNT(*) FROM comments WHERE user_id = :userId")
     Mono<Long> countByUserId(String userId);
 
+    @Query("SELECT COUNT(*) FROM comments WHERE post_id = :postId AND parent_id IS NULL")
+    Mono<Long> countRootByPostId(String postId);
     @Query("SELECT COUNT(*) FROM comments WHERE post_id = :postId")
     Mono<Long> countByPostId(String postId);
 

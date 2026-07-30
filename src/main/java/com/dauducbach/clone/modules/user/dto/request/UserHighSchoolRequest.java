@@ -15,6 +15,7 @@ import java.time.LocalDate;
 @Builder
 
 public class UserHighSchoolRequest {
+    String id;
     String userId;
     String schoolName;
     LocalDate from;

@@ -18,6 +18,7 @@ import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.concurrent.CompletableFuture;
 
 @Component
 @RequiredArgsConstructor
@@ -31,7 +32,7 @@ public class FeedEventListener {
     UserFollowerService userFollowerService;
 
     @KafkaListener(topics = FeedTopics.POST_UPLOAD_EVENT, groupId = "feed-service")
-    public void handlePostUploadEvent(@Payload String payload) {
+    public CompletableFuture<Void> handlePostUploadEvent(@Payload String payload) {
         JsonObject json = GsonUtils.fromString(payload);
         String postId = resolvePostId(json);
         String userId = KafkaUtils.extractString(json, "userId");
@@ -39,21 +40,21 @@ public class FeedEventListener {
         if (postId.isBlank() || userId.isBlank()) {
             log.warn("|FeedEventListener|handlePostUploadEvent|missing data|hasPostId={}|hasUserId={}",
                     !postId.isBlank(), !userId.isBlank());
-            return;
+            return CompletableFuture.completedFuture(null);
         }
 
-        userFollowerService.getFollowerIdsForFeedBroadcast(userId)
+        return userFollowerService.getFollowerIdsForFeedBroadcast(userId)
                 .concatMap(followerId -> feedService.appendPostToUserFeed(followerId, postId, Instant.now()))
                 .then()
                 .doOnSuccess(unused -> log.info("|FeedEventListener|handlePostUploadEvent|broadcasted|postId={}|userId={}",
                         postId, userId))
                 .doOnError(error -> log.error("|FeedEventListener|handlePostUploadEvent|failed|postId={}|error={}",
                         postId, error.getMessage()))
-                .subscribe();
+                .toFuture();
     }
 
     @KafkaListener(topics = FeedTopics.LIKE_EVENT, groupId = "feed-service")
-    public void handleLikeEvent(@Payload String payload) {
+    public CompletableFuture<Void> handleLikeEvent(@Payload String payload) {
         JsonObject json = GsonUtils.fromString(payload);
         String actorId = KafkaUtils.extractString(json, "actorId");
         String targetType = KafkaUtils.extractString(json, "targetType").toUpperCase();
@@ -61,36 +62,36 @@ public class FeedEventListener {
                 ? KafkaUtils.extractString(json, "targetId")
                 : KafkaUtils.extractString(json, "postId");
 
-        interactionEventPublisher.publishInteraction(actorId, postId, "LIKE", KafkaUtils.extractString(json, "targetId"))
+        return interactionEventPublisher.publishInteraction(actorId, postId, "LIKE", KafkaUtils.extractString(json, "targetId"))
                 .doOnError(error -> log.error("|FeedEventListener|handleLikeEvent|failed|actorId={}|postId={}|error={}",
                         actorId, postId, error.getMessage()))
-                .subscribe();
+                .toFuture();
     }
 
     @KafkaListener(topics = FeedTopics.COMMENT_SUCCESS_EVENT, groupId = "feed-service")
-    public void handleCommentSuccessEvent(@Payload String payload) {
+    public CompletableFuture<Void> handleCommentSuccessEvent(@Payload String payload) {
         JsonObject json = GsonUtils.fromString(payload);
         String userId = KafkaUtils.extractString(json, "userId");
         String postId = KafkaUtils.extractString(json, "postId");
         String commentId = KafkaUtils.extractString(json, "commentId");
 
-        interactionEventPublisher.publishInteraction(userId, postId, "COMMENT", commentId)
+        return interactionEventPublisher.publishInteraction(userId, postId, "COMMENT", commentId)
                 .doOnError(error -> log.error("|FeedEventListener|handleCommentSuccessEvent|failed|userId={}|postId={}|error={}",
                         userId, postId, error.getMessage()))
-                .subscribe();
+                .toFuture();
     }
 
     @KafkaListener(topics = FeedTopics.USER_INTERACTION_EVENTS, groupId = "feed-service")
-    public void handleUserInteractionEvent(@Payload String payload) {
+    public CompletableFuture<Void> handleUserInteractionEvent(@Payload String payload) {
         JsonObject json = GsonUtils.fromString(payload);
         String userId = KafkaUtils.extractString(json, "userId");
         String postId = KafkaUtils.extractString(json, "postId");
         String action = KafkaUtils.extractString(json, "action");
 
-        feedVectorService.updateShortTermVector(userId, postId, action)
+        return feedVectorService.updateShortTermVector(userId, postId, action)
                 .doOnError(error -> log.error("|FeedEventListener|handleUserInteractionEvent|failed|userId={}|postId={}|error={}",
                         userId, postId, error.getMessage()))
-                .subscribe();
+                .toFuture();
     }
 
     private String resolvePostId(JsonObject json) {

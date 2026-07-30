@@ -76,9 +76,33 @@ public class UserUniversityService {
                     }
                     reactiveRedisStringTemplate.opsForValue().delete(listCacheKey).subscribe();
                 })
-                .doOnError(error -> log.error("|UserUniversityService|createUserUniversity|failed to create|error={}", error.getMessage()));
+                .doOnError(error -> log.error("|UserUniversityService|createUserUniversity|failed to create|error={}", error.getMessage(), error));
     }
 
+    public Mono<UserUniversity> updateUserUniversity(UserUniversityRequest request) {
+        return userUniversityRepository.findById(request.getId())
+                .switchIfEmpty(Mono.error(new AppException(ErrorCode.USER_UNIVERSITY_NOT_FOUND,
+                        String.format("User university not found for id=%s", request.getId()))))
+                .flatMap(existing -> {
+                    if (request.getSchoolName() != null) existing.setSchoolName(request.getSchoolName().trim());
+                    if (request.getMajor() != null) existing.setMajor(request.getMajor().isBlank() ? null : request.getMajor().trim());
+                    if (request.getFrom() != null) existing.setFrom(request.getFrom());
+                    if (request.getTo() != null) existing.setTo(request.getTo());
+                    if (request.getIsGraduate() != null) existing.setGraduate(request.getIsGraduate());
+                    if (request.getIsPublic() != null) existing.setPublic(request.getIsPublic());
+                    return userUniversityRepository.save(existing);
+                })
+                .flatMap(updated -> saveProfileComponentAudit(updated.getUserId(), "USER_UNIVERSITY", updated.getId(), "UPDATE").thenReturn(updated))
+                .flatMap(updated -> publishProfileVectorRefresh(updated.getUserId(), "USER_UNIVERSITY", "UPDATE", updated.getId()).thenReturn(updated))
+                .doOnSuccess(updated -> {
+                    String json = RedisUtil.serialize(updated);
+                    if (json != null) reactiveRedisStringTemplate.opsForValue().set(CACHE_PREFIX + updated.getId(), json, CACHE_TTL).subscribe();
+                    reactiveRedisStringTemplate.opsForValue().delete(LIST_CACHE_PREFIX + updated.getUserId()).subscribe();
+                })
+                .onErrorMap(error -> error instanceof AppException ? error : new AppException(
+                        ErrorCode.USER_UNIVERSITY_SAVE_FAILED,
+                        String.format("Update user university failed for id=%s", request.getId()), error));
+    }
     /// Lấy UserUniversity theo ID
     private Mono<Void> saveProfileComponentAudit(String userId, String component, String resourceId, String operation) {
         JsonObject metadata = new JsonObject();

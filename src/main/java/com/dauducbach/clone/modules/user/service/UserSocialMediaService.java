@@ -65,6 +65,23 @@ public class UserSocialMediaService {
                 .doOnError(error -> log.error("|UserSocialMediaService|createUserSocialMedia|failed to create|error={}", error.getMessage()));
     }
 
+    public Mono<UserSocialMedia> updateUserSocialMedia(UserSocialMediaRequest request) {
+        return userSocialMediaRepository.findById(request.getId())
+                .switchIfEmpty(Mono.error(new AppException(ErrorCode.USER_SOCIAL_MEDIA_NOT_FOUND,
+                        String.format("User social media not found for id=%s", request.getId()))))
+                .flatMap(existing -> {
+                    if (request.getLink() != null && !request.getLink().isBlank()) existing.setLink(request.getLink().trim());
+                    return userSocialMediaRepository.save(existing);
+                })
+                .doOnSuccess(updated -> {
+                    String json = RedisUtil.serialize(updated);
+                    if (json != null) reactiveRedisStringTemplate.opsForValue().set(CACHE_PREFIX + updated.getId(), json, CACHE_TTL).subscribe();
+                    reactiveRedisStringTemplate.opsForValue().delete(LIST_CACHE_PREFIX + updated.getUserId()).subscribe();
+                })
+                .onErrorMap(error -> error instanceof AppException ? error : new AppException(
+                        ErrorCode.USER_SOCIAL_MEDIA_SAVE_FAILED,
+                        String.format("Update user social media failed for id=%s", request.getId()), error));
+    }
     /// Lấy UserSocialMedia theo ID
     public Mono<UserSocialMedia> getUserSocialMediaById(String id) {
         log.info("|UserSocialMediaService|getUserSocialMediaById|id={}", id);

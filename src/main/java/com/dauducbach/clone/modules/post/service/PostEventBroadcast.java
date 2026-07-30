@@ -4,51 +4,47 @@ import com.dauducbach.clone.utils.GsonUtils;
 import com.dauducbach.clone.utils.KafkaUtils;
 import com.google.gson.JsonObject;
 import lombok.RequiredArgsConstructor;
-import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Service;
 
+import java.util.concurrent.CompletableFuture;
+
 @Service
 @RequiredArgsConstructor
-@FieldDefaults(level = lombok.AccessLevel.PRIVATE, makeFinal = true)
 public class PostEventBroadcast {
-    PostVectorService postVectorService;
-
     private static final Logger log = LoggerFactory.getLogger(PostEventBroadcast.class);
+
+    private final PostVectorService postVectorService;
+
+    @KafkaListener(topics = "post_upload_event", groupId = "post-service")
+    public CompletableFuture<Void> handlePostEmbeddingEvent(@Payload String payload) {
+        JsonObject payloadJson = GsonUtils.fromString(payload);
+        String postId = resolveField(payloadJson, "postId");
+        String content = KafkaUtils.extractString(payloadJson, "content");
+        if (postId.isBlank() || content.isBlank()) {
+            log.warn(
+                    "|PostEventBroadcast|handlePostEmbeddingEvent|missing data|hasPostId={}|hasContent={}",
+                    !postId.isBlank(), !content.isBlank());
+            return CompletableFuture.completedFuture(null);
+        }
+
+        return postVectorService.processPostEmbedding(postId, content)
+                .doOnError(error -> log.error(
+                        "|PostEventBroadcast|handlePostEmbeddingEvent|failed|postId={}|error={}",
+                        postId, error.getMessage()))
+                .toFuture();
+    }
+
     private String resolveField(JsonObject payloadJson, String fieldName) {
         String value = KafkaUtils.extractString(payloadJson, fieldName);
         if (!value.isBlank()) {
             return value;
         }
-
-        if ("postId".equals(fieldName)) {
-            return KafkaUtils.extractString(payloadJson, "post_id");
-        }
-
-        return value;
+        return "postId".equals(fieldName)
+                ? KafkaUtils.extractString(payloadJson, "post_id")
+                : value;
     }
-
-    @KafkaListener(topics = "post_upload_event", groupId = "post-service")
-    public void handlePostEmbeddingEvent(@Payload String payload) {
-        JsonObject payloadJson = GsonUtils.fromString(payload);
-        String postId = resolveField(payloadJson, "postId");
-        String content = KafkaUtils.extractString(payloadJson, "content");
-
-        if (postId.isBlank() || content.isBlank()) {
-            log.warn("|PostEventBroadcast|handlePostEmbeddingEvent|missing data|hasPostId={}|hasContent={}",
-                    !postId.isBlank(), !content.isBlank());
-            return;
-        }
-
-        log.info("|PostEventBroadcast|handlePostEmbeddingEvent|received|postId={}|contentLength={}",
-                postId, content.length());
-        postVectorService.processPostEmbedding(postId, content)
-                .doOnError(error -> log.error("|PostEventBroadcast|handlePostEmbeddingEvent|failed|postId={}|error={}",
-                        postId, error.getMessage()))
-                .subscribe();
-    }
-
 }

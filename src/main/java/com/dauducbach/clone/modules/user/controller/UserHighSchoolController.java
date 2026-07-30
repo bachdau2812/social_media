@@ -26,6 +26,14 @@ public class UserHighSchoolController {
                         .build());
     }
 
+    @PutMapping
+    public Mono<ApiResponse<UserHighSchool>> updateUserHighSchool(@Valid @RequestBody UserHighSchoolRequest request) {
+        return userHighSchoolService.updateUserHighSchool(request)
+                .map(updated -> ApiResponse.<UserHighSchool>builder()
+                        .message("UserHighSchool updated successfully")
+                        .result(updated)
+                        .build());
+    }
     /// Lấy UserHighSchool theo ID
     @GetMapping("/{id}")
     public Mono<ApiResponse<UserHighSchool>> getUserHighSchoolById(@PathVariable String id) {

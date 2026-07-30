@@ -40,7 +40,7 @@ spring:
             scope:
               - email
               - profile
-            redirect-uri: http://localhost:8888/app/login/oauth2/code/google
+            redirect-uri: ${GOOGLE_REDIRECT_URI:http://localhost:8888/app/login/oauth2/code/google}
             authorization-grant-type: authorization_code
             client-name: Google
           facebook:
@@ -49,7 +49,7 @@ spring:
             scope:
               - email
               - public_profile
-            redirect-uri: http://localhost:8888/app/login/oauth2/code/facebook
+            redirect-uri: ${FACEBOOK_REDIRECT_URI:http://localhost:8888/app/login/oauth2/code/facebook}
             authorization-grant-type: authorization_code
             client-name: Facebook
           github:
@@ -58,12 +58,12 @@ spring:
             scope:
               - user:email
               - read:user
-            redirect-uri: http://localhost:8888/app/login/oauth2/code/github
+            redirect-uri: ${GITHUB_REDIRECT_URI:http://localhost:8888/app/login/oauth2/code/github}
             authorization-grant-type: authorization_code
             client-name: GitHub
 
   kafka:
-    bootstrap-servers: localhost:9092
+    bootstrap-servers: 127.0.0.1:9092
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
@@ -95,6 +95,10 @@ spring:
 
 gemini-key: ${GEMINI_KEY}
 
+firebase:
+  enabled: ${FIREBASE_ENABLED:false}
+  credentials-path: ${FIREBASE_CREDENTIALS_PATH:}
+
 jwt:
   signerKey: ${JWT_SIGNER_KEY}
   valid-duration: 900
@@ -110,6 +114,15 @@ post:
     scan:
       api-url: http://localhost:8000/api/v1/scan
       max-in-memory-size: 10MB
+
+app:
+  frontend:
+    oauth-success-url: ${FRONTEND_OAUTH_SUCCESS_URL:http://localhost:5173/oauth/callback}
+
+auth:
+  cookie:
+    secure: ${AUTH_COOKIE_SECURE:false}
+    same-site: ${AUTH_COOKIE_SAME_SITE:Lax}
 
 #    http://localhost:8888/app/oauth2/authorization/google
 #    http://localhost:8888/app/oauth2/authorization/facebook

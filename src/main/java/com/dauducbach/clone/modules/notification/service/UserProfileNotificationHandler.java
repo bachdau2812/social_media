@@ -7,8 +7,7 @@ import com.dauducbach.clone.modules.notification.dto.request.NotificationRequest
 import com.dauducbach.clone.modules.notification.entity.NotificationTemplates;
 import com.dauducbach.clone.modules.notification.repository.NotificationTemplatesRepository;
 import com.dauducbach.clone.modules.user.dto.response.FollowerListResponse;
-import com.dauducbach.clone.modules.user.entity.UserDetails;
-import com.dauducbach.clone.modules.user.service.UserDetailsService;
+import com.dauducbach.clone.modules.user.service.UserIdentityQueryService;
 import com.dauducbach.clone.modules.user.service.UserFollowerService;
 import com.dauducbach.clone.utils.GsonUtils;
 import com.dauducbach.clone.utils.KafkaUtils;
@@ -27,6 +26,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 
 @Service
 @RequiredArgsConstructor
@@ -38,33 +38,33 @@ public class UserProfileNotificationHandler {
     NotificationService notificationService;
     NotificationTemplatesRepository notificationTemplatesRepository;
     UserFollowerService userFollowerService;
-    UserDetailsService userDetailsService;
+    UserIdentityQueryService userIdentityQueryService;
 
     @KafkaListener(topics = "follow_event", groupId = "notification-service")
-    public void handleFollowEvent(@Payload String payload) {
+    public CompletableFuture<Void> handleFollowEvent(@Payload String payload) {
         JsonObject payloadJson = GsonUtils.fromString(payload);
         String followerId = KafkaUtils.extractString(payloadJson, "followerId");
         String followingId = KafkaUtils.extractString(payloadJson, "followingId");
 
         if (followerId.isBlank() || followingId.isBlank()) {
             log.warn("|UserProfileNotificationHandler|handleFollowEvent|missing data|followerId={}|followingId={}", followerId, followingId);
-            return;
+            return CompletableFuture.completedFuture(null);
         }
 
         Map<String, String> metadata = baseMetadata(followerId, followingId, EntityType.USER.name());
         metadata.put("FOLLOWER_ID", followerId);
         metadata.put("FOLLOWING_ID", followingId);
 
-        enrichActorUsername(followerId, metadata)
+        return enrichActorUsername(followerId, metadata)
                 .then(sendPush(UserActionType.FOLLOW_EVENT, followerId, followingId, EntityType.USER.name(), List.of(followingId), metadata))
                 .doOnSuccess(v -> log.info("|UserProfileNotificationHandler|handleFollowEvent|completed|followerId={}|followingId={}", followerId, followingId))
                 .doOnError(error -> log.error("|UserProfileNotificationHandler|handleFollowEvent|failed|followerId={}|followingId={}|error={}",
                         followerId, followingId, error.getMessage()))
-                .subscribe();
+                .toFuture();
     }
 
     @KafkaListener(topics = "avatar_update_event", groupId = "notification-service")
-    public void handleAvatarUpdateEvent(@Payload String payload) {
+    public CompletableFuture<Void> handleAvatarUpdateEvent(@Payload String payload) {
         JsonObject payloadJson = GsonUtils.fromString(payload);
         String userId = KafkaUtils.extractString(payloadJson, "userId");
         String avatarUrl = KafkaUtils.extractString(payloadJson, "avatarUrl");
@@ -72,33 +72,34 @@ public class UserProfileNotificationHandler {
 
         if (userId.isBlank()) {
             log.warn("|UserProfileNotificationHandler|handleAvatarUpdateEvent|missing data|userId={}", userId);
-            return;
+            return CompletableFuture.completedFuture(null);
         }
 
         Map<String, String> metadata = baseMetadata(userId, userId, EntityType.USER.name());
         metadata.put("AVATAR_URL", avatarUrl);
         metadata.put("MEDIA_ID", mediaId);
 
-        enrichActorUsername(userId, metadata)
+        return enrichActorUsername(userId, metadata)
                 .then(getFollowersOfUser(userId))
                 .flatMap(followers -> sendPush(UserActionType.AVATAR_UPDATE, userId, userId, EntityType.USER.name(), followers, metadata))
                 .doOnSuccess(v -> log.info("|UserProfileNotificationHandler|handleAvatarUpdateEvent|completed|userId={}", userId))
                 .doOnError(error -> log.error("|UserProfileNotificationHandler|handleAvatarUpdateEvent|failed|userId={}|error={}", userId, error.getMessage()))
-                .subscribe();
+                .toFuture();
     }
 
     @KafkaListener(topics = "story_success_event", groupId = "notification-service")
-    public void handleStorySuccessEvent(@Payload String payload) {
+    public CompletableFuture<Void> handleStorySuccessEvent(@Payload String payload) {
         JsonObject payloadJson = GsonUtils.fromString(payload);
         String storyId = KafkaUtils.extractString(payloadJson, "storyId");
         String userId = KafkaUtils.extractString(payloadJson, "userId");
         String mediaUrl = KafkaUtils.extractString(payloadJson, "mediaUrl");
         String mediaType = KafkaUtils.extractString(payloadJson, "mediaType");
         String mediaId = KafkaUtils.extractString(payloadJson, "mediaId");
+        String publicationId = KafkaUtils.extractString(payloadJson, "publicationId");
 
         if (storyId.isBlank() || userId.isBlank()) {
             log.warn("|UserProfileNotificationHandler|handleStorySuccessEvent|missing data|storyId={}|userId={}", storyId, userId);
-            return;
+            return CompletableFuture.completedFuture(null);
         }
 
         Map<String, String> metadata = baseMetadata(userId, storyId, EntityType.STORY.name());
@@ -106,13 +107,15 @@ public class UserProfileNotificationHandler {
         metadata.put("MEDIA_URL", mediaUrl);
         metadata.put("MEDIA_TYPE", mediaType);
         metadata.put("MEDIA_ID", mediaId);
+        metadata.put("PUBLICATION_ID", publicationId.isBlank() ? storyId : publicationId);
+        metadata.put("DEDUP_KEY", "UP_STORY:" + metadata.get("PUBLICATION_ID"));
 
-        enrichActorUsername(userId, metadata)
+        return enrichActorUsername(userId, metadata)
                 .then(getFollowersOfUser(userId))
                 .flatMap(followers -> sendPush(UserActionType.UP_STORY, userId, storyId, EntityType.STORY.name(), followers, metadata))
                 .doOnSuccess(v -> log.info("|UserProfileNotificationHandler|handleStorySuccessEvent|completed|storyId={}|userId={}", storyId, userId))
                 .doOnError(error -> log.error("|UserProfileNotificationHandler|handleStorySuccessEvent|failed|storyId={}|error={}", storyId, error.getMessage()))
-                .subscribe();
+                .toFuture();
     }
 
     private Mono<Void> sendPush(
@@ -151,6 +154,7 @@ public class UserProfileNotificationHandler {
                         .title(actionType.name())
                         .content(processTemplate(template, metadata))
                         .metadata(metadata)
+                        .dedupKey(metadata.get("DEDUP_KEY"))
                         .notificationType(NotificationType.PUSH)
                         .build()))
                 .then()
@@ -162,10 +166,7 @@ public class UserProfileNotificationHandler {
     }
 
     private Mono<Void> enrichActorUsername(String actorId, Map<String, String> metadata) {
-        return userDetailsService.getUserDetailsById(actorId)
-                .map(UserDetails::getUsername)
-                .filter(username -> username != null && !username.isBlank())
-                .defaultIfEmpty(actorId)
+        return userIdentityQueryService.resolveUsername(actorId)
                 .doOnNext(username -> metadata.put("USERNAME", username))
                 .onErrorResume(error -> {
                     log.error("|UserProfileNotificationHandler|enrichActorUsername|failed|actorId={}|error={}", actorId, error.getMessage());

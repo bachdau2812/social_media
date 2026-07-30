@@ -6,8 +6,6 @@ import com.dauducbach.clone.modules.notification.constants.NotificationStatus;
 import com.dauducbach.clone.modules.notification.dto.NotificationForService;
 import com.dauducbach.clone.modules.notification.entity.NotificationEvents;
 import com.dauducbach.clone.modules.notification.entity.UserNotifications;
-import com.dauducbach.clone.modules.auth.entity.UserCredentials;
-import com.dauducbach.clone.modules.auth.repository.UserCredentialsRepository;
 import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
@@ -32,7 +30,6 @@ public class EmailService {
     private static final Logger logger = LoggerFactory.getLogger(EmailService.class);
     JavaMailSender javaMailSender;
     R2dbcEntityTemplate r2dbcEntityTemplate;
-    UserCredentialsRepository userCredentialsRepository;
 
     public Mono<String> sendEmail(NotificationForService request) {
         return Mono.fromCallable(() -> {

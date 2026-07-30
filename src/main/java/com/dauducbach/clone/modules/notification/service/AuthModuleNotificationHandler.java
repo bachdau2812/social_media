@@ -1,7 +1,6 @@
 package com.dauducbach.clone.modules.notification.service;
 
 import com.dauducbach.clone.commons.constant.UserActionType;
-import com.dauducbach.clone.modules.auth.repository.UserCredentialsRepository;
 import com.dauducbach.clone.modules.notification.constants.NotificationType;
 import com.dauducbach.clone.modules.notification.dto.request.NotificationRequest;
 import com.dauducbach.clone.modules.notification.repository.NotificationTemplatesRepository;
@@ -16,6 +15,7 @@ import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 @Service
 @FieldDefaults(level = lombok.AccessLevel.PRIVATE, makeFinal = true)
@@ -24,11 +24,10 @@ import java.util.List;
 public class AuthModuleNotificationHandler {
     private static final Logger log = LoggerFactory.getLogger(AuthModuleNotificationHandler.class);
     NotificationService notificationService;
-    UserCredentialsRepository userCredentialsRepository;
     NotificationTemplatesRepository notificationTemplatesRepository;
 
     @KafkaListener(topics = "auth_send_code", groupId = "notification-service")
-    public void handleSendCodeForRegistration(@Payload String payload) {
+    public CompletableFuture<Void> handleSendCodeForRegistration(@Payload String payload) {
         JsonObject payloadJson = GsonUtils.fromString(payload);
 
         String username = String.valueOf(payloadJson.get("username"));
@@ -46,7 +45,7 @@ public class AuthModuleNotificationHandler {
                 .title("Registration Code")
                 .build();
 
-        notificationTemplatesRepository.findByActionType(notificationRequest.getActionType())
+        return notificationTemplatesRepository.findByActionType(notificationRequest.getActionType())
                 .doOnSuccess(notificationTemplates -> log.info("|AuthModuleNotificationHandler|handleSendCodeForRegistration|fetched template for actionType={}|templateId={}", notificationRequest.getActionType(), notificationTemplates.getId()))
                 .flatMap(notificationTemplates -> {
                     String processedHtml = notificationTemplates.getTemplate()
@@ -57,11 +56,11 @@ public class AuthModuleNotificationHandler {
 
                     return notificationService.sendNotification(notificationRequest);
                 })
-                .subscribe();
+                .then().toFuture();
     }
 
     @KafkaListener(topics = "forget_password_event", groupId = "notification-service")
-    public void handleForgetPasswordEvent(@Payload String payload) {
+    public CompletableFuture<Void> handleForgetPasswordEvent(@Payload String payload) {
         JsonObject payloadJson = GsonUtils.fromString(payload);
 
         String code = String.valueOf(payloadJson.get("code"));
@@ -79,7 +78,7 @@ public class AuthModuleNotificationHandler {
                 .build();
 
         ///  Send notification
-        notificationTemplatesRepository.findByActionType(notificationRequest.getActionType())
+        return notificationTemplatesRepository.findByActionType(notificationRequest.getActionType())
                 .doOnSuccess(notificationTemplates -> log.info("|AuthModuleNotificationHandler|handleForgetPasswordEvent|fetched template for actionType={}|templateId={}", notificationRequest.getActionType(), notificationTemplates.getId()))
                 .flatMap(notificationTemplates -> {
                     String processedHtml = notificationTemplates.getTemplate()
@@ -90,12 +89,12 @@ public class AuthModuleNotificationHandler {
 
                     return notificationService.sendNotification(notificationRequest);
                 })
-                .subscribe();
+                .then().toFuture();
 
     }
 
     @KafkaListener(topics = "new_password_event", groupId = "notification-service")
-    public void handleSendNewPasswordEvent(@Payload String payload) {
+    public CompletableFuture<Void> handleSendNewPasswordEvent(@Payload String payload) {
         JsonObject payloadJson = GsonUtils.fromString(payload);
 
         String newPassword = String.valueOf(payloadJson.get("newPassword"));
@@ -113,7 +112,7 @@ public class AuthModuleNotificationHandler {
                 .build();
 
         ///  Send notification
-        notificationTemplatesRepository.findByActionType(notificationRequest.getActionType())
+        return notificationTemplatesRepository.findByActionType(notificationRequest.getActionType())
                 .doOnSuccess(notificationTemplates -> log.info("|AuthModuleNotificationHandler|handleSendNewPasswordEvent|fetched template for actionType={}|templateId={}", notificationRequest.getActionType(), notificationTemplates.getId()))
                 .flatMap(notificationTemplates -> {
                     String processedHtml = notificationTemplates.getTemplate()
@@ -124,11 +123,11 @@ public class AuthModuleNotificationHandler {
 
                     return notificationService.sendNotification(notificationRequest);
                 })
-                .subscribe();
+                .then().toFuture();
     }
 
     @KafkaListener(topics = "new_password_and_username_event", groupId = "notification-service")
-    public void handleSendNewPasswordAndUsernameEvent(@Payload String payload) {
+    public CompletableFuture<Void> handleSendNewPasswordAndUsernameEvent(@Payload String payload) {
         JsonObject payloadJson = GsonUtils.fromString(payload);
 
         String newPassword = String.valueOf(payloadJson.get("newPassword"));
@@ -146,7 +145,7 @@ public class AuthModuleNotificationHandler {
                 .build();
 
         ///  Send notification
-        notificationTemplatesRepository.findByActionType(notificationRequest.getActionType())
+        return notificationTemplatesRepository.findByActionType(notificationRequest.getActionType())
                 .doOnSuccess(notificationTemplates -> log.info("|AuthModuleNotificationHandler|handleSendNewPasswordEvent|fetched template for actionType={}|templateId={}", notificationRequest.getActionType(), notificationTemplates.getId()))
                 .flatMap(notificationTemplates -> {
                     String processedHtml = notificationTemplates.getTemplate()
@@ -157,11 +156,11 @@ public class AuthModuleNotificationHandler {
 
                     return notificationService.sendNotification(notificationRequest);
                 })
-                .subscribe();
+                .then().toFuture();
     }
 
     @KafkaListener(topics = "profile_creation_event", groupId = "notification-service")
-    public void handleProfileCreationEvent(@Payload String payload) {
+    public CompletableFuture<Void> handleProfileCreationEvent(@Payload String payload) {
         JsonObject payloadJson = GsonUtils.fromString(payload);
 
         String username = payloadJson.get("username").toString();
@@ -179,7 +178,7 @@ public class AuthModuleNotificationHandler {
                 .build();
 
         ///  Send notification
-        notificationTemplatesRepository.findByActionType(notificationRequest.getActionType())
+        return notificationTemplatesRepository.findByActionType(notificationRequest.getActionType())
                 .doOnSuccess(notificationTemplates -> log.info("|AuthModuleNotificationHandler|handleSendNewPasswordEvent|fetched template for actionType={}|templateId={}", notificationRequest.getActionType(), notificationTemplates.getId()))
                 .flatMap(notificationTemplates -> {
                     String processedHtml = notificationTemplates.getTemplate()
@@ -189,6 +188,6 @@ public class AuthModuleNotificationHandler {
 
                     return notificationService.sendNotification(notificationRequest);
                 })
-                .subscribe();
+                .then().toFuture();
     }
 }

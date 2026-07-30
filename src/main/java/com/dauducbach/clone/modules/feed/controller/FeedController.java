@@ -1,15 +1,18 @@
 package com.dauducbach.clone.modules.feed.controller;
 
 import com.dauducbach.clone.commons.response.ApiResponse;
+import com.dauducbach.clone.commons.security.ActorIdentity;
 import com.dauducbach.clone.modules.feed.dto.response.FeedLongTermVectorRefreshResponse;
 import com.dauducbach.clone.modules.feed.dto.response.FeedResponse;
 import com.dauducbach.clone.modules.feed.service.FeedLongTermVectorService;
 import com.dauducbach.clone.modules.feed.service.FeedService;
+import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Mono;
 
@@ -22,8 +25,10 @@ public class FeedController {
 
     @GetMapping
     public Mono<ApiResponse<FeedResponse>> getFeed(@RequestParam String userId,
-                                                   @RequestParam(defaultValue = "20") int limit) {
-        return feedService.getFeed(userId, limit)
+                                                   Authentication authentication,
+                                                   @RequestParam(defaultValue = "20") int limit,
+                                                   @RequestParam(defaultValue = "FEED") MediaDisplayType mediaType) {
+        return feedService.getFeed(requireUser(authentication, userId), limit, mediaType)
                 .map(response -> ApiResponse.<FeedResponse>builder()
                         .message("Feed retrieved successfully")
                         .result(response)
@@ -41,5 +46,8 @@ public class FeedController {
                         .message("Feed long term vectors refreshed successfully")
                         .result(response)
                         .build());
+    }
+    private String requireUser(Authentication authentication, String userId) {
+        return ActorIdentity.require(authentication.getName(), userId);
     }
 }

@@ -13,6 +13,7 @@ import lombok.experimental.FieldDefaults;
 @Builder
 
 public class UserSocialMediaRequest {
+    String id;
     String userId;
     String link;
 }

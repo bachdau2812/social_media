@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Transient;
 import org.springframework.data.relational.core.mapping.Table;
 
 import java.time.Instant;
@@ -22,10 +23,16 @@ public class UserStories {
     String userId;
     String mediaUrl;
     String mediaType;
+    String musicId;
     String musicUrl;
     Long musicStart;
     Long musicEnd;
+    String publicationId;
+    Integer publicationOrder;
+    Integer publicationItemCount;
     String status;
     Instant createdAt;
     Instant expiredAt;
+    @Transient
+    Boolean viewerSeen;
 }

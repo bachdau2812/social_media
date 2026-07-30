@@ -26,6 +26,14 @@ public class UserUniversityController {
                         .build());
     }
 
+    @PutMapping
+    public Mono<ApiResponse<UserUniversity>> updateUserUniversity(@Valid @RequestBody UserUniversityRequest request) {
+        return userUniversityService.updateUserUniversity(request)
+                .map(updated -> ApiResponse.<UserUniversity>builder()
+                        .message("UserUniversity updated successfully")
+                        .result(updated)
+                        .build());
+    }
     /// Lấy UserUniversity theo ID
     @GetMapping("/{id}")
     public Mono<ApiResponse<UserUniversity>> getUserUniversityById(@PathVariable String id) {

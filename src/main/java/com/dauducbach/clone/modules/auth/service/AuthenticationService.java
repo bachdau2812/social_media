@@ -91,6 +91,8 @@ public class AuthenticationService {
                                     .accessToken(accessToken)
                                     .refreshToken(refreshToken)
                                     .deviceInfo(loginRequest.getDeviceInfo())
+                                    .userId(userCredentials.getUserId())
+                                    .username(userCredentials.getUsername())
                                     .build();
 
                             return r2dbcEntityTemplate.insert(RefreshTokens.class)

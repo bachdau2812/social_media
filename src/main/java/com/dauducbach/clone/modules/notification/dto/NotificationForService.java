@@ -5,6 +5,8 @@ import com.dauducbach.clone.commons.constant.UserActionType;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
+import java.util.Map;
+
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
@@ -19,5 +21,8 @@ public class NotificationForService {
     String recipient;
     String title;
     String htmlContent;
+    Map<String, String> metadata;
+    String deepLink;
+    String dedupKey;
     NotificationType notificationType;
 }

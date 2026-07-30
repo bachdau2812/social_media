@@ -11,13 +11,14 @@ import com.dauducbach.clone.modules.notification.entity.NotificationPushToken;
 import com.dauducbach.clone.modules.notification.entity.UserNotifications;
 import com.dauducbach.clone.modules.notification.repository.NotificationEventsRepository;
 import com.dauducbach.clone.modules.notification.repository.UserPushNotificationRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.firebase.messaging.FirebaseMessaging;
 import com.google.firebase.messaging.Message;
 import com.google.firebase.messaging.Notification;
-import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
@@ -28,13 +29,58 @@ import java.util.UUID;
 
 @Service
 @FieldDefaults(level = lombok.AccessLevel.PRIVATE,  makeFinal = true)
-@RequiredArgsConstructor
 
 public class PushNotificationService {
     private static final Logger logger = LoggerFactory.getLogger(PushNotificationService.class);
     UserPushNotificationRepository userPushNotificationRepository;
     NotificationEventsRepository notificationEventsRepository;
     R2dbcEntityTemplate r2dbcEntityTemplate;
+    NotificationPushGateway notificationPushGateway;
+    NotificationDestinationBuilder destinationBuilder;
+    NotificationContentNormalizer contentNormalizer;
+    NotificationMetadataCodec metadataCodec;
+    FirebasePushMessageFactory pushMessageFactory;
+    NotificationPersistenceFlow notificationPersistenceFlow;
+
+    @Autowired
+    public PushNotificationService(
+            UserPushNotificationRepository userPushNotificationRepository,
+            NotificationEventsRepository notificationEventsRepository,
+            R2dbcEntityTemplate r2dbcEntityTemplate,
+            NotificationPushGateway notificationPushGateway,
+            NotificationDestinationBuilder destinationBuilder,
+            NotificationContentNormalizer contentNormalizer,
+            NotificationMetadataCodec metadataCodec,
+            FirebasePushMessageFactory pushMessageFactory
+    ) {
+        this.userPushNotificationRepository = userPushNotificationRepository;
+        this.notificationEventsRepository = notificationEventsRepository;
+        this.r2dbcEntityTemplate = r2dbcEntityTemplate;
+        this.notificationPushGateway = notificationPushGateway;
+        this.destinationBuilder = destinationBuilder;
+        this.contentNormalizer = contentNormalizer;
+        this.metadataCodec = metadataCodec;
+        this.pushMessageFactory = pushMessageFactory;
+        this.notificationPersistenceFlow = new NotificationPersistenceFlow(
+                userPushNotificationRepository, notificationEventsRepository, r2dbcEntityTemplate,
+                notificationPushGateway, destinationBuilder, contentNormalizer, metadataCodec, pushMessageFactory);
+    }
+
+    PushNotificationService(
+            UserPushNotificationRepository userPushNotificationRepository,
+            NotificationEventsRepository notificationEventsRepository,
+            R2dbcEntityTemplate r2dbcEntityTemplate
+    ) {
+        this(
+                userPushNotificationRepository,
+                notificationEventsRepository,
+                r2dbcEntityTemplate,
+                new FirebaseNotificationPushGateway(),
+                new NotificationDestinationBuilder(),
+                new NotificationContentNormalizer(),
+                new NotificationMetadataCodec(new ObjectMapper()),
+                new FirebasePushMessageFactory());
+    }
 
     public Mono<PushTokenRegisterResponse> registerPushToken(PushTokenRegisterRequest request) {
         return Mono.defer(() -> {
@@ -61,6 +107,14 @@ public class PushNotificationService {
     }
 
     public Mono<String> sendPushNotification(NotificationForService request) {
+        return Mono.defer(() -> buildAndPersistNotification(request));
+    }
+
+    private Mono<String> buildAndPersistNotification(NotificationForService request) {
+        return notificationPersistenceFlow.send(request);
+    }
+
+    private Mono<String> sendPushNotificationLegacy(NotificationForService request) {
         if (request.getRecipient() == null || request.getRecipient().isBlank()) {
             return Mono.error(new AppException(ErrorCode.SEND_PUSH_NOTIFICATION_FAILED, "Recipient userId is missing"));
         }

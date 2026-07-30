@@ -65,6 +65,7 @@ public class SecurityConfig {
     private final SocialLoginService socialLoginService;
     private final SocialLoginSuccessHandler socialLoginSuccessHandler;
     private final SocialLoginFailService socialLoginFailService;
+    private final CookieServerAuthenticationConverter cookieServerAuthenticationConverter;
 
     @Value("${spring.security.oauth2.client.registration.google.client-id}")
     private String googleClientId;
@@ -91,12 +92,14 @@ public class SecurityConfig {
             JwtService jwtService,
             SocialLoginService socialLoginService,
             SocialLoginSuccessHandler socialLoginSuccessHandler,
-            SocialLoginFailService socialLoginFailService, AuthenticationService authenticationService
+            SocialLoginFailService socialLoginFailService,
+            CookieServerAuthenticationConverter cookieServerAuthenticationConverter
     ) {
         this.jwtService = jwtService;
         this.socialLoginService = socialLoginService;
         this.socialLoginSuccessHandler = socialLoginSuccessHandler;
         this.socialLoginFailService = socialLoginFailService;
+        this.cookieServerAuthenticationConverter = cookieServerAuthenticationConverter;
     }
 
     @Bean
@@ -116,7 +119,7 @@ public class SecurityConfig {
         );
 
         serverHttpSecurity.oauth2ResourceServer(oAuth2ResourceServerSpec -> oAuth2ResourceServerSpec
-                .bearerTokenConverter(new CookieServerAuthenticationConverter())
+                .bearerTokenConverter(cookieServerAuthenticationConverter)
                 .jwt(jwtSpec -> jwtSpec
                         .jwtDecoder(reactiveJwtDecoder())
                         .jwtAuthenticationConverter(jwtAuthenticationConverter())
@@ -140,7 +143,7 @@ public class SecurityConfig {
     public ReactiveJwtDecoder reactiveJwtDecoder() {
         return token -> jwtService.verifyToken(token)
                 .doOnError(e -> log.info("SecurityConfig|JWT verification failed: {}", e.getMessage()))
-                .doOnSuccess(jwt -> log.info("SecurityConfig|Valid_token: {}", jwt))
+                .doOnSuccess(jwt -> log.debug("SecurityConfig|Valid_token"))
                 .then(Mono.fromSupplier(() -> decodeJwt(token)));
     }
 
@@ -266,8 +269,8 @@ public class SecurityConfig {
 
     private Jwt decodeJwt(String token) {
         try {
-            log.info("SecurityConfig|Decoding JWT: {}", token);
             SignedJWT signedJWT = SignedJWT.parse(token);
+            log.debug("SecurityConfig|Decoding JWT claims");
             Date issueTime = signedJWT.getJWTClaimsSet().getIssueTime();
             Date expiryTime = signedJWT.getJWTClaimsSet().getExpirationTime();
 

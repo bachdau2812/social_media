@@ -34,6 +34,10 @@ public class PostDetails {
     Instant createdAt;
     Instant updatedAt;
     String validateStatus;
+    String musicId;
+    Long musicStart;
+    Long musicEnd;
+    String mediaRatio;
 
     public List<String> getHashtagList() {
         if (hashtag == null || hashtag.trim().isEmpty()) {

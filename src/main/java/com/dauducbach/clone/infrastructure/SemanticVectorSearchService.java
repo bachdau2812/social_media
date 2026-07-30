@@ -41,6 +41,25 @@ public class SemanticVectorSearchService {
         );
     }
 
+    public Mono<List<String>> searchUserIdsByVector(List<Double> vector,
+                                                    int limit,
+                                                    Set<String> excludedIds) {
+        if (vector == null || vector.isEmpty() || limit <= 0) {
+            return Mono.just(List.of());
+        }
+
+        Set<String> safeExcludedIds = excludedIds == null ? Set.of() : new HashSet<>(excludedIds);
+        int maxResults = limit + safeExcludedIds.size() + 10;
+        return searchByVector(vector, USER_LONG_TERM_VECTOR_FIELD, UserDetailVector.class, maxResults)
+                .map(SearchHit::getContent)
+                .map(UserDetailVector::getUserId)
+                .filter(id -> id != null && !id.isBlank())
+                .filter(id -> !safeExcludedIds.contains(id))
+                .distinct()
+                .take(limit)
+                .collectList();
+    }
+
     public Mono<List<String>> searchPostIds(String query, int limit, Set<String> excludedIds) {
         return semanticSearch(
                 query,

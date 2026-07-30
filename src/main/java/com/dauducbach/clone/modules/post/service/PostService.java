@@ -1,18 +1,24 @@
 package com.dauducbach.clone.modules.post.service;
 
+import com.dauducbach.clone.commons.constant.PostNotificationCacheKeys;
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
-import com.dauducbach.clone.commons.constant.PostNotificationCacheKeys;
+import com.dauducbach.clone.modules.post.constant.PostMediaRatio;
+import com.dauducbach.clone.modules.post.dto.event.PostMediaScanItem;
 import com.dauducbach.clone.modules.post.dto.request.PostCreateRequest;
+import com.dauducbach.clone.modules.post.dto.request.PostItemCreateRequest;
+import com.dauducbach.clone.modules.post.dto.request.PostItemUpdateRequest;
 import com.dauducbach.clone.modules.post.dto.request.PostUpdateRequest;
-import com.dauducbach.clone.modules.post.dto.request.MediaUploadRequest;
 import com.dauducbach.clone.modules.post.dto.response.PostCreateResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostNotificationMuteResponse;
 import com.dauducbach.clone.modules.post.entity.PostDetails;
+import com.dauducbach.clone.modules.post.entity.PostItem;
 import com.dauducbach.clone.modules.post.repositoty.PostDetailsRepository;
+import com.dauducbach.clone.modules.post.repositoty.PostItemRepository;
 import com.dauducbach.clone.utils.GsonUtils;
 import com.dauducbach.clone.utils.RedisUtil;
 import com.google.gson.JsonObject;
+import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -25,118 +31,95 @@ import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 import reactor.kafka.sender.KafkaSender;
 import reactor.kafka.sender.SenderRecord;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.UUID;
+import java.util.stream.IntStream;
 
 @Service
 @RequiredArgsConstructor
-@FieldDefaults(level = lombok.AccessLevel.PRIVATE, makeFinal = true)
+@FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 public class PostService {
+    private static final Logger log = LoggerFactory.getLogger(PostService.class);
+    private static final String POST_CACHE_PREFIX = "post:details:v3:";
+    private static final Duration CACHE_TTL = Duration.ofHours(24);
+    private static final Duration POST_NOTIFICATION_MUTE_TTL = Duration.ofDays(60);
+    private static final long POST_NOTIFICATION_MUTE_DAYS = 60L;
+    private static final String PENDING_SCAN_MESSAGE = "BÃ i viáº¿t máº¥t má»™t chÃºt thá»i gian Ä‘á»ƒ táº£i lÃªn, vui lÃ²ng Ä‘á»£i";
+
     PostDetailsRepository postDetailsRepository;
+    PostItemRepository postItemRepository;
     R2dbcEntityTemplate r2dbcEntityTemplate;
     ReactiveRedisTemplate<String, String> reactiveRedisStringTemplate;
     KafkaSender<String, String> kafkaSender;
     PostSseService postSseService;
-
-    private static final Logger log = LoggerFactory.getLogger(PostService.class);
-    private static final String POST_CACHE_PREFIX = "post_details:";
-    private static final String WAIT_UPLOAD_PREFIX = "wait_for_upload_post:";
-    private static final Duration CACHE_TTL = Duration.ofHours(24);
-    private static final Duration WAIT_UPLOAD_TTL = Duration.ofHours(1);
-    private static final Duration POST_NOTIFICATION_MUTE_TTL = Duration.ofDays(60);
-    private static final long POST_NOTIFICATION_MUTE_DAYS = 60L;
+    PostMediaModerationOrchestrator postMediaModerationOrchestrator;
 
     public Mono<PostCreateResponse> createPost(PostCreateRequest request) {
-        log.info("|PostService|createPost|start|userId={}|contentLength={}",
-                request.getUserId(),
-                request.getContent() != null ? request.getContent().length() : 0);
+        return Mono.defer(() -> {
+            validateCreateRequest(request);
 
-        if (request.getUserId() == null || request.getUserId().isBlank()) {
-            log.warn("|PostService|createPost|validation failed|userId is missing");
-            return Mono.error(new AppException(
-                    ErrorCode.POST_CREATE_FAILED,
-                    "userId is required"
-            ));
-        }
+            String postId = UUID.randomUUID().toString();
+            String userId = normalizeRequired(request.getUserId(), "userId is required");
+            List<PostMediaScanItem> scanItems = buildScanItems(request);
+            boolean hasMedia = !scanItems.isEmpty();
+            String commonMusicId = normalizeOptional(request.getMusicId());
+            Long commonMusicStart = commonMusicId == null ? null : request.getMusicStart();
+            Long commonMusicEnd = commonMusicId == null ? null : request.getMusicEnd();
+            String mediaRatio = PostMediaRatio.defaultIfMissing(request.getMediaRatio());
+            String content = sanitizeContent(request.getContent(), hasMedia);
 
-        List<MediaUploadRequest> mediaList = request.getMediaList() == null ? List.of() : request.getMediaList();
-        boolean hasMedia = !mediaList.isEmpty();
-        log.info("|PostService|createPost|media resolved|count={}", mediaList.size());
+            PostDetails postDetails = PostDetails.builder()
+                    .postId(postId)
+                    .userId(userId)
+                    .content(content)
+                    .musicId(commonMusicId)
+                    .musicStart(commonMusicStart)
+                    .musicEnd(commonMusicEnd)
+                    .mediaRatio(mediaRatio)
+                    .validateStatus(hasMedia ? "PENDING_SCAN" : "APPROVED")
+                    .build();
+            postDetails.setCreatedAt(Instant.now());
+            postDetails.setUpdatedAt(Instant.now());
+            postDetails.setHashtagList(request.getHashtags());
 
-        String postStatus = hasMedia ? "PENDING_SCAN" : "APPROVED";
+            Mono<Void> createAction = r2dbcEntityTemplate.insert(PostDetails.class)
+                    .using(postDetails)
+                    .flatMap(saved -> hasMedia
+                            ? sendCheckMediaEvent(saved.getPostId(), saved.getUserId(), scanItems)
+                            : sendPostSuccessSse(saved, "BÃ i viáº¿t Ä‘Ã£ Ä‘Æ°á»£c Ä‘Äƒng táº£i thÃ nh cÃ´ng")
+                                    .then(sendPostUploadEvent(saved)))
+                    .doOnSuccess(v -> log.info("|PostService|createPost|accepted|postId={}|userId={}|mediaCount={}",
+                            postId, userId, scanItems.size()))
+                    .onErrorMap(throwable -> throwable instanceof AppException
+                            ? throwable
+                            : new AppException(
+                                    ErrorCode.POST_CREATE_FAILED,
+                                    String.format("Create post failed for userId=%s", userId),
+                                    throwable
+                            ));
 
-        String postId = UUID.randomUUID().toString();
-        String content = sanitizeAndValidateContent(request.getContent());
-        List<String> hashtags = request.getHashtag();
-
-        log.info("|PostService|createPost|creating post entity|postId={}|userId={}", postId, request.getUserId());
-
-        PostDetails postDetails = PostDetails.builder()
-                .postId(postId)
-                .userId(request.getUserId())
-                .content(content)
-                .validateStatus(postStatus)
-                .build();
-        postDetails.setCreatedAt(Instant.now());
-        postDetails.setUpdatedAt(Instant.now());
-        postDetails.setHashtagList(hashtags);
-
-        String waitKey = WAIT_UPLOAD_PREFIX + postId;
-
-        Mono<PostDetails> insertPost = r2dbcEntityTemplate.insert(PostDetails.class)
-                .using(postDetails)
-                .publishOn(Schedulers.boundedElastic())
-                .doOnSuccess(saved -> log.info("|PostService|createPost|post saved to database|postId={}|status={}", postId, postStatus))
-                .onErrorMap(throwable -> {
-                    log.error("|PostService|createPost|database insert failed|postId={}|error={}",
-                            postId, throwable.getMessage());
-                    return new AppException(
-                            ErrorCode.POST_CREATE_FAILED,
-                            String.format("Create post failed for userId=%s", request.getUserId()),
-                            throwable
-                    );
-                });
-
-        Mono<Void> postCreateAction = hasMedia
-                ? insertPost
-                .flatMap(saved -> reactiveRedisStringTemplate.opsForValue()
-                        .set(waitKey, saved.getUserId(), WAIT_UPLOAD_TTL)
-                        .then(sendCheckMediaEvent(postId, request.getUserId(), mediaList)))
-                .doOnSuccess(v -> log.info("|PostService|createPost|scan event sent|postId={}|mediaCount={}",
-                        postId, mediaList.size()))
-                : insertPost
-                .flatMap(saved -> sendPostSuccessSse(saved)
-                        .then(sendPostUploadEvent(saved).onErrorResume(error -> {
-                            log.error("|PostService|createPost|text post event publish failed|postId={}|error={}",
-                                    postId, error.getMessage());
-                            return Mono.empty();
-                        })))
-                .doOnSuccess(v -> log.info("|PostService|createPost|text post approved|postId={}", postId));
-
-        return postCreateAction
-                .thenReturn(PostCreateResponse.builder()
-                        .postId(postId)
-                        .message(hasMedia ? "Dang doi xu ly va duyet media" : "Post created")
-                .build())
-                .doOnError(error -> {
-                    log.error("|PostService|createPost|failed|postId={}|userId={}|error={}", postId, request.getUserId(), error.getMessage());
-                    if (!hasMedia) {
-                        sendPostFailureSse(request.getUserId(), postId, "Create post failed");
-                    }
-                })
-                .doOnSuccess(response -> log.info("|PostService|createPost|completed|postId={}", postId));
+            return createAction.thenReturn(PostCreateResponse.builder()
+                    .postId(postId)
+                    .message(hasMedia ? PENDING_SCAN_MESSAGE : "BÃ i viáº¿t Ä‘Ã£ Ä‘Æ°á»£c Ä‘Äƒng táº£i thÃ nh cÃ´ng")
+                    .build());
+        });
     }
 
     public Mono<PostDetails> updatePost(PostUpdateRequest request) {
-        String postId = request.getPostId();
-        log.info("|PostService|updatePost|start|postId={}|userId={}", postId, request.getUserId());
+        if (request == null) {
+            return Mono.error(new AppException(ErrorCode.POST_UPDATE_FAILED, "Update request is required"));
+        }
+        String postId = normalizeRequired(request.getPostId(), "postId is required");
+        String actorId = normalizeRequired(request.getUserId(), "userId is required");
 
         return postDetailsRepository.findById(postId)
                 .switchIfEmpty(Mono.error(new AppException(
@@ -144,52 +127,151 @@ public class PostService {
                         String.format("Post not found for postId=%s", postId)
                 )))
                 .flatMap(existing -> {
-                    log.info("|PostService|updatePost|post found|postId={}|currentContentLength={}",
-                            postId, existing.getContent() != null ? existing.getContent().length() : 0);
-
-                    if (request.getContent() != null && !request.getContent().isBlank()) {
-                        String sanitizedContent = sanitizeAndValidateContent(request.getContent());
-                        existing.setContent(sanitizedContent);
-                        log.info("|PostService|updatePost|content updated|postId={}|newContentLength={}",
-                                postId, sanitizedContent.length());
+                    if (!actorId.equals(existing.getUserId())) {
+                        return Mono.error(new AppException(
+                                ErrorCode.POST_UPDATE_FAILED,
+                                "Only the post owner can update this post"
+                        ));
                     }
-                    if (request.getHashtag() != null && !request.getHashtag().isEmpty()) {
-                        existing.setHashtagList(request.getHashtag());
-                        log.info("|PostService|updatePost|hashtags updated|postId={}|count={}",
-                                postId, request.getHashtag().size());
-                    }
-                    existing.setUpdatedAt(Instant.now());
-                    return postDetailsRepository.save(existing);
+                    return postItemRepository.findByPostIdOrderByOrderNumberAsc(postId)
+                            .collectList()
+                            .flatMap(existingItems -> {
+                                applyPostMetadataUpdate(existing, request, !existingItems.isEmpty());
+                                return applyPostItemUpdates(postId, existingItems, request.getItems())
+                                        .then(postDetailsRepository.save(existing));
+                            });
                 })
-                .doOnSuccess(updated -> log.info("|PostService|updatePost|saved to database|postId={}", postId))
-                .onErrorMap(throwable -> {
-                    log.error("|PostService|updatePost|operation failed|postId={}|error={}",
-                            postId, throwable.getMessage());
-                    return throwable instanceof AppException
-                            ? throwable
-                            : new AppException(
-                                    ErrorCode.POST_UPDATE_FAILED,
-                                    String.format("Update post failed for postId=%s", postId),
-                                    throwable
-                            );
-                })
-                .publishOn(Schedulers.boundedElastic())
-                .doOnSuccess(updated -> {
-                    String cacheKey = POST_CACHE_PREFIX + updated.getPostId();
-                    reactiveRedisStringTemplate.opsForValue().get(cacheKey)
-                            .flatMap(existingCache -> {
-                                String cacheValue = RedisUtil.serialize(updated);
-                                if (cacheValue == null) {
-                                    return Mono.empty();
-                                }
-                                return reactiveRedisStringTemplate.opsForValue().set(cacheKey, cacheValue, CACHE_TTL);
-                            })
-                            .subscribe();
+                .flatMap(updated -> refreshPostAfterUpdate(updated).thenReturn(updated))
+                .onErrorMap(throwable -> throwable instanceof AppException
+                        ? throwable
+                        : new AppException(
+                                ErrorCode.POST_UPDATE_FAILED,
+                                String.format("Update post failed for postId=%s", postId),
+                                throwable
+                        ));
+    }
 
-                    publishPostEvent("post_update_event", updated);
-                    log.info("|PostService|updatePost|cache updated and event published|postId={}", postId);
+
+    private Mono<Void> applyPostItemUpdates(
+            String postId,
+            List<PostItem> existingItems,
+            List<PostItemUpdateRequest> requestedItems
+    ) {
+        if (requestedItems == null) {
+            return Mono.empty();
+        }
+        Map<String, PostItem> existingById = existingItems.stream()
+                .collect(Collectors.toMap(PostItem::getId, Function.identity()));
+        for (PostItemUpdateRequest requested : requestedItems) {
+            String requestedId = normalizeOptional(requested.getItemId());
+            if (requestedId != null && !existingById.containsKey(requestedId)) {
+                throw new AppException(ErrorCode.POST_UPDATE_FAILED, "Post item does not belong to this post");
+            }
+            if (requestedId == null && (normalizeOptional(requested.getSecureUrl()) == null
+                    || normalizeOptional(requested.getPublicId()) == null)) {
+                throw new AppException(ErrorCode.POST_UPDATE_FAILED, "New media upload data is incomplete");
+            }
+        }
+
+        List<String> requestedIds = requestedItems.stream()
+                .map(PostItemUpdateRequest::getItemId)
+                .filter(itemId -> itemId != null && !itemId.isBlank())
+                .toList();
+        Mono<Void> removeOmitted = Flux.fromIterable(existingItems)
+                .filter(item -> !requestedIds.contains(item.getId()))
+                .concatMap(item -> postItemRepository.deleteById(item.getId()))
+                .then();
+
+        Mono<Void> updateKept = Flux.fromIterable(requestedItems)
+                .filter(requested -> normalizeOptional(requested.getItemId()) != null)
+                .index()
+                .concatMap(indexed -> {
+                    PostItemUpdateRequest requested = indexed.getT2();
+                    PostItem item = existingById.get(requested.getItemId());
+                    int orderNumber = requested.getOrderNumber() == null || requested.getOrderNumber() <= 0
+                            ? Math.toIntExact(indexed.getT1() + 1)
+                            : requested.getOrderNumber();
+                    item.setOrderNumber(orderNumber);
+                    item.setCaption(normalizeOptional(requested.getCaption()));
+                    String musicId = normalizeOptional(requested.getMusicId());
+                    if (musicId != null) {
+                        validateMusicSegment(musicId, requested.getMusicStart(), requested.getMusicEnd(), "post item");
+                    }
+                    item.setMusicId(musicId);
+                    item.setMusicStart(musicId == null ? null : requested.getMusicStart());
+                    item.setMusicEnd(musicId == null ? null : requested.getMusicEnd());
+                    item.setUpdatedAt(Instant.now());
+                    return postItemRepository.save(item);
                 })
-                .doOnSuccess(updated -> log.info("|PostService|updatePost|completed|postId={}", postId));
+                .then();
+
+        List<PostMediaScanItem> newItems = IntStream.range(0, requestedItems.size())
+                .filter(index -> normalizeOptional(requestedItems.get(index).getItemId()) == null)
+                .mapToObj(index -> {
+                    PostItemUpdateRequest requested = requestedItems.get(index);
+                    String musicId = normalizeOptional(requested.getMusicId());
+                    if (musicId != null) {
+                        validateMusicSegment(musicId, requested.getMusicStart(), requested.getMusicEnd(), "post item");
+                    }
+                    return PostMediaScanItem.builder()
+                            .orderNumber(requested.getOrderNumber() == null || requested.getOrderNumber() <= 0
+                                    ? index + 1
+                                    : requested.getOrderNumber())
+                            .secureUrl(normalizeRequired(requested.getSecureUrl(), "secureUrl is required"))
+                            .publicId(normalizeRequired(requested.getPublicId(), "publicId is required"))
+                            .resourceType(normalizeOptional(requested.getResourceType()))
+                            .caption(normalizeOptional(requested.getCaption()))
+                            .musicId(musicId)
+                            .musicStart(musicId == null ? null : requested.getMusicStart())
+                            .musicEnd(musicId == null ? null : requested.getMusicEnd())
+                            .build();
+                })
+                .toList();
+
+        return postMediaModerationOrchestrator.scanAdditionalPostItems(postId, newItems)
+                .then(removeOmitted)
+                .then(updateKept)
+                .doOnSuccess(ignored -> log.info(
+                        "|PostService|applyPostItemUpdates|postId={}|kept={}|added={}|removed={}",
+                        postId,
+                        requestedIds.size(),
+                        newItems.size(),
+                        Math.max(0, existingItems.size() - requestedItems.size())
+                ));
+    }
+
+    private void applyPostMetadataUpdate(PostDetails existing, PostUpdateRequest request, boolean hasExistingMedia) {
+        if (request.getContent() != null) {
+            existing.setContent(sanitizeContent(request.getContent(), hasExistingMedia || request.getItems() != null));
+        }
+        if (request.getHashtag() != null) {
+            existing.setHashtagList(request.getHashtag());
+        }
+        if (request.getMediaRatio() != null) {
+            if (!PostMediaRatio.isSupported(request.getMediaRatio())) {
+                throw new AppException(ErrorCode.POST_UPDATE_FAILED, "Unsupported mediaRatio");
+            }
+            existing.setMediaRatio(PostMediaRatio.defaultIfMissing(request.getMediaRatio()));
+        }
+        if (request.getMusicId() != null || request.getMusicStart() != null || request.getMusicEnd() != null) {
+            String musicId = normalizeOptional(request.getMusicId());
+            validateMusicSegment(musicId, request.getMusicStart(), request.getMusicEnd(), "post");
+            existing.setMusicId(musicId);
+            existing.setMusicStart(musicId == null ? null : request.getMusicStart());
+            existing.setMusicEnd(musicId == null ? null : request.getMusicEnd());
+        }
+        existing.setUpdatedAt(Instant.now());
+    }
+
+    private Mono<Void> refreshPostAfterUpdate(PostDetails updated) {
+        String cacheKey = POST_CACHE_PREFIX + updated.getPostId();
+        String cacheValue = RedisUtil.serialize(updated);
+        Mono<Boolean> cacheUpdate = cacheValue == null
+                ? Mono.just(false)
+                : reactiveRedisStringTemplate.opsForValue().set(cacheKey, cacheValue, CACHE_TTL);
+        return cacheUpdate
+                .onErrorReturn(false)
+                .then(publishPostEvent("post_update_event", updated));
     }
 
     public Mono<PostDetails> getPostById(String postId) {
@@ -222,12 +304,20 @@ public class PostService {
                                         String.format("Fetch post failed for postId=%s", postId),
                                         throwable
                         ))
-                        .doOnSuccess(post -> {
+                        .flatMap(post -> {
                             log.info("|PostService|getPostById|database hit|postId={}|userId={}", postId, post.getUserId());
-                            String cacheValue = RedisUtil.serialize(post);
-                            if (cacheValue != null) {
-                                reactiveRedisStringTemplate.opsForValue().set(cacheKey, cacheValue, CACHE_TTL).subscribe();
+                            String serialized = RedisUtil.serialize(post);
+                            if (serialized == null) {
+                                return Mono.just(post);
                             }
+                            return reactiveRedisStringTemplate.opsForValue()
+                                    .set(cacheKey, serialized, CACHE_TTL)
+                                    .onErrorResume(error -> {
+                                        log.warn("|PostService|getPostById|cache write failed|postId={}|error={}",
+                                                postId, error.getMessage());
+                                        return Mono.empty();
+                                    })
+                                    .thenReturn(post);
                         })
                 );
     }
@@ -304,22 +394,27 @@ public class PostService {
                 ));
     }
 
-    public Mono<Void> deletePostById(String postId) {
+    public Mono<Void> deletePostById(String postId, String userId) {
         String cacheKey = POST_CACHE_PREFIX + postId;
-        String waitKey = WAIT_UPLOAD_PREFIX + postId;
 
-        log.info("|PostService|deletePostById|postId={}", postId);
+        log.info("|PostService|deletePostById|postId={}|userId={}", postId, userId);
         return postDetailsRepository.findById(postId)
                 .switchIfEmpty(Mono.error(new AppException(
                         ErrorCode.POST_NOT_FOUND,
                         String.format("Post not found for postId=%s", postId)
                 )))
-                .flatMap(existing -> postDetailsRepository.deleteById(postId)
-                        .then(reactiveRedisStringTemplate.opsForValue().delete(cacheKey).then())
-                        .then(reactiveRedisStringTemplate.opsForValue().delete(waitKey).then())
-                )
-                .doOnSuccess(v -> log.info("|PostService|deletePostById|deleted|postId={}", postId))
-                .doOnError(error -> log.error("|PostService|deletePostById|failed|postId={}|error={}", postId, error.getMessage()))
+                .flatMap(existing -> {
+                    if (!userId.equals(existing.getUserId())) {
+                        return Mono.error(new AppException(
+                                ErrorCode.POST_DELETE_FAILED,
+                                String.format("Only the post owner can delete postId=%s", postId)
+                        ));
+                    }
+                    return postDetailsRepository.deleteById(postId)
+                            .then(reactiveRedisStringTemplate.opsForValue().delete(cacheKey).then());
+                })
+                .doOnSuccess(v -> log.info("|PostService|deletePostById|deleted|postId={}|userId={}", postId, userId))
+                .doOnError(error -> log.error("|PostService|deletePostById|failed|postId={}|userId={}|error={}", postId, userId, error.getMessage()))
                 .onErrorMap(throwable -> throwable instanceof AppException
                         ? throwable
                         : new AppException(
@@ -336,13 +431,9 @@ public class PostService {
                 .flatMap(posts -> {
                     log.info("|PostService|deletePostsByUserId|found posts|userId={}|count={}", userId, posts.size());
                     Mono<Void> cacheRemoval = Flux.fromIterable(posts)
-                            .flatMap(post -> {
-                                String cacheKey = POST_CACHE_PREFIX + post.getPostId();
-                                String waitKey = WAIT_UPLOAD_PREFIX + post.getPostId();
-                                return reactiveRedisStringTemplate.opsForValue().delete(cacheKey)
-                                        .then(reactiveRedisStringTemplate.opsForValue().delete(waitKey))
-                                        .then();
-                            })
+                            .flatMap(post -> reactiveRedisStringTemplate.opsForValue()
+                                    .delete(POST_CACHE_PREFIX + post.getPostId())
+                                    .then())
                             .then();
 
                     return cacheRemoval.then(postDetailsRepository.deleteByUserId(userId));
@@ -356,17 +447,121 @@ public class PostService {
                 ));
     }
 
-    private String sanitizeAndValidateContent(String content) {
-        if (content == null || content.isBlank()) {
+    private void validateCreateRequest(PostCreateRequest request) {
+        if (request == null) {
+            throw new AppException(ErrorCode.POST_CREATE_FAILED, "Post request is required");
+        }
+        normalizeRequired(request.getUserId(), "userId is required");
+        if (normalizeOptional(request.getMediaRatio()) != null && !PostMediaRatio.isSupported(request.getMediaRatio())) {
+            throw new AppException(ErrorCode.POST_CREATE_FAILED,
+                    "mediaRatio must be one of 1:1, 4:5, 3:4, 9:16, 4:3, 3:2, 16:9");
+        }
+        List<PostItemCreateRequest> items = request.getItems() == null ? List.of() : request.getItems();
+        if (items.isEmpty() && normalizeOptional(request.getContent()) == null) {
+            throw new AppException(ErrorCode.POST_CONTENT_INVALID, "Post content or media is required");
+        }
+
+        String commonMusicId = normalizeOptional(request.getMusicId());
+        if (commonMusicId != null) {
+            validateMusicSegment(commonMusicId, request.getMusicStart(), request.getMusicEnd(), "post");
+        }
+
+        for (int index = 0; index < items.size(); index++) {
+            PostItemCreateRequest item = items.get(index);
+            int orderNumber = item.getOrderNumber() == null || item.getOrderNumber() <= 0 ? index + 1 : item.getOrderNumber();
+            normalizeRequired(item.getSecureUrl(), "secureUrl is required for post item " + orderNumber);
+            normalizeRequired(item.getPublicId(), "publicId is required for post item " + orderNumber);
+            if (commonMusicId == null) {
+                String itemMusicId = normalizeOptional(item.getMusicId());
+                if (itemMusicId != null && !isVideoItem(item)) {
+                    validateMusicSegment(itemMusicId, item.getMusicStart(), item.getMusicEnd(), "post item " + orderNumber);
+                }
+            }
+        }
+    }
+
+    private List<PostMediaScanItem> buildScanItems(PostCreateRequest request) {
+        List<PostItemCreateRequest> items = request.getItems() == null ? List.of() : request.getItems();
+        boolean useSharedMusic = normalizeOptional(request.getMusicId()) != null;
+        return IntStream.range(0, items.size())
+                .mapToObj(index -> {
+                    PostItemCreateRequest item = items.get(index);
+                    int orderNumber = item.getOrderNumber() == null || item.getOrderNumber() <= 0 ? index + 1 : item.getOrderNumber();
+                    boolean videoItem = isVideoItem(item);
+                    String itemMusicId = useSharedMusic || videoItem ? null : normalizeOptional(item.getMusicId());
+                    return PostMediaScanItem.builder()
+                            .orderNumber(orderNumber)
+                            .secureUrl(normalizeRequired(item.getSecureUrl(), "secureUrl is required for post item " + orderNumber))
+                            .publicId(normalizeRequired(item.getPublicId(), "publicId is required for post item " + orderNumber))
+                            .resourceType(normalizeOptional(item.getResourceType()))
+                            .caption(normalizeOptional(item.getCaption()))
+                            .musicId(itemMusicId)
+                            .musicStart(itemMusicId == null ? null : item.getMusicStart())
+                            .musicEnd(itemMusicId == null ? null : item.getMusicEnd())
+                            .build();
+                })
+                .sorted(Comparator.comparing(PostMediaScanItem::getOrderNumber))
+                .toList();
+    }
+
+    private boolean isVideoItem(PostItemCreateRequest item) {
+        String value = firstNonBlank(item.getResourceType(), item.getSecureUrl());
+        if (value == null) {
+            return false;
+        }
+        String lower = value.toLowerCase();
+        return lower.contains("video") || lower.endsWith(".mp4") || lower.endsWith(".mov") || lower.endsWith(".webm") || lower.endsWith(".m4v");
+    }
+
+    private String firstNonBlank(String first, String second) {
+        String normalizedFirst = normalizeOptional(first);
+        return normalizedFirst != null ? normalizedFirst : normalizeOptional(second);
+    }
+
+    private void validateMusicSegment(String musicId, Long musicStart, Long musicEnd, String scope) {
+        if (musicId == null) {
+            if (musicStart != null || musicEnd != null) {
+                throw new AppException(ErrorCode.POST_CREATE_FAILED,
+                        "musicId is required when a music segment is provided for " + scope);
+            }
+            return;
+        }
+        if (musicStart == null || musicEnd == null) {
+            throw new AppException(ErrorCode.POST_CREATE_FAILED,
+                    "musicStart and musicEnd are required for " + scope);
+        }
+        if (musicStart < 0 || musicEnd <= musicStart) {
+            throw new AppException(ErrorCode.POST_CREATE_FAILED,
+                    "Invalid music segment for " + scope);
+        }
+    }
+
+    private String sanitizeContent(String content, boolean allowEmpty) {
+        String normalized = normalizeOptional(content);
+        if (normalized == null) {
+            if (allowEmpty) {
+                return "";
+            }
             throw new AppException(ErrorCode.POST_CONTENT_INVALID, "Post content is empty");
         }
 
-        String sanitized = Jsoup.clean(content, Safelist.relaxed());
-        if (sanitized.isBlank()) {
+        String sanitized = Jsoup.clean(normalized, Safelist.relaxed()).trim();
+        if (sanitized.isBlank() && !allowEmpty) {
             throw new AppException(ErrorCode.POST_CONTENT_INVALID, "Post content is invalid after sanitization");
         }
-
         return sanitized;
+    }
+
+    private String normalizeRequired(String value, String message) {
+        String normalized = normalizeOptional(value);
+        if (normalized == null) {
+            throw new AppException(ErrorCode.POST_CREATE_FAILED, message);
+        }
+        return normalized;
+    }
+
+    private String normalizeOptional(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     private void validatePostNotificationMuteRequest(String postId, String userId) {
@@ -378,21 +573,22 @@ public class PostService {
         }
     }
 
-    private void publishPostEvent(String topic, PostDetails postDetails) {
+    private Mono<Void> publishPostEvent(String topic, PostDetails postDetails) {
         JsonObject payload = new JsonObject();
         payload.addProperty("post_id", postDetails.getPostId());
         payload.addProperty("content", postDetails.getContent());
-        payload.add("hashtag", com.dauducbach.clone.utils.GsonUtils.getGson().toJsonTree(postDetails.getHashtagList()));
+        payload.addProperty("mediaRatio", PostMediaRatio.defaultIfMissing(postDetails.getMediaRatio()));
+        payload.add("hashtag", GsonUtils.getGson().toJsonTree(postDetails.getHashtagList()));
 
         SenderRecord<String, String, String> record = SenderRecord.create(
                 new ProducerRecord<>(topic, postDetails.getPostId(), payload.toString()),
                 topic
         );
 
-        kafkaSender.send(Mono.just(record))
+        return kafkaSender.send(Mono.just(record))
                 .doOnError(error -> log.error("|PostService|publishPostEvent|topic={}|error={}", topic, error.getMessage()))
                 .doOnComplete(() -> log.info("|PostService|publishPostEvent|sent|topic={}|postId={}", topic, postDetails.getPostId()))
-                .subscribe();
+                .then();
     }
 
     private Mono<Void> sendPostUploadEvent(PostDetails postDetails) {
@@ -415,38 +611,36 @@ public class PostService {
         payload.addProperty("post_id", postDetails.getPostId());
         payload.addProperty("userId", postDetails.getUserId());
         payload.addProperty("content", postDetails.getContent());
+        payload.addProperty("mediaRatio", PostMediaRatio.defaultIfMissing(postDetails.getMediaRatio()));
         payload.add("hashtag", GsonUtils.getGson().toJsonTree(postDetails.getHashtagList()));
+        if (postDetails.getMusicId() != null && !postDetails.getMusicId().isBlank()) {
+            payload.addProperty("musicId", postDetails.getMusicId());
+            payload.addProperty("musicStart", postDetails.getMusicStart());
+            payload.addProperty("musicEnd", postDetails.getMusicEnd());
+        }
         return payload;
     }
 
-    private Mono<Void> sendPostSuccessSse(PostDetails postDetails) {
+    private Mono<Void> sendPostSuccessSse(PostDetails postDetails, String message) {
         JsonObject payload = new JsonObject();
         payload.addProperty("postId", postDetails.getPostId());
         payload.addProperty("result", "SUCCESSED");
-        payload.addProperty("message", "Post approved");
-        postSseService.sendToUser(postDetails.getUserId(), "post_upload", payload.toString());
-        log.info("|PostService|sendPostSuccessSse|sent|postId={}|userId={}", postDetails.getPostId(), postDetails.getUserId());
-        return Mono.empty();
-    }
-
-    private void sendPostFailureSse(String userId, String postId, String message) {
-        if (userId == null || userId.isBlank()) {
-            return;
-        }
-
-        JsonObject payload = new JsonObject();
-        payload.addProperty("postId", postId);
-        payload.addProperty("result", "FAILED");
         payload.addProperty("message", message);
-        postSseService.sendToUser(userId, "post_upload", payload.toString());
-        log.info("|PostService|sendPostFailureSse|sent|postId={}|userId={}", postId, userId);
+        return postSseService.sendToUser(
+                        postDetails.getUserId(),
+                        "post_upload",
+                        payload.toString())
+                .doOnSuccess(unused -> log.info(
+                        "|PostService|sendPostSuccessSse|sent|postId={}|userId={}",
+                        postDetails.getPostId(),
+                        postDetails.getUserId()));
     }
 
-    private Mono<Void> sendCheckMediaEvent(String postId, String userId, List<MediaUploadRequest> mediaList) {
+    private Mono<Void> sendCheckMediaEvent(String postId, String userId, List<PostMediaScanItem> items) {
         JsonObject payload = new JsonObject();
         payload.addProperty("postId", postId);
         payload.addProperty("userId", userId);
-        payload.add("media", GsonUtils.getGson().toJsonTree(mediaList));
+        payload.add("items", GsonUtils.getGson().toJsonTree(items));
 
         SenderRecord<String, String, String> record = SenderRecord.create(
                 new ProducerRecord<>("check_media_event", postId, payload.toString()),
@@ -455,8 +649,8 @@ public class PostService {
 
         return kafkaSender.send(Mono.just(record))
                 .doOnError(error -> log.error("|PostService|sendCheckMediaEvent|postId={}|error={}", postId, error.getMessage()))
-                .doOnComplete(() -> log.info("|PostService|sendCheckMediaEvent|sent|postId={}|userId={}|mediaCount={}",
-                        postId, userId, mediaList.size()))
+                .doOnComplete(() -> log.info("|PostService|sendCheckMediaEvent|sent|postId={}|userId={}|itemCount={}",
+                        postId, userId, items.size()))
                 .then();
     }
 }

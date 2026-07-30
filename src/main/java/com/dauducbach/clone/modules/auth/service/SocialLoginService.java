@@ -4,6 +4,7 @@ import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.auth.entity.UserCredentials;
 import com.dauducbach.clone.modules.auth.repository.UserCredentialsRepository;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
@@ -62,7 +63,12 @@ public class SocialLoginService extends DefaultReactiveOAuth2UserService {
 
         /// extract provider common information
         String email = oAuth2User.getAttribute("email");
-        String displayName = oAuth2User.getAttribute("name");
+        String displayName = firstNonBlank(
+                oAuth2User.getAttribute("name"),
+                oAuth2User.getAttribute("login"),
+                email,
+                "Social user"
+        );
         String provider = oAuth2UserRequest.getClientRegistration().getRegistrationId();
 
         logger.info("|SocialLoginService| Processing user from provider: email={}, displayName={}, provider={}", email, displayName, provider);
@@ -98,7 +104,7 @@ public class SocialLoginService extends DefaultReactiveOAuth2UserService {
                                             return Mono.error(new AppException(ErrorCode.EMAIL_ALREADY_LINKED));
                                         } else {
                                             /// create new account for this user
-                                            return createNewUser(fetchedEmail, provider, providerId, avatarUrl, oAuth2User);
+                                            return createNewUser(fetchedEmail, provider, providerId, avatarUrl, displayName, oAuth2User);
                                         }
                                     });
                         }
@@ -109,27 +115,27 @@ public class SocialLoginService extends DefaultReactiveOAuth2UserService {
         });
     }
 
-    public Mono<OAuth2User> createNewUser(String email, String provider, String providerId, String avatarUrl, OAuth2User oAuth2User) {
+    public Mono<OAuth2User> createNewUser(String email, String provider, String providerId, String avatarUrl, String fullName, OAuth2User oAuth2User) {
         UserCredentials newUser = UserCredentials.builder()
                 .userId(UUID.randomUUID().toString())
                 .username(generateUsername(email))
                 .email(email)
                 // Default password is user's email
                 .userPassword(passwordEncoder.encode(email))
+                .userRole("USER")
                 .provider(provider)
                 .providerId(providerId)
                 .build();
 
-        /// Broadcast new user creation from social media
-        JsonObject payload = new JsonObject();
-        payload.addProperty("username", newUser.getUsername());
-        payload.addProperty("email", newUser.getEmail());
-        payload.addProperty("provider", newUser.getProvider());
-        payload.addProperty("providerId", newUser.getProviderId());
-        payload.addProperty("avatarUrl", avatarUrl);
+        SenderRecord<String, String, String> socialUserCreationRecord = SenderRecord.create(
+                new ProducerRecord<>("user_creation_social_media", newUser.getUserId(), buildSocialUserCreationPayload(newUser, avatarUrl).toString()),
+                "Send user information to identity service after creating new user from social media"
+        );
 
-        ProducerRecord<String, String> record = new ProducerRecord<>("user_creation_social_media", newUser.getUserId(), payload.toString());
-        SenderRecord<String, String, String> senderRecord = SenderRecord.create(record, "Send user information to identity service after creating new user from social media");
+        SenderRecord<String, String, String> profileCreationRecord = SenderRecord.create(
+                new ProducerRecord<>("profile_creation_event", newUser.getUserId(), buildProfileCreationPayload(newUser, avatarUrl, fullName).toString()),
+                "Profile creation event for new social login user"
+        );
 
         /// insert user to database
         return r2dbcEntityTemplate.insert(UserCredentials.class)
@@ -139,17 +145,47 @@ public class SocialLoginService extends DefaultReactiveOAuth2UserService {
                     logger.info("|SocialLoginService| Error creating new user from social media: {}", throwable.getMessage());
                     return new AppException(ErrorCode.LOAD_USER_FROM_SOCIAL_MEDIA_FAIL);
                 })
-                /// send event to kafka
-                .thenMany(kafkaSender.send(Mono.just(senderRecord)))
+                /// send current social creation event to kafka
+                .thenMany(kafkaSender.send(Mono.just(socialUserCreationRecord))
                         .doOnComplete(() -> logger.info("|SocialLoginService| Successfully sent user creation event to Kafka for userId: {}", newUser.getUserId()))
                         .onErrorMap(e -> {
                             logger.error("|SocialLoginService| Failed to send user creation event to Kafka for userId: {}, error: {}", newUser.getUserId(), e.getMessage());
                             return new AppException(ErrorCode.LOAD_USER_FROM_SOCIAL_MEDIA_FAIL);
-                        })
+                        }))
+                /// send profile creation event so user profile is created like normal registration
+                .thenMany(kafkaSender.send(Mono.just(profileCreationRecord))
+                        .doOnComplete(() -> logger.info("|SocialLoginService| Successfully sent profile_creation_event to Kafka for userId: {}", newUser.getUserId()))
+                        .onErrorMap(e -> {
+                            logger.error("|SocialLoginService| Failed to send profile_creation_event to Kafka for userId: {}, error: {}", newUser.getUserId(), e.getMessage());
+                            return new AppException(ErrorCode.LOAD_USER_FROM_SOCIAL_MEDIA_FAIL);
+                        }))
                 .then()
                 .thenReturn(oAuth2User);
     }
 
+    private JsonObject buildSocialUserCreationPayload(UserCredentials userCredentials, String avatarUrl) {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("username", userCredentials.getUsername());
+        payload.addProperty("email", userCredentials.getEmail());
+        payload.addProperty("provider", userCredentials.getProvider());
+        payload.addProperty("providerId", userCredentials.getProviderId());
+        payload.addProperty("avatarUrl", avatarUrl);
+        return payload;
+    }
+
+    private JsonObject buildProfileCreationPayload(UserCredentials userCredentials, String avatarUrl, String fullName) {
+        JsonObject payload = buildSocialUserCreationPayload(userCredentials, avatarUrl);
+        payload.addProperty("userId", userCredentials.getUserId());
+        payload.addProperty("fullName", firstNonBlank(fullName, userCredentials.getUsername(), userCredentials.getEmail(), "Social user"));
+        payload.addProperty("phoneNumber", "");
+        payload.addProperty("dob", "");
+        payload.addProperty("sex", "");
+        payload.addProperty("livingIn", "");
+        payload.addProperty("hometown", "");
+        payload.add("hobbyList", new JsonArray());
+        payload.addProperty("role", userCredentials.getUserRole());
+        return payload;
+    }
     /// utils
     private Mono<String> fetchGithubEmail(OAuth2UserRequest oAuth2UserRequest) {
         String accessToken = oAuth2UserRequest.getAccessToken().getTokenValue();
@@ -205,6 +241,15 @@ public class SocialLoginService extends DefaultReactiveOAuth2UserService {
             default:
                 return null;
         }
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return "";
     }
 
     private String generateUsername(String email) {

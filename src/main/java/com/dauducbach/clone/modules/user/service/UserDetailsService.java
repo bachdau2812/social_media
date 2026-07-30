@@ -25,6 +25,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 import java.time.Duration;
+import java.util.concurrent.CompletableFuture;
 
 @Service
 @RequiredArgsConstructor
@@ -43,12 +44,13 @@ public class UserDetailsService {
 
     /// Listen event and create profile for new user
     @KafkaListener(topics = "profile_creation_event", groupId = "user-service")
-    public void createUserDetails (@Payload String payload) {
+    public CompletableFuture<Void> createUserDetails (@Payload String payload) {
         JsonObject payloadJson = GsonUtils.fromString(payload);
 
         var userDetails = UserDetails.builder()
                 .userId(KafkaUtils.extractString(payloadJson, "userId"))
                 .username(KafkaUtils.extractString(payloadJson, "username"))
+                .fullName(KafkaUtils.extractString(payloadJson, "fullName"))
                 .dob(KafkaUtils.extractLocalDate(payloadJson, "dob"))
                 .hometown(KafkaUtils.extractString(payloadJson, "hometown"))
                 .livingIn(KafkaUtils.extractString(payloadJson, "livingIn"))
@@ -58,11 +60,12 @@ public class UserDetailsService {
         log.info("|UserDetailsService|createUserDetails|received|userId={}|username={}",
                 userDetails.getUserId(), userDetails.getUsername());
 
-        insertUserDetails(userDetails)
-                .subscribe(
-                        saved -> log.info("|UserDetailsService|createUserDetails|created user details|userId={}", saved.getUserId()),
-                        error -> log.error("|UserDetailsService|createUserDetails|failed to create user details|userId={}|error={}", userDetails.getUserId(), error.getMessage())
-                );
+        return insertUserDetails(userDetails)
+                .doOnSuccess(saved -> log.info("|UserDetailsService|createUserDetails|created user details|userId={}", saved.getUserId()))
+                .doOnError(error -> log.error("|UserDetailsService|createUserDetails|failed to create user details|userId={}|error={}",
+                        userDetails.getUserId(), error.getMessage()))
+                .then()
+                .toFuture();
     }
 
     /// Insert UserDetails with caching
@@ -116,22 +119,25 @@ public class UserDetailsService {
                 .flatMap(existingUserDetails -> {
                     log.info("|UserDetailsService|updateUserDetails|found|userId={}", request.getUserId());
                     // Update only non-null and non-empty fields
+                    if (request.getFullName() != null && !request.getFullName().isBlank()) {
+                        existingUserDetails.setFullName(request.getFullName());
+                    }
                     if (request.getUsername() != null && !request.getUsername().isBlank()) {
                         existingUserDetails.setUsername(request.getUsername());
                     }
                     if (request.getDob() != null) {
                         existingUserDetails.setDob(request.getDob());
                     }
-                    if (request.getHomeTown() != null && !request.getHomeTown().isBlank()) {
-                        existingUserDetails.setHometown(request.getHomeTown());
+                    if (request.getHomeTown() != null) {
+                        existingUserDetails.setHometown(request.getHomeTown().isBlank() ? null : request.getHomeTown().trim());
                     }
-                    if (request.getLivingIn() != null && !request.getLivingIn().isBlank()) {
-                        existingUserDetails.setLivingIn(request.getLivingIn());
+                    if (request.getLivingIn() != null) {
+                        existingUserDetails.setLivingIn(request.getLivingIn().isBlank() ? null : request.getLivingIn().trim());
                     }
                     if (request.getSex() != null && !request.getSex().isBlank()) {
                         existingUserDetails.setSex(request.getSex());
                     }
-                    if (request.getHobbieList() != null && !request.getHobbieList().isEmpty()) {
+                    if (request.getHobbieList() != null) {
                         existingUserDetails.setHobbyList(request.getHobbieList());
                     }
 
@@ -164,6 +170,7 @@ public class UserDetailsService {
 
     private Mono<Void> saveUpdateUserDetailsAudit(UserDetailsUpdateRequest request, String userId) {
         JsonObject metadata = new JsonObject();
+        metadata.addProperty("fullNameChanged", request.getFullName() != null && !request.getFullName().isBlank());
         metadata.addProperty("usernameChanged", request.getUsername() != null && !request.getUsername().isBlank());
         metadata.addProperty("dobChanged", request.getDob() != null);
         metadata.addProperty("hometownChanged", request.getHomeTown() != null && !request.getHomeTown().isBlank());

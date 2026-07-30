@@ -23,13 +23,35 @@ public interface UserFollowerRepository extends ReactiveCrudRepository<UserFollo
     @Query("SELECT * FROM user_follower WHERE follower_id = :userId ORDER BY created_at DESC LIMIT :limit OFFSET :offset")
     Flux<UserFollower> findFollowingByUserId(String userId, int limit, int offset);
 
-    // Count total followers (Dùng @Query ở đây là OK)
+    @Query("""
+            SELECT following.*
+            FROM user_follower following
+            INNER JOIN user_follower follower_back
+              ON follower_back.follower_id = following.following_id
+             AND follower_back.following_id = :userId
+            WHERE following.follower_id = :userId
+            ORDER BY following.created_at DESC
+            LIMIT :limit OFFSET :offset
+            """)
+    Flux<UserFollower> findFriendsByUserId(String userId, int limit, int offset);
+
+    // Count total followers
     @Query("SELECT COUNT(*) FROM user_follower WHERE following_id = :userId")
     Mono<Long> countFollowers(String userId);
 
-    // Count total following (Dùng @Query ở đây là OK)
+    // Count total following
     @Query("SELECT COUNT(*) FROM user_follower WHERE follower_id = :userId")
     Mono<Long> countFollowing(String userId);
+
+    @Query("""
+            SELECT COUNT(*)
+            FROM user_follower following
+            INNER JOIN user_follower follower_back
+              ON follower_back.follower_id = following.following_id
+             AND follower_back.following_id = :userId
+            WHERE following.follower_id = :userId
+            """)
+    Mono<Long> countFriends(String userId);
 
     Mono<Void> deleteByFollowerIdAndFollowingId(String followerId, String followingId);
 }

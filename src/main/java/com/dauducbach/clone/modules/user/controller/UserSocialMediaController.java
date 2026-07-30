@@ -26,6 +26,14 @@ public class UserSocialMediaController {
                         .build());
     }
 
+    @PutMapping
+    public Mono<ApiResponse<UserSocialMedia>> updateUserSocialMedia(@Valid @RequestBody UserSocialMediaRequest request) {
+        return userSocialMediaService.updateUserSocialMedia(request)
+                .map(updated -> ApiResponse.<UserSocialMedia>builder()
+                        .message("UserSocialMedia updated successfully")
+                        .result(updated)
+                        .build());
+    }
     /// Lấy UserSocialMedia theo ID
     @GetMapping("/{id}")
     public Mono<ApiResponse<UserSocialMedia>> getUserSocialMediaById(@PathVariable String id) {

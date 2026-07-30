@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Transient;
 import org.springframework.data.relational.core.mapping.Table;
 
 import java.time.Instant;
@@ -27,4 +28,8 @@ public class Comment {
     String commentType;
     String mediaUrl;
     Instant timestamp;
+    @Transient
+    long replyCount;
+    @Transient
+    boolean hasLiked;
 }

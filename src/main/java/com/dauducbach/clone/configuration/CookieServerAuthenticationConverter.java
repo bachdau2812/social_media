@@ -1,38 +1,67 @@
 package com.dauducbach.clone.configuration;
 
+import com.dauducbach.clone.modules.auth.dto.request.RefreshTokenRequest;
+import com.dauducbach.clone.modules.auth.dto.response.AuthenticationResponse;
+import com.dauducbach.clone.modules.auth.service.AuthCookieService;
+import com.dauducbach.clone.modules.auth.service.AuthenticationService;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpCookie;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.server.resource.authentication.BearerTokenAuthenticationToken;
 import org.springframework.security.web.server.authentication.ServerAuthenticationConverter;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
-@Configuration
+@Component
+@RequiredArgsConstructor
 public class CookieServerAuthenticationConverter implements ServerAuthenticationConverter {
-    
-    private static final String COOKIE_NAME = "accessToken";
     private static final Logger log = LoggerFactory.getLogger(CookieServerAuthenticationConverter.class);
+
+    private final AuthenticationService authenticationService;
+    private final AuthCookieService authCookieService;
 
     @Override
     public Mono<Authentication> convert(ServerWebExchange exchange) {
-        log.info("Attempting to authenticate using cookie: {}", COOKIE_NAME);
-        // Lấy cookie từ request
-        HttpCookie cookie = exchange.getRequest().getCookies().getFirst(COOKIE_NAME);
-        
-        if (cookie != null && !cookie.getValue().isEmpty()) {
-            String token = cookie.getValue();
-            log.info("Cookie found: {}", token);
-
-            // Trả về token dưới dạng BearerTokenAuthenticationToken để Spring Security xử lý tiếp
-            return Mono.just(new BearerTokenAuthenticationToken(token));
-        } else {
-            log.info("Cookie is empty or null");
+        String accessToken = getCookieValue(exchange, AuthCookieService.ACCESS_TOKEN_COOKIE);
+        if (StringUtils.hasText(accessToken)) {
+            log.info("|CookieServerAuthenticationConverter|convert|source=access_cookie");
+            return Mono.just(new BearerTokenAuthenticationToken(accessToken));
         }
-        
-        // Trả về rỗng nếu không tìm thấy cookie, Spring sẽ chuyển sang báo lỗi 401
-        return Mono.empty();
+
+        RefreshTokenRequest refreshTokenRequest = authCookieService.resolveRefreshTokenRequest(exchange, null);
+        if (!hasRefreshContext(refreshTokenRequest)) {
+            log.info("|CookieServerAuthenticationConverter|convert|source=none|reason=missing_refresh_context");
+            return Mono.empty();
+        }
+
+        log.info("|CookieServerAuthenticationConverter|convert|source=refresh_cookie|deviceInfo={}", refreshTokenRequest.getDeviceInfo());
+        return authenticationService.refreshToken(refreshTokenRequest)
+                .doOnNext(authenticationResponse -> authCookieService.writeAuthCookies(exchange.getResponse(), authenticationResponse))
+                .map(AuthenticationResponse::getAccessToken)
+                .filter(StringUtils::hasText)
+                .map(BearerTokenAuthenticationToken::new)
+                .cast(Authentication.class)
+                .onErrorResume(error -> {
+                    log.warn("|CookieServerAuthenticationConverter|convert|refresh_failed|deviceInfo={}|reason={}",
+                            refreshTokenRequest.getDeviceInfo(),
+                            error.getMessage());
+                    authCookieService.clearAuthCookies(exchange.getResponse());
+                    return Mono.empty();
+                });
+    }
+
+    private String getCookieValue(ServerWebExchange exchange, String cookieName) {
+        HttpCookie cookie = exchange.getRequest().getCookies().getFirst(cookieName);
+        return cookie == null ? null : cookie.getValue();
+    }
+
+    private boolean hasRefreshContext(RefreshTokenRequest request) {
+        return request != null
+                && StringUtils.hasText(request.getRefreshToken())
+                && StringUtils.hasText(request.getDeviceInfo());
     }
 }

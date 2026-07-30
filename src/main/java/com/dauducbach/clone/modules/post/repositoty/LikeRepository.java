@@ -20,6 +20,9 @@ public interface LikeRepository extends ReactiveCrudRepository<Like, String> {
 
     Mono<Long> countByActorIdAndTargetType(String actorId, String targetType);
 
+    @Query("SELECT actor_id FROM likes WHERE target_id = :targetId AND target_type = :targetType ORDER BY timestamp DESC LIMIT :#{#pageable.pageSize} OFFSET :#{#pageable.offset}")
+    Flux<String> findActorIdsByTargetIdAndTargetType(String targetId, String targetType, Pageable pageable);
+
     @Query("SELECT target_id FROM likes WHERE actor_id = :actorId AND target_type = :targetType ORDER BY timestamp DESC LIMIT :#{#pageable.pageSize} OFFSET :#{#pageable.offset}")
     Flux<String> findTargetIdByActorIdAndTargetType(String actorId, String targetType, Pageable pageable);
 }

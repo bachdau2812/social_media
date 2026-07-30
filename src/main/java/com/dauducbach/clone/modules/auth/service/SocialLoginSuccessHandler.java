@@ -7,6 +7,8 @@ import com.dauducbach.clone.modules.auth.entity.RefreshTokens;
 import com.dauducbach.clone.modules.auth.repository.UserCredentialsRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
+import lombok.experimental.NonFinal;
+import org.springframework.beans.factory.annotation.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
@@ -19,6 +21,7 @@ import org.springframework.security.web.server.WebFilterExchange;
 import org.springframework.security.web.server.authentication.ServerAuthenticationSuccessHandler;
 import org.springframework.stereotype.Service;
 import org.springframework.http.server.reactive.ServerHttpResponse;
+import org.springframework.util.StringUtils;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
@@ -32,7 +35,10 @@ import java.util.UUID;
 
 public class SocialLoginSuccessHandler implements ServerAuthenticationSuccessHandler {
     private static final Logger logger = LoggerFactory.getLogger(SocialLoginSuccessHandler.class);
-    private static final String FRONT_END_LOGIN_PAGE = "http://localhost:5000/login";
+
+    @NonFinal
+    @Value("${app.frontend.oauth-success-url:http://localhost:5173/oauth/callback}")
+    String frontendOauthSuccessUrl;
 
     R2dbcEntityTemplate r2dbcEntityTemplate;
     UserCredentialsRepository userCredentialsRepository;
@@ -49,10 +55,13 @@ public class SocialLoginSuccessHandler implements ServerAuthenticationSuccessHan
 
         String provider = oauthToken.getAuthorizedClientRegistrationId();
         String providerId = extractProviderId(principal, provider);
+        if (!StringUtils.hasText(providerId)) {
+            return Mono.error(new AppException(ErrorCode.AUTHENTICATION_FAILED));
+        }
 
         /// Find user by providerId and generate JWT token
         return userCredentialsRepository.findByProviderId(providerId)
-                .doOnSuccess(userCredentials -> logger.info("|SocialLoginSuccessHandler|findUserCredentialsByProviderIdSuccess|providerId: {}|userId: {}", providerId, userCredentials.getUserId()))
+                .doOnNext(userCredentials -> logger.info("|SocialLoginSuccessHandler|findUserCredentialsByProviderIdSuccess|providerId: {}|userId: {}", providerId, userCredentials.getUserId()))
                 .switchIfEmpty(Mono.error(new AppException(ErrorCode.USER_NOT_FOUND)))
                 .flatMap(userCredentials -> jwtService.generateToken(userCredentials)
                         .flatMap(accessToken -> {
@@ -74,6 +83,8 @@ public class SocialLoginSuccessHandler implements ServerAuthenticationSuccessHan
                                     .accessToken(accessToken)
                                     .refreshToken(refreshToken)
                                     .deviceInfo(deviceInfo)
+                                    .userId(userCredentials.getUserId())
+                                    .username(userCredentials.getUsername())
                                     .build();
 
                             /// Save refresh token to database
@@ -89,10 +100,11 @@ public class SocialLoginSuccessHandler implements ServerAuthenticationSuccessHan
                                         authCookieService.writeAuthCookies(response, authResponse);
 
                                         response.setStatusCode(HttpStatus.FOUND);
-                                        response.getHeaders().setLocation(java.net.URI.create(FRONT_END_LOGIN_PAGE));
+                                        var redirectUri = OAuthRedirectUrlBuilder.build(frontendOauthSuccessUrl);
+                                        response.getHeaders().setLocation(redirectUri);
 
                                         return response.setComplete().doOnSuccess(unused ->
-                                                logger.info("|SocialLoginSuccessHandler|redirectToFrontEnd|userId: {}|redirectUrl: {}", userCredentials.getUserId(), FRONT_END_LOGIN_PAGE)
+                                                logger.info("|SocialLoginSuccessHandler|redirectToFrontEnd|userId: {}|redirectUrl: {}", userCredentials.getUserId(), redirectUri)
                                         );
                                     });
                         }));
@@ -103,7 +115,7 @@ public class SocialLoginSuccessHandler implements ServerAuthenticationSuccessHan
             case "google" -> oAuth2User.getAttribute("sub"); // String
             case "facebook" -> (String) Objects.requireNonNull(oAuth2User.getAttribute("id"));
             case "github" -> {
-                Integer githubId = oAuth2User.getAttribute("id");
+                Object githubId = oAuth2User.getAttribute("id");
                 yield githubId != null ? githubId.toString() : null;
             }
             default -> null;

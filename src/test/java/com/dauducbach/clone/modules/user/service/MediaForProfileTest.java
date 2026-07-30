@@ -1,11 +1,11 @@
 package com.dauducbach.clone.modules.user.service;
 
-import com.cloudinary.Cloudinary;
 import com.dauducbach.clone.modules.audit.entity.AuditLogs;
 import com.dauducbach.clone.modules.audit.service.UserAuditService;
-import com.dauducbach.clone.modules.post.constant.OwnerType;
-import com.dauducbach.clone.modules.post.entity.Media;
-import com.dauducbach.clone.modules.post.service.MediaService;
+import com.dauducbach.clone.modules.media.constant.OwnerType;
+import com.dauducbach.clone.modules.media.entity.Media;
+import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
+import com.dauducbach.clone.modules.media.service.MediaService;
 import com.dauducbach.clone.modules.post.service.PostSseService;
 import com.dauducbach.clone.modules.user.dto.request.AvatarUploadRequest;
 import com.dauducbach.clone.modules.user.dto.request.MusicSelectRequest;
@@ -51,13 +51,13 @@ class MediaForProfileTest {
     @Mock
     MediaService mediaService;
     @Mock
+    MediaCompatibilityFacade cloudinaryMediaService;
+    @Mock
     PostSseService postSseService;
     @Mock
     KafkaSender<String, String> kafkaSender;
     @Mock
     R2dbcEntityTemplate r2dbcEntityTemplate;
-    @Mock
-    Cloudinary cloudinary;
     @Mock
     MediaScanUtils mediaScanUtils;
     @Mock
@@ -162,6 +162,8 @@ class MediaForProfileTest {
 
     @Test
     void createStoryRejectsInvalidMusicSegment() {
+        org.mockito.Mockito.doThrow(new IllegalArgumentException("musicEnd must be greater than musicStart"))
+                .when(cloudinaryMediaService).validateMusicSegment(45L, 30L);
         MediaForProfile service = newService();
 
         assertThatThrownBy(() -> service.createStory(new StoryCreateRequest(
@@ -181,10 +183,10 @@ class MediaForProfileTest {
                 musicsRepository,
                 userStoriesRepository,
                 mediaService,
+                cloudinaryMediaService,
                 postSseService,
                 kafkaSender,
                 r2dbcEntityTemplate,
-                cloudinary,
                 mediaScanUtils,
                 userAuditService
         );

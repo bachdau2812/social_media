@@ -23,5 +23,7 @@ public class NotificationRequest {
     String title;
     String content;
     Map<String, String> metadata;
+    String deepLink;
+    String dedupKey;
     NotificationType notificationType;
 }

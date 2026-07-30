@@ -9,7 +9,7 @@ import reactor.core.publisher.Flux;
 @Repository
 public interface UserUniversityRepository extends ReactiveCrudRepository<UserUniversity, String> {
     @Query("""
-            SELECT id, user_id, school_name, major, `from`, `to`, is_graduate, is_public
+            SELECT id, user_id, school_name, major, from_date, to_date, is_graduate, is_public
             FROM user_university
             WHERE user_id = :userId
             """)

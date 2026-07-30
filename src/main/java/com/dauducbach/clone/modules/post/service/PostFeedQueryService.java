@@ -4,7 +4,6 @@ import co.elastic.clients.json.JsonData;
 import com.dauducbach.clone.modules.post.elastic.PostVector;
 import com.dauducbach.clone.modules.post.entity.PostDetails;
 import com.dauducbach.clone.modules.post.repositoty.PostDetailsRepository;
-import com.dauducbach.clone.modules.post.repositoty.PostVectorRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
@@ -29,9 +28,15 @@ public class PostFeedQueryService {
     private static final String POST_CONTENT_VECTOR_FIELD = "content_vector";
 
     PostDetailsRepository postDetailsRepository;
-    PostVectorRepository postVectorRepository;
     ReactiveElasticsearchOperations elasticsearchOperations;
 
+    public Mono<PostDetails> getApprovedPostById(String postId) {
+        if (postId == null || postId.isBlank()) {
+            return Mono.empty();
+        }
+        return postDetailsRepository.findApprovedFeedEligibleById(postId.trim())
+                .filter(post -> APPROVED_STATUS.equalsIgnoreCase(post.getValidateStatus()));
+    }
     public Flux<PostDetails> getRecentApprovedPosts(int limit, Set<String> excludedPostIds) {
         int safeLimit = Math.max(limit, 0);
         if (safeLimit == 0) {
@@ -46,6 +51,17 @@ public class PostFeedQueryService {
                         safeLimit, excludes.size()));
     }
 
+    public Flux<PostDetails> getRecentApprovedPostsFromMutualFriends(String userId, int limit, int offset) {
+        int safeLimit = Math.max(limit, 0);
+        if (safeLimit == 0) {
+            return Flux.empty();
+        }
+        return postDetailsRepository.findRecentApprovedPostsFromMutualFriends(
+                userId,
+                safeLimit,
+                Math.max(offset, 0)
+        );
+    }
     public Mono<List<String>> searchRecommendedPostIds(List<Double> queryVector, int limit, Set<String> excludedPostIds) {
         int safeLimit = Math.max(limit, 0);
         if (safeLimit == 0 || queryVector == null || queryVector.isEmpty()) {
@@ -69,7 +85,7 @@ public class PostFeedQueryService {
                 .filter(postId -> postId != null && !postId.isBlank())
                 .filter(postId -> !excludes.contains(postId))
                 .distinct()
-                .concatMap(postId -> postDetailsRepository.findById(postId)
+                .concatMap(postId -> postDetailsRepository.findApprovedFeedEligibleById(postId)
                         .filter(post -> APPROVED_STATUS.equalsIgnoreCase(post.getValidateStatus()))
                         .map(PostDetails::getPostId))
                 .take(safeLimit)
@@ -83,7 +99,7 @@ public class PostFeedQueryService {
             return Mono.just(List.of());
         }
 
-        return postVectorRepository.findById(postId)
+        return elasticsearchOperations.get(postId, PostVector.class)
                 .map(PostVector::getContentVector)
                 .filter(vector -> vector != null && !vector.isEmpty())
                 .defaultIfEmpty(List.of())

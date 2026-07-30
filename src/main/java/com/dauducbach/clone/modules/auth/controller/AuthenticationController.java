@@ -9,14 +9,18 @@ import com.dauducbach.clone.modules.auth.dto.request.LoginRequest;
 import com.dauducbach.clone.modules.auth.dto.request.LogoutRequest;
 import com.dauducbach.clone.modules.auth.dto.request.RefreshTokenRequest;
 import com.dauducbach.clone.modules.auth.dto.response.IntrospectResponse;
+import com.dauducbach.clone.modules.auth.dto.response.LoginResponse;
 import com.dauducbach.clone.modules.auth.service.AuthenticationService;
 import com.dauducbach.clone.modules.auth.service.AuthCookieService;
+import com.dauducbach.clone.modules.auth.service.UserAccountQueryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.server.reactive.ServerHttpResponse;
+import org.springframework.security.core.Authentication;
 import org.springframework.util.StringUtils;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -31,21 +35,42 @@ public class AuthenticationController {
     private static final Logger log = LoggerFactory.getLogger(AuthenticationController.class);
     private final AuthenticationService authenticationService;
     private final AuthCookieService authCookieService;
+    private final UserAccountQueryService userAccountQueryService;
 
     @PostMapping("/login")
-    public Mono<ApiResponse<String>> login(@Valid @RequestBody LoginRequest request,
-                                           ServerWebExchange exchange) {
+    public Mono<ApiResponse<LoginResponse>> login(@Valid @RequestBody LoginRequest request,
+                                                  ServerWebExchange exchange) {
         ServerHttpResponse response = exchange.getResponse();
 
         return authenticationService.login(request)
                 .map(authenticationResponse -> {
                     authCookieService.writeAuthCookies(response, authenticationResponse);
-                    return ApiResponse.<String>builder()
+                    return ApiResponse.<LoginResponse>builder()
                             .message("Login successful")
                             .traceId(resolveTraceId(exchange))
-                            .result("Login successful")
+                            .result(LoginResponse.builder()
+                                    .userId(authenticationResponse.getUserId())
+                                    .username(authenticationResponse.getUsername())
+                                    .message("Login successful")
+                                    .build())
                             .build();
                 });
+    }
+
+    @GetMapping("/session")
+    public Mono<ApiResponse<LoginResponse>> session(Authentication authentication,
+                                                    ServerWebExchange exchange) {
+        return userAccountQueryService.getSessionIdentity(authentication.getName())
+                .switchIfEmpty(Mono.error(new AppException(ErrorCode.USER_NOT_FOUND)))
+                .map(userCredentials -> ApiResponse.<LoginResponse>builder()
+                        .message("Session active")
+                        .traceId(resolveTraceId(exchange))
+                        .result(LoginResponse.builder()
+                                .userId(userCredentials.userId())
+                                .username(userCredentials.username())
+                                .message("Session active")
+                                .build())
+                        .build());
     }
 
     @PostMapping("/refresh-token")
@@ -53,8 +78,6 @@ public class AuthenticationController {
                                                   ServerWebExchange exchange) {
         ServerHttpResponse response = exchange.getResponse();
         RefreshTokenRequest resolvedRequest = authCookieService.resolveRefreshTokenRequest(exchange, request);
-
-        log.info("|AuthenticationController| Resolved refresh token request: {}", resolvedRequest);
 
         if (!StringUtils.hasText(resolvedRequest.getRefreshToken()) || !StringUtils.hasText(resolvedRequest.getDeviceInfo())) {
             authCookieService.clearAuthCookies(response);
@@ -120,4 +143,3 @@ public class AuthenticationController {
         return traceId == null ? null : traceId.toString();
     }
 }
-

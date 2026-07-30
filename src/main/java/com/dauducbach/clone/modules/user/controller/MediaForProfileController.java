@@ -2,8 +2,9 @@ package com.dauducbach.clone.modules.user.controller;
 
 import com.dauducbach.clone.commons.response.ApiResponse;
 import com.dauducbach.clone.commons.response.PageResponse;
-import com.dauducbach.clone.modules.post.constant.OwnerType;
-import com.dauducbach.clone.modules.post.entity.Media;
+import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
+import com.dauducbach.clone.modules.media.constant.OwnerType;
+import com.dauducbach.clone.modules.media.entity.Media;
 import com.dauducbach.clone.modules.user.dto.request.AvatarUploadRequest;
 import com.dauducbach.clone.modules.user.dto.request.MusicSelectRequest;
 import com.dauducbach.clone.modules.user.dto.request.StoryCreateRequest;
@@ -13,6 +14,7 @@ import com.dauducbach.clone.modules.user.entity.UserStories;
 import com.dauducbach.clone.modules.user.service.MediaForProfile;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -38,8 +40,12 @@ public class MediaForProfileController {
     }
 
     @PostMapping("/stories")
-    public Mono<ApiResponse<ProfileMediaUploadResponse>> createStory(@Valid @RequestBody StoryCreateRequest request) {
-        return mediaForProfile.createStory(request)
+    public Mono<ApiResponse<ProfileMediaUploadResponse>> createStory(@Valid @RequestBody StoryCreateRequest request, Authentication authentication) {
+        StoryCreateRequest authenticatedRequest = new StoryCreateRequest(
+                authentication.getName(), request.mediaUrl(), request.musicId(), request.musicUrl(),
+                request.musicStart(), request.musicEnd(), request.publicationId(),
+                request.publicationOrder(), request.publicationItemCount());
+        return mediaForProfile.createStory(authenticatedRequest)
                 .map(response -> ApiResponse.<ProfileMediaUploadResponse>builder()
                         .message("Story upload accepted")
                         .result(response)
@@ -70,8 +76,11 @@ public class MediaForProfileController {
     }
 
     @GetMapping("/{userId}/avatar/current")
-    public Mono<ApiResponse<Media>> getCurrentAvatar(@PathVariable String userId) {
-        return mediaForProfile.getCurrentAvatar(userId)
+    public Mono<ApiResponse<Media>> getCurrentAvatar(
+            @PathVariable String userId,
+            @RequestParam(defaultValue = "AVATAR") MediaDisplayType mediaType
+    ) {
+        return mediaForProfile.getCurrentAvatar(userId, mediaType)
                 .map(response -> ApiResponse.<Media>builder()
                         .message("Current avatar fetched")
                         .result(response)
@@ -95,9 +104,11 @@ public class MediaForProfileController {
     public Mono<ApiResponse<PageResponse<UserStories>>> getStories(
             @PathVariable String userId,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "STORY") MediaDisplayType mediaType,
+            Authentication authentication
     ) {
-        return mediaForProfile.getStories(userId, page, size)
+        return mediaForProfile.getStories(userId, authentication.getName(), page, size, mediaType)
                 .map(response -> ApiResponse.<PageResponse<UserStories>>builder()
                         .message("Stories fetched")
                         .result(response)

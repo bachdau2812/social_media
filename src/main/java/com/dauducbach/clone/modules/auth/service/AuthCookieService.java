@@ -10,6 +10,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.server.ServerWebExchange;
 
+import java.net.URLDecoder;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
 @Service
@@ -21,10 +24,14 @@ public class AuthCookieService {
     @Value("${jwt.valid-duration}")
     private long accessTokenValidDuration;
 
+    @Value("${auth.cookie.secure:false}")
+    private boolean secure;
+
+    @Value("${auth.cookie.same-site:Lax}")
+    private String sameSite;
+
     private static final Duration REFRESH_TOKEN_DURATION = Duration.ofDays(5);
     private static final String COOKIE_PATH = "/";
-    private static final String COOKIE_SAME_SITE = "Lax";
-
     public void writeAuthCookies(ServerHttpResponse response, AuthenticationResponse authenticationResponse) {
         addCookie(response, ACCESS_TOKEN_COOKIE, authenticationResponse.getAccessToken(), Duration.ofSeconds(accessTokenValidDuration));
         addCookie(response, REFRESH_TOKEN_COOKIE, authenticationResponse.getRefreshToken(), REFRESH_TOKEN_DURATION);
@@ -46,7 +53,7 @@ public class AuthCookieService {
             return null;
         }
 
-        return cookie.getValue();
+        return decodeCookieValue(cookie.getValue());
     }
 
     private void addCookie(ServerHttpResponse response, String name, String value, Duration maxAge) {
@@ -54,20 +61,31 @@ public class AuthCookieService {
             return;
         }
 
-        response.addCookie(ResponseCookie.from(name, value)
+        response.addCookie(ResponseCookie.from(name, encodeCookieValue(value))
                 .httpOnly(true)
-                .secure(false)
-                .sameSite(COOKIE_SAME_SITE)
+                .secure(secure)
+                .sameSite(sameSite)
                 .path(COOKIE_PATH)
                 .maxAge(maxAge)
                 .build());
     }
 
+    private String encodeCookieValue(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    private String decodeCookieValue(String value) {
+        try {
+            return URLDecoder.decode(value, StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            return value;
+        }
+    }
     private void clearCookie(ServerHttpResponse response, String name) {
         response.addCookie(ResponseCookie.from(name, "")
                 .httpOnly(true)
-                .secure(false)
-                .sameSite(COOKIE_SAME_SITE)
+                .secure(secure)
+                .sameSite(sameSite)
                 .path(COOKIE_PATH)
                 .maxAge(Duration.ZERO)
                 .build());

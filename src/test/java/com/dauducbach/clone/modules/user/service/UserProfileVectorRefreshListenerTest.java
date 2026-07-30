@@ -5,7 +5,6 @@ import com.dauducbach.clone.modules.user.entity.UserDetails;
 import com.dauducbach.clone.modules.user.entity.UserHighSchool;
 import com.dauducbach.clone.modules.user.entity.UserJob;
 import com.dauducbach.clone.modules.user.entity.UserUniversity;
-import com.dauducbach.clone.modules.user.repositoty.UserDetailVectorRepository;
 import com.dauducbach.clone.modules.user.repositoty.UserDetailsRepository;
 import com.dauducbach.clone.modules.user.repositoty.UserHighSchoolRepository;
 import com.dauducbach.clone.modules.user.repositoty.UserJobRepository;
@@ -13,6 +12,7 @@ import com.dauducbach.clone.modules.user.repositoty.UserUniversityRepository;
 import com.dauducbach.clone.utils.GetVectorEmbedding;
 import com.dauducbach.clone.utils.GsonUtils;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.elasticsearch.core.ReactiveElasticsearchOperations;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -42,7 +42,7 @@ class UserProfileVectorRefreshListenerTest {
     @Mock
     UserUniversityRepository userUniversityRepository;
     @Mock
-    UserDetailVectorRepository userDetailVectorRepository;
+    ReactiveElasticsearchOperations elasticsearchOperations;
     @Mock
     GetVectorEmbedding getVectorEmbedding;
 
@@ -73,14 +73,14 @@ class UserProfileVectorRefreshListenerTest {
                 .build();
 
         when(getVectorEmbedding.getEmbedding(anyString())).thenReturn(Mono.just(List.of(0.3, 0.7)));
-        when(userDetailVectorRepository.findById("user-1")).thenReturn(Mono.just(existing));
-        when(userDetailVectorRepository.save(any(UserDetailVector.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+        when(elasticsearchOperations.get("user-1", UserDetailVector.class)).thenReturn(Mono.just(existing));
+        when(elasticsearchOperations.save(any(UserDetailVector.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
 
         StepVerifier.create(listener.refreshUserVector("user-1"))
                 .verifyComplete();
 
         ArgumentCaptor<UserDetailVector> captor = ArgumentCaptor.forClass(UserDetailVector.class);
-        verify(userDetailVectorRepository).save(captor.capture());
+        verify(elasticsearchOperations).save(captor.capture());
         assertThat(captor.getValue().getUserVector()).containsExactly(0.3, 0.7);
         assertThat(captor.getValue().getUserLongTermVector()).containsExactly(0.9, 0.1);
     }
@@ -93,8 +93,8 @@ class UserProfileVectorRefreshListenerTest {
                 .build();
 
         when(getVectorEmbedding.getEmbedding(anyString())).thenReturn(Mono.just(List.of(0.4, 0.6)));
-        when(userDetailVectorRepository.findById("user-1")).thenReturn(Mono.just(existing));
-        when(userDetailVectorRepository.save(any(UserDetailVector.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+        when(elasticsearchOperations.get("user-1", UserDetailVector.class)).thenReturn(Mono.just(existing));
+        when(elasticsearchOperations.save(any(UserDetailVector.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
 
         StepVerifier.create(listener.refreshCreatedUserVector(GsonUtils.fromString("""
                         {"userId":"user-1","username":"bach","hometown":"Ha Noi","livingIn":"Ho Chi Minh","sex":"male","dob":"2000-01-02","hobbyList":["music","backend"]}
@@ -106,7 +106,7 @@ class UserProfileVectorRefreshListenerTest {
         verify(userHighSchoolRepository, never()).findByUserId(anyString());
         verify(userUniversityRepository, never()).findByUserId(anyString());
         ArgumentCaptor<UserDetailVector> captor = ArgumentCaptor.forClass(UserDetailVector.class);
-        verify(userDetailVectorRepository).save(captor.capture());
+        verify(elasticsearchOperations).save(captor.capture());
         assertThat(captor.getValue().getUserVector()).containsExactly(0.4, 0.6);
     }
 
@@ -116,7 +116,7 @@ class UserProfileVectorRefreshListenerTest {
                 userJobRepository,
                 userHighSchoolRepository,
                 userUniversityRepository,
-                userDetailVectorRepository,
+                elasticsearchOperations,
                 getVectorEmbedding
         );
     }

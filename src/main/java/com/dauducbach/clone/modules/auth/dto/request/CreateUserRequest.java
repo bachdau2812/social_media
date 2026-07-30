@@ -17,6 +17,9 @@ import java.util.List;
 @Builder
 
 public class CreateUserRequest {
+    @NotBlank(message = "Full name must not be blank")
+    String fullName;
+
     @NotBlank(message = "Username must not be blank")
     String username;
 

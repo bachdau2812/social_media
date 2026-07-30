@@ -2,12 +2,7 @@ package com.dauducbach.clone.modules.feed.service;
 
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
-import com.dauducbach.clone.modules.post.service.CommentService;
-import com.dauducbach.clone.modules.post.service.LikeService;
-import com.dauducbach.clone.modules.post.service.MediaService;
 import com.dauducbach.clone.modules.post.service.PostFeedQueryService;
-import com.dauducbach.clone.modules.post.service.PostService;
-import com.dauducbach.clone.modules.user.service.UserDetailsService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -20,11 +15,8 @@ import reactor.test.StepVerifier;
 import java.time.Duration;
 import java.time.Instant;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-
 @ExtendWith(MockitoExtension.class)
 class FeedServiceTest {
     @Mock
@@ -32,19 +24,11 @@ class FeedServiceTest {
     @Mock
     ReactiveZSetOperations<String, String> zSetOperations;
     @Mock
-    PostService postService;
-    @Mock
     PostFeedQueryService postFeedQueryService;
     @Mock
-    MediaService mediaService;
+    FeedCandidatePipeline candidatePipeline;
     @Mock
-    UserDetailsService userDetailsService;
-    @Mock
-    LikeService likeService;
-    @Mock
-    CommentService commentService;
-    @Mock
-    FeedVectorService feedVectorService;
+    FeedItemHydrator itemHydrator;
 
     @Test
     void appendPostToUserFeedWritesZSetWithTtl() {
@@ -74,13 +58,9 @@ class FeedServiceTest {
     private FeedService newService() {
         return new FeedService(
                 redisTemplate,
-                postService,
                 postFeedQueryService,
-                mediaService,
-                userDetailsService,
-                likeService,
-                commentService,
-                feedVectorService
+                candidatePipeline,
+                itemHydrator
         );
     }
 }

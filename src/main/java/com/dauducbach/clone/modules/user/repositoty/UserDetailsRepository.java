@@ -10,6 +10,9 @@ import reactor.core.publisher.Mono;
 
 @Repository
 public interface UserDetailsRepository extends ReactiveCrudRepository<UserDetails, String> {
+    @Query("SELECT user_id FROM user_details ORDER BY user_id")
+    Flux<String> findAllUserIds();
+
     @Query("""
             SELECT user_id FROM user_details
             WHERE LOWER(COALESCE(username, '')) LIKE CONCAT('%', LOWER(:query), '%')

@@ -1,58 +1,78 @@
 package com.dauducbach.clone.modules.post.service;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class PostSseService {
     private static final Duration KEEP_ALIVE = Duration.ofSeconds(15);
-    private final Map<String, Sinks.Many<ServerSentEvent<String>>> userSinks = new ConcurrentHashMap<>();
+
+    private final SseRealtimeFanoutPublisher fanoutPublisher;
+    private final Map<String, UserChannel> userChannels = new ConcurrentHashMap<>();
 
     public Flux<ServerSentEvent<String>> subscribe(String userId) {
-        log.info("|PostSseService|subscribe|userId={}", userId);
-        Sinks.Many<ServerSentEvent<String>> sink = userSinks.computeIfAbsent(userId, key ->
-                Sinks.many().multicast().onBackpressureBuffer()
-        );
-
-        return sink.asFlux()
+        UserChannel channel = userChannels.computeIfAbsent(
+                userId,
+                ignored -> new UserChannel());
+        channel.subscribers.incrementAndGet();
+        return channel.sink.asFlux()
                 .mergeWith(Flux.interval(KEEP_ALIVE)
-                        .map(seq -> ServerSentEvent.builder(":keep-alive").build()))
-                .doOnCancel(() -> removeSink(userId));
+                        .map(sequence -> ServerSentEvent.builder(":keep-alive").build()))
+                .doFinally(signal -> removeSubscriber(userId, channel));
     }
 
-    public void sendToUser(String userId, String event, String data) {
-        Sinks.Many<ServerSentEvent<String>> sink = userSinks.get(userId);
-        if (sink == null) {
-            log.warn("|PostSseService|sendToUser|no SSE subscriber for userId={}", userId);
+    public Mono<Void> sendToUser(String userId, String event, String data) {
+        if (userId == null || userId.isBlank()) {
+            return Mono.empty();
+        }
+        return fanoutPublisher.publish(userId, event, data)
+                .onErrorResume(error -> {
+                    log.warn(
+                            "|PostSseService|sendToUser|redis fallback|userId={}|event={}|error={}",
+                            userId, event, error.getMessage());
+                    sendToLocalUser(userId, event, data);
+                    return Mono.empty();
+                });
+    }
+
+    void sendToLocalUser(String userId, String event, String data) {
+        UserChannel channel = userChannels.get(userId);
+        if (channel == null) {
             return;
         }
-
         ServerSentEvent<String> message = ServerSentEvent.<String>builder()
                 .event(event)
                 .data(data)
                 .build();
-
-        Sinks.EmitResult result = sink.tryEmitNext(message);
+        Sinks.EmitResult result = channel.sink.tryEmitNext(message);
         if (result.isFailure()) {
-            log.warn("|PostSseService|sendToUser|emit failed|userId={}|event={}|dataLength={}|result={}",
-                    userId, event, data == null ? 0 : data.length(), result);
-        } else if (result.isSuccess()) {
-            log.info("|PostSseService|sendToUser|emit success|userId={}|event={}|dataLength={}|result={}",
-                    userId, event, data == null ? 0 : data.length(), result);
+            log.warn(
+                    "|PostSseService|sendToLocalUser|emit failed|userId={}|event={}|result={}",
+                    userId, event, result);
         }
     }
 
-    private void removeSink(String userId) {
-        userSinks.remove(userId);
-        log.info("|PostSseService|removeSink|removed SSE sink|userId={}", userId);
+    private void removeSubscriber(String userId, UserChannel channel) {
+        if (channel.subscribers.decrementAndGet() <= 0) {
+            userChannels.remove(userId, channel);
+        }
+    }
+
+    private static final class UserChannel {
+        private final Sinks.Many<ServerSentEvent<String>> sink =
+                Sinks.many().multicast().onBackpressureBuffer();
+        private final AtomicInteger subscribers = new AtomicInteger();
     }
 }
-

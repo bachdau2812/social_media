@@ -80,6 +80,29 @@ public class UserHighSchoolService {
                 .doOnError(error -> log.error("|UserHighSchoolService|createUserHighSchool|failed to create|error={}", error.getMessage()));
     }
 
+    public Mono<UserHighSchool> updateUserHighSchool(UserHighSchoolRequest request) {
+        return userHighSchoolRepository.findById(request.getId())
+                .switchIfEmpty(Mono.error(new AppException(ErrorCode.USER_HIGH_SCHOOL_NOT_FOUND,
+                        String.format("User high school not found for id=%s", request.getId()))))
+                .flatMap(existing -> {
+                    if (request.getSchoolName() != null) existing.setSchoolName(request.getSchoolName().trim());
+                    if (request.getFrom() != null) existing.setFromDate(request.getFrom());
+                    if (request.getTo() != null) existing.setToDate(request.getTo());
+                    if (request.getIsGraduate() != null) existing.setGraduate(request.getIsGraduate());
+                    if (request.getIsPublic() != null) existing.setPublic(request.getIsPublic());
+                    return userHighSchoolRepository.save(existing);
+                })
+                .flatMap(updated -> saveProfileComponentAudit(updated.getUserId(), "USER_HIGH_SCHOOL", updated.getId(), "UPDATE").thenReturn(updated))
+                .flatMap(updated -> publishProfileVectorRefresh(updated.getUserId(), "USER_HIGH_SCHOOL", "UPDATE", updated.getId()).thenReturn(updated))
+                .doOnSuccess(updated -> {
+                    String json = RedisUtil.serialize(updated);
+                    if (json != null) reactiveRedisStringTemplate.opsForValue().set(CACHE_PREFIX + updated.getId(), json, CACHE_TTL).subscribe();
+                    reactiveRedisStringTemplate.opsForValue().delete(LIST_CACHE_PREFIX + updated.getUserId()).subscribe();
+                })
+                .onErrorMap(error -> error instanceof AppException ? error : new AppException(
+                        ErrorCode.USER_HIGH_SCHOOL_SAVE_FAILED,
+                        String.format("Update user high school failed for id=%s", request.getId()), error));
+    }
     /// Lấy UserHighSchool theo ID
     private Mono<Void> saveProfileComponentAudit(String userId, String component, String resourceId, String operation) {
         JsonObject metadata = new JsonObject();

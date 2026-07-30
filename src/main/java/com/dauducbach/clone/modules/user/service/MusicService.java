@@ -1,11 +1,11 @@
 package com.dauducbach.clone.modules.user.service;
 
-import com.cloudinary.Cloudinary;
-import com.cloudinary.utils.ObjectUtils;
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.commons.response.PageResponse;
-import com.dauducbach.clone.modules.post.service.MediaService;
+import com.dauducbach.clone.modules.media.dto.response.MediaAudioUploadResult;
+import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
+import com.dauducbach.clone.modules.media.service.MediaService;
 import com.dauducbach.clone.modules.user.dto.request.JamendoMusicImportRequest;
 import com.dauducbach.clone.modules.user.dto.request.MusicCreateRequest;
 import com.dauducbach.clone.modules.user.dto.response.JamendoMusicImportResponse;
@@ -28,7 +28,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 
 import java.net.URI;
 import java.net.URLDecoder;
@@ -38,7 +37,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -56,7 +54,7 @@ public class MusicService {
     R2dbcEntityTemplate r2dbcEntityTemplate;
     ReactiveRedisTemplate<String, String> redisTemplate;
     WebClient webClient;
-    Cloudinary cloudinary;
+    MediaCompatibilityFacade mediaFacade;
 
     public Mono<JamendoMusicImportResponse> importFromJamendo(JamendoMusicImportRequest request, String categoryParam) {
         return Mono.defer(() -> {
@@ -207,10 +205,10 @@ public class MusicService {
                 });
     }
 
-    private Mono<Musics> saveImportedMusic(JsonObject item, String category, Map<String, Object> uploadResult) {
+    private Mono<Musics> saveImportedMusic(JsonObject item, String category, MediaAudioUploadResult uploadResult) {
         String musicId = KafkaUtils.extractString(item, "id");
         String displayName = firstNonBlank(KafkaUtils.extractString(item, "name"), musicId);
-        String secureUrl = stringValue(uploadResult.get("secure_url"), stringValue(uploadResult.get("url"), null));
+        String secureUrl = firstNonBlank(uploadResult.secureUrl(), uploadResult.url());
         if (secureUrl == null || secureUrl.isBlank()) {
             return Mono.error(new AppException(ErrorCode.MUSIC_IMPORT_FAILED, "Cloudinary upload result missing secure_url"));
         }
@@ -242,21 +240,16 @@ public class MusicService {
                 .doOnError(error -> log.error("|MusicService|downloadAudio|failed|error={}", error.getMessage()));
     }
 
-    private Mono<Map<String, Object>> uploadAudioToCloudinary(byte[] bytes, String musicId, String displayName) {
+    private Mono<MediaAudioUploadResult> uploadAudioToCloudinary(byte[] bytes, String musicId, String displayName) {
         log.info("|MusicService|uploadAudioToCloudinary|start|musicId={}|bytes={}", musicId, bytes.length);
-        return Mono.fromCallable(() -> {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> result = cloudinary.uploader().upload(bytes, ObjectUtils.asMap(
-                            "resource_type", "video",
-                            "folder", "social_network_musics",
-                            "public_id", toSlug(firstNonBlank(displayName, musicId))
-                    ));
-                    return result;
-                })
-                .subscribeOn(Schedulers.boundedElastic())
-                .doOnSuccess(result -> log.info("|MusicService|uploadAudioToCloudinary|success|musicId={}|publicId={}",
-                        musicId, stringValue(result.get("public_id"), null)))
-                .doOnError(error -> log.error("|MusicService|uploadAudioToCloudinary|failed|musicId={}|error={}",
+        return mediaFacade.uploadMusic(
+                        bytes,
+                        toSlug(firstNonBlank(displayName, musicId)))
+                .doOnSuccess(result -> log.info(
+                        "|MusicService|uploadAudioToCloudinary|success|musicId={}|publicId={}",
+                        musicId, result.publicId()))
+                .doOnError(error -> log.error(
+                        "|MusicService|uploadAudioToCloudinary|failed|musicId={}|error={}",
                         musicId, error.getMessage()));
     }
 
@@ -400,9 +393,6 @@ public class MusicService {
         return first == null || first.isBlank() ? fallback : first.trim();
     }
 
-    private String stringValue(Object value, String fallback) {
-        return value == null ? fallback : String.valueOf(value);
-    }
 
     private String toSlug(String value) {
         String source = firstNonBlank(value, UUID.randomUUID().toString());

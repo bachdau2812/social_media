@@ -14,7 +14,7 @@ import com.dauducbach.clone.modules.post.service.PostService;
 import com.dauducbach.clone.modules.user.dto.response.FollowerListResponse;
 import com.dauducbach.clone.modules.user.entity.UserDetails;
 import com.dauducbach.clone.modules.user.service.UserFollowerService;
-import com.dauducbach.clone.modules.user.service.UserDetailsService;
+import com.dauducbach.clone.modules.user.service.UserIdentityQueryService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -46,7 +46,7 @@ class PushModuleNotificationHandlerTest {
     @Mock
     UserFollowerService userFollowerService;
     @Mock
-    UserDetailsService userDetailsService;
+    UserIdentityQueryService userIdentityQueryService;
     @Mock
     PostService postService;
     @Mock
@@ -59,7 +59,7 @@ class PushModuleNotificationHandlerTest {
         PushModuleNotificationHandler handler = newHandler();
 
         when(redisTemplate.hasKey(anyString())).thenReturn(Mono.just(false));
-        when(userDetailsService.getUserDetailsById("owner-1")).thenReturn(Mono.just(userDetails("owner-1", "Bach")));
+        when(userIdentityQueryService.resolveUsername("owner-1")).thenReturn(Mono.just("Bach"));
         when(userFollowerService.getFollowers("owner-1", 0, 100))
                 .thenReturn(Mono.just(FollowerListResponse.builder()
                         .followers(List.of(
@@ -99,7 +99,7 @@ class PushModuleNotificationHandlerTest {
         PushModuleNotificationHandler handler = newHandler();
 
         when(redisTemplate.hasKey(anyString())).thenReturn(Mono.just(false));
-        when(userDetailsService.getUserDetailsById("actor-1")).thenReturn(Mono.just(userDetails("actor-1", "Nam")));
+        when(userIdentityQueryService.resolveUsername("actor-1")).thenReturn(Mono.just("Nam"));
         when(postService.getPostById("post-1")).thenReturn(Mono.just(post("post-1", "owner-1", "noi dung bai viet")));
         when(commentService.getDistinctCommenterUserIdsByPostId("post-1"))
                 .thenReturn(Flux.just("commenter-1", "owner-1", "actor-1"));
@@ -149,7 +149,7 @@ class PushModuleNotificationHandlerTest {
         PushModuleNotificationHandler handler = newHandler();
 
         when(redisTemplate.hasKey(anyString())).thenReturn(Mono.just(false));
-        when(userDetailsService.getUserDetailsById("actor-1")).thenReturn(Mono.just(userDetails("actor-1", "Nam")));
+        when(userIdentityQueryService.resolveUsername("actor-1")).thenReturn(Mono.just("Nam"));
         when(postService.getPostOwnerIdByPostId("post-1")).thenReturn(Mono.just("owner-1"));
         when(postService.getPostById("post-1")).thenReturn(Mono.just(post("post-1", "owner-1", "noi dung bai viet")));
         when(commentService.getCommentById("parent-1"))
@@ -206,7 +206,7 @@ class PushModuleNotificationHandlerTest {
     void handlePostLikeSkipsMutedPostRecipients() {
         PushModuleNotificationHandler handler = newHandler();
 
-        when(userDetailsService.getUserDetailsById("actor-1")).thenReturn(Mono.just(userDetails("actor-1", "Nam")));
+        when(userIdentityQueryService.resolveUsername("actor-1")).thenReturn(Mono.just("Nam"));
         when(postService.getPostById("post-1")).thenReturn(Mono.just(post("post-1", "owner-1", "noi dung bai viet")));
         when(redisTemplate.hasKey(PostNotificationCacheKeys.mutedPostNotification("post-1", "owner-1")))
                 .thenReturn(Mono.just(false));
@@ -239,7 +239,7 @@ class PushModuleNotificationHandlerTest {
         PushModuleNotificationHandler handler = newHandler();
 
         when(redisTemplate.hasKey(anyString())).thenReturn(Mono.just(false));
-        when(userDetailsService.getUserDetailsById("actor-1")).thenReturn(Mono.just(userDetails("actor-1", "Nam")));
+        when(userIdentityQueryService.resolveUsername("actor-1")).thenReturn(Mono.just("Nam"));
         when(commentService.getCommentById("comment-1"))
                 .thenReturn(Mono.just(comment("comment-1", "comment-owner-1", "noi dung binh luan")));
         when(notificationTemplatesRepository.findByActionType(UserActionType.LIKE_COMMENT))
@@ -269,7 +269,7 @@ class PushModuleNotificationHandlerTest {
                 notificationTemplatesRepository,
                 redisTemplate,
                 userFollowerService,
-                userDetailsService,
+                userIdentityQueryService,
                 postService,
                 commentService,
                 likeService

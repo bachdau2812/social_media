@@ -25,6 +25,7 @@ public class UserDetails {
     @Id
     String userId;
     String username;
+    String fullName;
     LocalDate dob;
     String hometown;
     String livingIn;

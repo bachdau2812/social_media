@@ -22,5 +22,9 @@ public class NotificationEvents {
     UserActionType actionType;  // ID của loại hành động (ví dụ: "like", "comment", "follow")
     String entityId;    // ID của đối tượng bị tác động (ví dụ: bài viet, bình luận, người dùng)
     String entityType;  // Loại đối tượng bị tác động (ví dụ: "post", "comment", "user")
+    String content;
+    String metadata;
+    String deepLink;
+    String dedupKey;
     Instant createdAt;
 }

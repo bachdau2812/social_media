@@ -76,6 +76,9 @@ public class NotificationService {
                 .recipient(recipientId)
                 .title(request.getTitle())
                 .htmlContent(request.getContent())
+                .metadata(request.getMetadata())
+                .deepLink(request.getDeepLink())
+                .dedupKey(request.getDedupKey())
                 .notificationType(request.getNotificationType())
                 .build();
 

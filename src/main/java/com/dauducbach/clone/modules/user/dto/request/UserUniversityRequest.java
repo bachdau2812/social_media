@@ -15,6 +15,7 @@ import java.time.LocalDate;
 @Builder
 
 public class UserUniversityRequest {
+    String id;
     String userId;
     String schoolName;
     String major;

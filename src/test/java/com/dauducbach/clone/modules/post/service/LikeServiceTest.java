@@ -155,6 +155,20 @@ class LikeServiceTest {
     }
 
     @Test
+    void getLikerActorIdsReturnsNewestActorsForTarget() {
+        LikeService service = newService();
+
+        when(likeRepository.countByTargetIdAndTargetType("post-1", "POST")).thenReturn(Mono.just(3L));
+        when(likeRepository.findActorIdsByTargetIdAndTargetType(eq("post-1"), eq("POST"), any(Pageable.class)))
+                .thenReturn(Flux.just("user-3", "user-2"));
+
+        StepVerifier.create(service.getLikerActorIds("post-1", "POST", 0, 2))
+                .expectNextMatches(response -> response.content().equals(java.util.List.of("user-3", "user-2"))
+                        && response.totalElements() == 3)
+                .verifyComplete();
+    }
+
+    @Test
     void countLikesForPostReadsCacheFirst() {
         LikeService service = newService();
 
@@ -197,8 +211,7 @@ class LikeServiceTest {
     }
 
     private LikeService newService() {
-        lenient().when(userAuditService.save(any(AuditLogs.class))).thenReturn(Mono.empty());
-        return new LikeService(likeRepository, postDetailsRepository, commentRepository, kafkaSender, reactiveRedisStringTemplate, r2dbcEntityTemplate, userAuditService);
+        return new LikeService(likeRepository, postDetailsRepository, commentRepository, kafkaSender, reactiveRedisStringTemplate, r2dbcEntityTemplate);
     }
 
     private void mockPostLikeCacheUpdate(long currentCount, long updatedCount) {

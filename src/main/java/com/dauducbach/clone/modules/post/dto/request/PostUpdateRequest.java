@@ -19,5 +19,11 @@ public class PostUpdateRequest {
     String userId;
     String content;
     List<String> hashtag;
+    String mediaRatio;
+    String visibility;
+    String musicId;
+    Long musicStart;
+    Long musicEnd;
+    List<PostItemUpdateRequest> items;
 }
 

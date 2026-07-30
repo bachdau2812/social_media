@@ -2,20 +2,38 @@ package com.dauducbach.clone.modules.user.controller;
 
 import com.dauducbach.clone.commons.response.ApiResponse;
 import com.dauducbach.clone.modules.user.dto.request.UserDetailsUpdateRequest;
+import com.dauducbach.clone.modules.user.dto.response.ChatUserSuggestionResponse;
 import com.dauducbach.clone.modules.user.entity.UserDetails;
+import com.dauducbach.clone.modules.user.service.ChatUserSuggestionService;
 import com.dauducbach.clone.modules.user.service.UserDetailsService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 
+import java.util.List;
+
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/user-details")
 public class UserDetailsController {
     private final UserDetailsService userDetailsService;
+    private final ChatUserSuggestionService chatUserSuggestionService;
 
-    /// Get UserDetails by userId
+    @GetMapping("/chat-suggestions")
+    public Mono<ApiResponse<List<ChatUserSuggestionResponse>>> getChatSuggestions(
+            @RequestParam String viewerId,
+            @RequestParam(defaultValue = "") String query,
+            @RequestParam(defaultValue = "30") int limit
+    ) {
+        return chatUserSuggestionService.getSuggestions(viewerId, query, limit)
+                .collectList()
+                .map(results -> ApiResponse.<List<ChatUserSuggestionResponse>>builder()
+                        .message("Chat user suggestions fetched")
+                        .result(results)
+                        .build());
+    }
+
     @GetMapping("/{userId}")
     public Mono<ApiResponse<UserDetails>> getUserDetailsById(@PathVariable String userId,
                                                               @RequestHeader(required = false) String traceId) {
@@ -27,7 +45,6 @@ public class UserDetailsController {
                         .build());
     }
 
-    /// Update UserDetails
     @PutMapping("/update")
     public Mono<ApiResponse<UserDetails>> updateUserDetails(@Valid @RequestBody UserDetailsUpdateRequest request,
                                                              @RequestHeader(required = false) String traceId) {
@@ -39,7 +56,6 @@ public class UserDetailsController {
                         .build());
     }
 
-    /// Delete UserDetails by userId
     @DeleteMapping("/{userId}")
     public Mono<ApiResponse<String>> deleteUserDetails(@PathVariable String userId,
                                                         @RequestHeader(required = false) String traceId) {

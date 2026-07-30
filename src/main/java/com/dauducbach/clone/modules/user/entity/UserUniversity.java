@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.relational.core.mapping.Column;
 import org.springframework.data.relational.core.mapping.Table;
 
 import java.time.LocalDate;
@@ -23,7 +24,9 @@ public class UserUniversity {
     String userId;
     String schoolName;
     String major;
+    @Column("from_date")
     LocalDate from;
+    @Column("to_date")
     LocalDate to;
     boolean isGraduate;
     boolean isPublic;

@@ -16,6 +16,8 @@ public enum UserActionType {
     REPLY_COMMENT,
     LIKE_COMMENT,
     SEND_MESSAGE,
+    CHAT_MEMBER_REQUEST,
+    CHAT_GROUP_MEMBER_ADDED,
     ADD_FRIEND,
     ACCEPT_FRIEND,
     RESET_PASSWORD,
@@ -24,4 +26,5 @@ public enum UserActionType {
     FOLLOW_EVENT,
     AVATAR_UPDATE,
     UP_STORY,
+    STORY_ACTIVITY,
 }

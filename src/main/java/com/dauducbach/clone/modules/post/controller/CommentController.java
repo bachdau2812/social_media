@@ -2,12 +2,14 @@ package com.dauducbach.clone.modules.post.controller;
 
 import com.dauducbach.clone.commons.response.ApiResponse;
 import com.dauducbach.clone.commons.response.PageResponse;
+import com.dauducbach.clone.commons.security.ActorIdentity;
 import com.dauducbach.clone.modules.post.dto.request.CommentCreateRequest;
 import com.dauducbach.clone.modules.post.dto.request.CommentUpdateRequest;
 import com.dauducbach.clone.modules.post.dto.response.CommentCreateResponse;
 import com.dauducbach.clone.modules.post.entity.Comment;
 import com.dauducbach.clone.modules.post.service.CommentService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.http.ResponseEntity;
 import reactor.core.publisher.Flux;
@@ -20,7 +22,8 @@ public class CommentController {
     private final CommentService commentService;
 
     @PostMapping
-    public Mono<ResponseEntity<ApiResponse<CommentCreateResponse>>> createComment(@RequestBody CommentCreateRequest request) {
+    public Mono<ResponseEntity<ApiResponse<CommentCreateResponse>>> createComment(@RequestBody CommentCreateRequest request, Authentication authentication) {
+        request.setUserId(ActorIdentity.require(authentication.getName(), request.getUserId()));
         return commentService.createComment(request)
                 .map(response -> ResponseEntity.accepted().body(ApiResponse.<CommentCreateResponse>builder()
                         .message(response.getMessage())
@@ -29,7 +32,8 @@ public class CommentController {
     }
 
     @PutMapping
-    public Mono<ApiResponse<Comment>> updateComment(@RequestBody CommentUpdateRequest request) {
+    public Mono<ApiResponse<Comment>> updateComment(@RequestBody CommentUpdateRequest request, Authentication authentication) {
+        request.setUserId(ActorIdentity.require(authentication.getName(), request.getUserId()));
         return commentService.updateComment(request)
                 .map(updated -> ApiResponse.<Comment>builder()
                         .message("Comment updated successfully")
@@ -38,8 +42,8 @@ public class CommentController {
     }
 
     @DeleteMapping("/{commentId}")
-    public Mono<ApiResponse<String>> deleteComment(@PathVariable String commentId) {
-        return commentService.deleteComment(commentId)
+    public Mono<ApiResponse<String>> deleteComment(@PathVariable String commentId, Authentication authentication) {
+        return commentService.deleteComment(commentId, authentication.getName())
                 .then(Mono.just(ApiResponse.<String>builder()
                         .message("Comment deleted successfully")
                         .result("Deleted commentId: " + commentId)
@@ -55,20 +59,41 @@ public class CommentController {
                         .build());
     }
 
+    @GetMapping("/post/{postId}/page")
+    public Mono<ApiResponse<PageResponse<Comment>>> getRootCommentPage(
+            @PathVariable String postId,
+            @RequestParam(required = false) String viewerId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size
+    ) {
+        Mono<PageResponse<Comment>> source = viewerId == null || viewerId.isBlank()
+                ? commentService.getRootCommentsPage(postId, page, size)
+                : commentService.getRootCommentsPage(postId, viewerId, page, size);
+        return source.map(result -> ApiResponse.<PageResponse<Comment>>builder()
+                        .message("Post comments fetched successfully")
+                        .result(result)
+                        .build());
+    }
+
     @GetMapping("/post/{postId}")
     public Flux<Comment> getRootComments(@PathVariable String postId,
+                                         @RequestParam(required = false) String viewerId,
                                          @RequestParam(defaultValue = "0") int page,
                                          @RequestParam(defaultValue = "10") int size) {
-        return commentService.getRootComments(postId, page, size);
+        return viewerId == null || viewerId.isBlank()
+                ? commentService.getRootComments(postId, page, size)
+                : commentService.getRootComments(postId, viewerId, page, size);
     }
 
     @GetMapping("/parent/{parentId}")
     public Flux<Comment> getChildComments(@PathVariable String parentId,
+                                          @RequestParam(required = false) String viewerId,
                                           @RequestParam(defaultValue = "0") int page,
                                           @RequestParam(defaultValue = "10") int size) {
-        return commentService.getChildComments(parentId, page, size);
+        return viewerId == null || viewerId.isBlank()
+                ? commentService.getChildComments(parentId, page, size)
+                : commentService.getChildComments(parentId, viewerId, page, size);
     }
-
     @GetMapping("/user/{userId}")
     public Mono<ApiResponse<PageResponse<Comment>>> getCommentsByUserId(@PathVariable String userId,
                                                                         @RequestParam(defaultValue = "0") int page,

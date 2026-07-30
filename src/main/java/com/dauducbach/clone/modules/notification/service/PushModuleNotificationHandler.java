@@ -11,9 +11,8 @@ import com.dauducbach.clone.modules.post.service.CommentService;
 import com.dauducbach.clone.modules.post.service.LikeService;
 import com.dauducbach.clone.modules.post.service.PostService;
 import com.dauducbach.clone.modules.user.dto.response.FollowerListResponse;
-import com.dauducbach.clone.modules.user.entity.UserDetails;
 import com.dauducbach.clone.modules.user.service.UserFollowerService;
-import com.dauducbach.clone.modules.user.service.UserDetailsService;
+import com.dauducbach.clone.modules.user.service.UserIdentityQueryService;
 import com.dauducbach.clone.utils.GsonUtils;
 import com.dauducbach.clone.utils.KafkaUtils;
 import com.google.gson.JsonObject;
@@ -34,6 +33,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 
 @Service
 @FieldDefaults(level = lombok.AccessLevel.PRIVATE, makeFinal = true)
@@ -47,13 +47,13 @@ public class PushModuleNotificationHandler {
     NotificationTemplatesRepository notificationTemplatesRepository;
     ReactiveRedisTemplate<String, Object> redisTemplate;
     UserFollowerService userFollowerService;
-    UserDetailsService userDetailsService;
+    UserIdentityQueryService userIdentityQueryService;
     PostService postService;
     CommentService commentService;
     LikeService likeService;
 
     @KafkaListener(topics = "post_upload_event", groupId = "notification-service")
-    public void handlePostUploadEvent(@Payload Object payload) {
+    public CompletableFuture<Void> handlePostUploadEvent(@Payload Object payload) {
         JsonObject payloadJson = toJsonObject(payload);
         String postId = firstString(payloadJson, "postId", "post_id");
         String userId = firstString(payloadJson, "userId", "user_id");
@@ -61,22 +61,22 @@ public class PushModuleNotificationHandler {
 
         if (postId.isBlank() || userId.isBlank()) {
             log.warn("|PushModuleNotificationHandler|handlePostUploadEvent|missing data|postId={}|userId={}", postId, userId);
-            return;
+            return CompletableFuture.completedFuture(null);
         }
 
         Map<String, String> metadata = baseMetadata(userId, postId, EntityType.POST.name());
         metadata.put("CONTENT", content);
 
-        enrichActorUsername(userId, metadata)
+        return enrichActorUsername(userId, metadata)
                 .then(getFollowersOfUser(userId))
                 .flatMap(followers -> sendPush(UserActionType.NEW_POST, userId, postId, EntityType.POST.name(), followers, metadata, true))
                 .doOnSuccess(v -> log.info("|PushModuleNotificationHandler|handlePostUploadEvent|completed|postId={}|userId={}", postId, userId))
                 .doOnError(error -> log.error("|PushModuleNotificationHandler|handlePostUploadEvent|failed|postId={}|error={}", postId, error.getMessage()))
-                .subscribe();
+                .toFuture();
     }
 
     @KafkaListener(topics = "comment_success_event", groupId = "notification-service")
-    public void handleCommentSuccessEvent(@Payload Object payload) {
+    public CompletableFuture<Void> handleCommentSuccessEvent(@Payload Object payload) {
         JsonObject payloadJson = toJsonObject(payload);
         String commentId = firstString(payloadJson, "commentId", "comment_id");
         String userId = firstString(payloadJson, "userId", "user_id");
@@ -87,7 +87,7 @@ public class PushModuleNotificationHandler {
         if (commentId.isBlank() || userId.isBlank() || postId.isBlank()) {
             log.warn("|PushModuleNotificationHandler|handleCommentSuccessEvent|missing data|commentId={}|userId={}|postId={}",
                     commentId, userId, postId);
-            return;
+            return CompletableFuture.completedFuture(null);
         }
 
         Map<String, String> metadata = baseMetadata(userId, commentId, EntityType.COMMENT.name());
@@ -97,16 +97,16 @@ public class PushModuleNotificationHandler {
         metadata.put("COMMENT", content);
         metadata.put("REPLY", content);
 
-        enrichActorUsername(userId, metadata)
+        return enrichActorUsername(userId, metadata)
                 .then(enrichPostContent(postId, metadata))
                 .then(sendCommentNotifications(userId, postId, commentId, parentId, metadata))
                 .doOnSuccess(v -> log.info("|PushModuleNotificationHandler|handleCommentSuccessEvent|completed|commentId={}|postId={}", commentId, postId))
                 .doOnError(error -> log.error("|PushModuleNotificationHandler|handleCommentSuccessEvent|failed|commentId={}|error={}", commentId, error.getMessage()))
-                .subscribe();
+                .toFuture();
     }
 
     @KafkaListener(topics = "like_event", groupId = "notification-service")
-    public void handleLikeEvent(@Payload Object payload) {
+    public CompletableFuture<Void> handleLikeEvent(@Payload Object payload) {
         JsonObject payloadJson = toJsonObject(payload);
         String actorId = firstString(payloadJson, "actorId", "actor_id");
         String targetId = firstString(payloadJson, "targetId", "target_id");
@@ -118,17 +118,17 @@ public class PushModuleNotificationHandler {
         if (actorId.isBlank() || targetId.isBlank() || targetType.isBlank()) {
             log.warn("|PushModuleNotificationHandler|handleLikeEvent|missing data|actorId={}|targetId={}|targetType={}",
                     actorId, targetId, targetType);
-            return;
+            return CompletableFuture.completedFuture(null);
         }
 
         Mono<Void> notification = EntityType.POST.name().equals(targetType)
                 ? handlePostLike(actorId, targetId, targetOwnerId, likeCount)
                 : handleCommentLike(actorId, targetId, targetOwnerId, postId);
 
-        notification
+        return notification
                 .doOnSuccess(v -> log.info("|PushModuleNotificationHandler|handleLikeEvent|completed|targetId={}|targetType={}", targetId, targetType))
                 .doOnError(error -> log.error("|PushModuleNotificationHandler|handleLikeEvent|failed|targetId={}|error={}", targetId, error.getMessage()))
-                .subscribe();
+                .toFuture();
     }
 
     private Mono<Void> sendCommentNotifications(String actorId, String postId, String commentId, String parentId, Map<String, String> metadata) {
@@ -332,10 +332,7 @@ public class PushModuleNotificationHandler {
     }
 
     private Mono<Void> enrichActorUsername(String actorId, Map<String, String> metadata) {
-        return userDetailsService.getUserDetailsById(actorId)
-                .map(UserDetails::getUsername)
-                .filter(username -> username != null && !username.isBlank())
-                .defaultIfEmpty(actorId)
+        return userIdentityQueryService.resolveUsername(actorId)
                 .doOnNext(username -> metadata.put("USERNAME", username))
                 .onErrorResume(error -> {
                     log.error("|PushModuleNotificationHandler|enrichActorUsername|failed|actorId={}|error={}",

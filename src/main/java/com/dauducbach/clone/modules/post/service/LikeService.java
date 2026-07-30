@@ -4,9 +4,6 @@ import com.dauducbach.clone.commons.constant.EntityType;
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.commons.response.PageResponse;
-import com.dauducbach.clone.modules.audit.dto.AuditActionType;
-import com.dauducbach.clone.modules.audit.entity.AuditLogs;
-import com.dauducbach.clone.modules.audit.service.UserAuditService;
 import com.dauducbach.clone.modules.post.dto.event.LikeEventPayload;
 import com.dauducbach.clone.modules.post.dto.request.LikeRequest;
 import com.dauducbach.clone.modules.post.dto.response.LikeToggleResponse;
@@ -56,7 +53,6 @@ public class LikeService {
     KafkaSender<String, String> kafkaSender;
     ReactiveRedisTemplate<String, String> reactiveRedisStringTemplate;
     R2dbcEntityTemplate r2dbcEntityTemplate;
-    UserAuditService userAuditService;
 
     // Luồng like phải kiểm tra target trước khi ghi DB để không tạo like mồ côi.
     public Mono<LikeToggleResponse> like(String actorId, LikeRequest request) {
@@ -87,7 +83,6 @@ public class LikeService {
         return ensurePostLikeCountCache(targetId, targetType)
                 .then(likeRepository.delete(existing))
                 .then(updatePostLikeCountCache(targetId, targetType, -1))
-                .then(saveUnlikeAudit(existing.getActorId(), targetId, targetType))
                 .thenReturn(new LikeToggleResponse(targetId, targetType, false, existing.getId()))
                 .doOnSuccess(response -> log.info("|LikeService|unlikeExisting|completed|likeId={}|targetId={}|targetType={}",
                         existing.getId(), targetId, targetType));
@@ -193,6 +188,22 @@ public class LikeService {
     }
 
     // Hiện tại việc kiểm tra target tồn tại được mock bằng chính DB của module post/comment.
+    public Mono<PageResponse<String>> getLikerActorIds(String targetId, String targetType, int page, int size) {
+        String normalizedTargetType = normalizeAndValidateTargetType(targetType);
+        validateTargetId(targetId);
+        int pageNumber = Math.max(page, 0);
+        int pageSize = validatePageSize(size);
+        Pageable pageable = PageRequest.of(pageNumber, pageSize);
+
+        return likeRepository.countByTargetIdAndTargetType(targetId, normalizedTargetType)
+                .flatMap(totalElements -> likeRepository
+                        .findActorIdsByTargetIdAndTargetType(targetId, normalizedTargetType, pageable)
+                        .collectList()
+                        .map(content -> PageResponse.of(content, pageNumber, totalElements, pageSize)))
+                .onErrorMap(error -> error instanceof AppException
+                        ? error
+                        : new AppException(ErrorCode.LIKE_FETCH_FAILED, "Fetch liker actors failed", error));
+    }
     private Mono<TargetContext> resolveTargetContext(String targetId, String targetType) {
         if (EntityType.POST.name().equals(targetType)) {
             return postDetailsRepository.findById(targetId)
@@ -238,23 +249,6 @@ public class LikeService {
                 .doOnComplete(() -> log.info("|LikeService|publishLikeEvent|sent|actorId={}|targetId={}|targetType={}|postId={}|likeCount={}",
                         payload.actorId(), payload.targetId(), payload.targetType(), payload.postId(), payload.likeCount()))
                 .then();
-    }
-
-    // Chuẩn hóa targetType tại biên service để toàn bộ repository query dùng cùng một format.
-    private Mono<Void> saveUnlikeAudit(String actorId, String targetId, String targetType) {
-        AuditActionType action = EntityType.COMMENT.name().equals(targetType)
-                ? AuditActionType.UNLIKE_COMMENT
-                : AuditActionType.UNLIKE_POST;
-        JsonObject metadata = new JsonObject();
-        metadata.addProperty("targetType", targetType);
-        return userAuditService.save(AuditLogs.builder()
-                .actorId(actorId)
-                .action(action)
-                .resourceType(targetType)
-                .resourceId(targetId)
-                .status("SUCCESS")
-                .metadata(metadata.toString())
-                .build());
     }
 
     private Mono<Long> getPostLikeCountFromCache(String postId) {

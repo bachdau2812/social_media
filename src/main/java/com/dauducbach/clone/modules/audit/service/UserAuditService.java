@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
+import java.util.concurrent.CompletableFuture;
 import java.util.UUID;
 
 @Service
@@ -72,100 +73,54 @@ public class UserAuditService {
     }
 
     @KafkaListener(topics = "profile_creation_event", groupId = "audit-service")
-    public void handleProfileCreationEvent(@Payload String payload) {
+    public CompletableFuture<Void> handleProfileCreationEvent(@Payload String payload) {
         JsonObject json = GsonUtils.fromString(payload);
         String userId = KafkaUtils.extractString(json, "userId");
         JsonObject metadata = new JsonObject();
         metadata.addProperty("username", KafkaUtils.extractString(json, "username"));
         metadata.addProperty("email", KafkaUtils.extractString(json, "email"));
 
-        record(AuditActionType.REGISTER, userId, EntityType.USER.name(), userId, STATUS_SUCCESS, metadata).subscribe();
+        return record(AuditActionType.REGISTER, userId, EntityType.USER.name(), userId, STATUS_SUCCESS, metadata).toFuture();
     }
 
-    @KafkaListener(topics = "post_upload_event", groupId = "audit-service")
-    public void handlePostUploadEvent(@Payload String payload) {
-        JsonObject json = GsonUtils.fromString(payload);
-        String postId = KafkaUtils.extractString(json, "post_id");
-        String userId = KafkaUtils.extractString(json, "userId");
-        JsonObject metadata = new JsonObject();
-        metadata.addProperty("contentLength", KafkaUtils.extractString(json, "content").length());
 
-        record(AuditActionType.CREATE_POST, userId, EntityType.POST.name(), postId, STATUS_SUCCESS, metadata).subscribe();
-    }
 
-    @KafkaListener(topics = "comment_success_event", groupId = "audit-service")
-    public void handleCommentSuccessEvent(@Payload String payload) {
-        JsonObject json = GsonUtils.fromString(payload);
-        String commentId = KafkaUtils.extractString(json, "commentId");
-        String userId = KafkaUtils.extractString(json, "userId");
-        String postId = KafkaUtils.extractString(json, "postId");
-        String parentId = KafkaUtils.extractString(json, "parentId");
-
-        JsonObject metadata = new JsonObject();
-        metadata.addProperty("postId", postId);
-        metadata.addProperty("parentId", parentId);
-        metadata.addProperty("hasMedia", !KafkaUtils.extractString(json, "mediaUrl").isBlank());
-
-        AuditActionType action = parentId.isBlank()
-                ? AuditActionType.COMMENT_POST
-                : AuditActionType.COMMENT_REPLY;
-        record(action, userId, EntityType.COMMENT.name(), commentId, STATUS_SUCCESS, metadata).subscribe();
-    }
-
-    @KafkaListener(topics = "like_event", groupId = "audit-service")
-    public void handleLikeEvent(@Payload String payload) {
-        JsonObject json = GsonUtils.fromString(payload);
-        String actorId = KafkaUtils.extractString(json, "actorId");
-        String targetId = KafkaUtils.extractString(json, "targetId");
-        String targetType = KafkaUtils.extractString(json, "targetType").toUpperCase();
-
-        JsonObject metadata = new JsonObject();
-        metadata.addProperty("targetOwnerId", KafkaUtils.extractString(json, "targetOwnerId"));
-        metadata.addProperty("postId", KafkaUtils.extractString(json, "postId"));
-        metadata.addProperty("parentCommentId", KafkaUtils.extractString(json, "parentCommentId"));
-        metadata.addProperty("likeCount", KafkaUtils.extractLong(json, "likeCount"));
-
-        AuditActionType action = EntityType.COMMENT.name().equals(targetType)
-                ? AuditActionType.LIKE_COMMENT
-                : AuditActionType.LIKE_POST;
-        record(action, actorId, targetType, targetId, STATUS_SUCCESS, metadata).subscribe();
-    }
 
     @KafkaListener(topics = "follow_event", groupId = "audit-service")
-    public void handleFollowEvent(@Payload String payload) {
+    public CompletableFuture<Void> handleFollowEvent(@Payload String payload) {
         JsonObject json = GsonUtils.fromString(payload);
         String followerId = KafkaUtils.extractString(json, "followerId");
         String followingId = KafkaUtils.extractString(json, "followingId");
         JsonObject metadata = new JsonObject();
         metadata.addProperty("followingId", followingId);
 
-        record(AuditActionType.FOLLOW, followerId, EntityType.USER.name(), followingId, STATUS_SUCCESS, metadata).subscribe();
+        return record(AuditActionType.FOLLOW, followerId, EntityType.USER.name(), followingId, STATUS_SUCCESS, metadata).toFuture();
     }
 
     @KafkaListener(topics = "un_follow_event", groupId = "audit-service")
-    public void handleUnfollowEvent(@Payload String payload) {
+    public CompletableFuture<Void> handleUnfollowEvent(@Payload String payload) {
         JsonObject json = GsonUtils.fromString(payload);
         String followerId = KafkaUtils.extractString(json, "followerId");
         String followingId = KafkaUtils.extractString(json, "followingId");
         JsonObject metadata = new JsonObject();
         metadata.addProperty("followingId", followingId);
 
-        record(AuditActionType.UNFOLLOW, followerId, EntityType.USER.name(), followingId, STATUS_SUCCESS, metadata).subscribe();
+        return record(AuditActionType.UNFOLLOW, followerId, EntityType.USER.name(), followingId, STATUS_SUCCESS, metadata).toFuture();
     }
 
     @KafkaListener(topics = "avatar_update_event", groupId = "audit-service")
-    public void handleAvatarUpdateEvent(@Payload String payload) {
+    public CompletableFuture<Void> handleAvatarUpdateEvent(@Payload String payload) {
         JsonObject json = GsonUtils.fromString(payload);
         String userId = KafkaUtils.extractString(json, "userId");
         String mediaId = KafkaUtils.extractString(json, "mediaId");
         JsonObject metadata = new JsonObject();
         metadata.addProperty("mediaId", mediaId);
 
-        record(AuditActionType.UPLOAD_AVATAR, userId, RESOURCE_AVATAR, mediaId, STATUS_SUCCESS, metadata).subscribe();
+        return record(AuditActionType.UPLOAD_AVATAR, userId, RESOURCE_AVATAR, mediaId, STATUS_SUCCESS, metadata).toFuture();
     }
 
     @KafkaListener(topics = "story_success_event", groupId = "audit-service")
-    public void handleStorySuccessEvent(@Payload String payload) {
+    public CompletableFuture<Void> handleStorySuccessEvent(@Payload String payload) {
         JsonObject json = GsonUtils.fromString(payload);
         String userId = KafkaUtils.extractString(json, "userId");
         String storyId = KafkaUtils.extractString(json, "storyId");
@@ -174,28 +129,28 @@ public class UserAuditService {
         metadata.addProperty("mediaType", KafkaUtils.extractString(json, "mediaType"));
         metadata.addProperty("hasMusic", !KafkaUtils.extractString(json, "musicUrl").isBlank());
 
-        record(AuditActionType.UPLOAD_STORY, userId, RESOURCE_STORY, storyId, STATUS_SUCCESS, metadata).subscribe();
+        return record(AuditActionType.UPLOAD_STORY, userId, RESOURCE_STORY, storyId, STATUS_SUCCESS, metadata).toFuture();
     }
 
     @KafkaListener(topics = "forget_password_event", groupId = "audit-service")
-    public void handleForgetPasswordEvent(@Payload String payload) {
+    public CompletableFuture<Void> handleForgetPasswordEvent(@Payload String payload) {
         JsonObject json = GsonUtils.fromString(payload);
         String email = KafkaUtils.extractString(json, "email");
-        record(AuditActionType.FORGET_PASSWORD, email, RESOURCE_PASSWORD, email, STATUS_SUCCESS, emailMetadata(email)).subscribe();
+        return record(AuditActionType.FORGET_PASSWORD, email, RESOURCE_PASSWORD, email, STATUS_SUCCESS, emailMetadata(email)).toFuture();
     }
 
     @KafkaListener(topics = "new_password_event", groupId = "audit-service")
-    public void handleNewPasswordEvent(@Payload String payload) {
+    public CompletableFuture<Void> handleNewPasswordEvent(@Payload String payload) {
         JsonObject json = GsonUtils.fromString(payload);
         String email = KafkaUtils.extractString(json, "email");
-        record(AuditActionType.RESET_PASSWORD, email, RESOURCE_PASSWORD, email, STATUS_SUCCESS, emailMetadata(email)).subscribe();
+        return record(AuditActionType.RESET_PASSWORD, email, RESOURCE_PASSWORD, email, STATUS_SUCCESS, emailMetadata(email)).toFuture();
     }
 
     @KafkaListener(topics = "new_password_and_username_event", groupId = "audit-service")
-    public void handleNewPasswordAndUsernameEvent(@Payload String payload) {
+    public CompletableFuture<Void> handleNewPasswordAndUsernameEvent(@Payload String payload) {
         JsonObject json = GsonUtils.fromString(payload);
         String email = KafkaUtils.extractString(json, "email");
-        record(AuditActionType.RESET_PASSWORD, email, RESOURCE_PASSWORD, email, STATUS_SUCCESS, emailMetadata(email)).subscribe();
+        return record(AuditActionType.RESET_PASSWORD, email, RESOURCE_PASSWORD, email, STATUS_SUCCESS, emailMetadata(email)).toFuture();
     }
 
     private AuditLogs prepareAuditLog(AuditLogs auditLog) {

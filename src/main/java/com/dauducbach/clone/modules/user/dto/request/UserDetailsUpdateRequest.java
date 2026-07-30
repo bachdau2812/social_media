@@ -17,6 +17,7 @@ import java.util.List;
 
 public class UserDetailsUpdateRequest {
     String userId;
+    String fullName;
     String username;
     LocalDate dob;
     String homeTown;

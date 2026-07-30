@@ -1,13 +1,18 @@
 package com.dauducbach.clone.modules.post.service;
 
+import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
+
+import com.dauducbach.clone.commons.constant.EntityType;
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.commons.response.PageResponse;
+import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import com.dauducbach.clone.modules.post.dto.request.CommentCreateRequest;
 import com.dauducbach.clone.modules.post.dto.request.CommentUpdateRequest;
 import com.dauducbach.clone.modules.post.dto.response.CommentCreateResponse;
 import com.dauducbach.clone.modules.post.dto.request.MediaUploadRequest;
 import com.dauducbach.clone.modules.post.entity.Comment;
+import com.dauducbach.clone.modules.post.entity.Like;
 import com.dauducbach.clone.modules.post.repositoty.CommentRepository;
 import com.google.gson.JsonObject;
 import com.dauducbach.clone.utils.GsonUtils;
@@ -17,6 +22,8 @@ import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
+import org.springframework.data.relational.core.query.Criteria;
+import org.springframework.data.relational.core.query.Query;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -57,15 +64,18 @@ public class CommentService {
     KafkaSender<String, String> kafkaSender;
     PostSseService postSseService;
     R2dbcEntityTemplate r2dbcEntityTemplate;
+    MediaCompatibilityFacade cloudinaryMediaService;
 
     public Mono<CommentCreateResponse> createComment(CommentCreateRequest request) {
         log.info("|CommentService|createComment|start|postId={}|userId={}", request.getPostId(), request.getUserId());
 
         validateCreateRequest(request);
-        validateContent(request.getContent());
-
         List<MediaUploadRequest> mediaList = request.getMediaList() == null ? List.of() : request.getMediaList();
         boolean hasMedia = !mediaList.isEmpty();
+        validateMediaList(mediaList);
+        if (!hasMedia || (request.getContent() != null && !request.getContent().isBlank())) {
+            validateContent(request.getContent());
+        }
 
         String commentId = UUID.randomUUID().toString();
         Comment comment = Comment.builder()
@@ -88,7 +98,8 @@ public class CommentService {
                 ? sendCheckCommentMediaEvent(comment, mediaList)
                 : Mono.empty();
 
-        return ensurePostCommentCountCache(request.getPostId())
+        return validateParent(request)
+                .then(ensurePostCommentCountCache(request.getPostId()))
                 .then(r2dbcEntityTemplate.insert(Comment.class).using(comment))
                 .doOnSuccess(comment1 -> log.info("|CommentService|createComment|insert_success={}", comment1.getId()))
                 .doOnError(throwable -> log.error("|CommentService|createComment|insert_error|postId={}|userId={}|error={}",
@@ -105,14 +116,14 @@ public class CommentService {
                             .build());
                 })
                 .doOnSuccess(response -> log.info("|CommentService|createComment|success|commentId={}", response.getCommentId()))
-                .doOnError(error -> {
+                .onErrorResume(error -> {
                     log.error("|CommentService|createComment|failed|postId={}|userId={}|error={}",
                             request.getPostId(), request.getUserId(), error.getMessage());
-                    if (!hasMedia) {
-                        sendTextCommentFailureSse(comment, "Create comment failed");
-                    }
-                })
-                .onErrorMap(error -> wrapCreateError(request, error));
+                    Mono<Void> failureNotification = hasMedia
+                            ? Mono.empty()
+                            : sendTextCommentFailureSse(comment, "Create comment failed");
+                    return failureNotification.then(Mono.error(wrapCreateError(request, error)));
+                });
     }
 
     public Mono<Comment> updateComment(CommentUpdateRequest request) {
@@ -151,19 +162,26 @@ public class CommentService {
                         ));
     }
 
-    public Mono<Void> deleteComment(String commentId) {
-        log.info("|CommentService|deleteComment|start|commentId={}", commentId);
+    public Mono<Void> deleteComment(String commentId, String userId) {
+        log.info("|CommentService|deleteComment|start|commentId={}|userId={}", commentId, userId);
 
         return commentRepository.findById(commentId)
                 .switchIfEmpty(Mono.error(new AppException(
                         ErrorCode.COMMENT_NOT_FOUND,
                         String.format("Comment not found for commentId=%s", commentId)
                 )))
-                .flatMap(existing -> ensurePostCommentCountCache(existing.getPostId())
-                        .then(commentRepository.deleteById(commentId))
-                        .then(updatePostCommentCountCache(existing.getPostId(), -1))
-                )
-                .doOnSuccess(unused -> log.info("|CommentService|deleteComment|success|commentId={}", commentId))
+                .flatMap(existing -> {
+                    if (!userId.equals(existing.getUserId())) {
+                        return Mono.error(new AppException(
+                                ErrorCode.COMMENT_FORBIDDEN,
+                                String.format("User %s is not owner of commentId=%s", userId, commentId)
+                        ));
+                    }
+                    return ensurePostCommentCountCache(existing.getPostId())
+                            .then(commentRepository.deleteById(commentId))
+                            .then(updatePostCommentCountCache(existing.getPostId(), -1));
+                })
+                .doOnSuccess(unused -> log.info("|CommentService|deleteComment|success|commentId={}|userId={}", commentId, userId))
                 .onErrorMap(error -> error instanceof AppException
                         ? error
                         : new AppException(
@@ -174,12 +192,17 @@ public class CommentService {
     }
 
     public Flux<Comment> getRootComments(String postId, int page, int size) {
+        return getRootComments(postId, null, page, size);
+    }
+
+    public Flux<Comment> getRootComments(String postId, String viewerId, int page, int size) {
         validatePostId(postId);
         int limit = validatePageSize(size);
         int offset = normalizePage(page) * limit;
 
-        log.info("|CommentService|getRootComments|postId={}|page={}|size={}", postId, page, size);
+        log.info("|CommentService|getRootComments|postId={}|viewerId={}|page={}|size={}", postId, viewerId, page, size);
         return commentRepository.findRootByPostId(postId, limit, offset)
+                .concatMap(comment -> enrichCommentForViewer(comment, viewerId))
                 .onErrorMap(error -> new AppException(
                         ErrorCode.COMMENT_FETCH_FAILED,
                         String.format("Fetch root comments failed for postId=%s", postId),
@@ -187,18 +210,59 @@ public class CommentService {
                 ));
     }
 
+    public Mono<PageResponse<Comment>> getRootCommentsPage(String postId, int page, int size) {
+        return getRootCommentsPage(postId, null, page, size);
+    }
+
+    public Mono<PageResponse<Comment>> getRootCommentsPage(String postId, String viewerId, int page, int size) {
+        validatePostId(postId);
+        int pageNumber = normalizePage(page);
+        int pageSize = validatePageSize(size);
+        return commentRepository.countRootByPostId(postId)
+                .flatMap(total -> getRootComments(postId, viewerId, pageNumber, pageSize)
+                        .collectList()
+                        .map(content -> PageResponse.of(content, pageNumber, total, pageSize)))
+                .onErrorMap(error -> error instanceof AppException
+                        ? error
+                        : new AppException(ErrorCode.COMMENT_FETCH_FAILED, "Fetch root comment page failed", error));
+    }
+
     public Flux<Comment> getChildComments(String parentId, int page, int size) {
+        return getChildComments(parentId, null, page, size);
+    }
+
+    public Flux<Comment> getChildComments(String parentId, String viewerId, int page, int size) {
         validateCommentId(parentId);
         int limit = validatePageSize(size);
         int offset = normalizePage(page) * limit;
 
-        log.info("|CommentService|getChildComments|parentId={}|page={}|size={}", parentId, page, size);
+        log.info("|CommentService|getChildComments|parentId={}|viewerId={}|page={}|size={}", parentId, viewerId, page, size);
         return commentRepository.findByParentId(parentId, limit, offset)
+                .concatMap(comment -> enrichCommentForViewer(comment, viewerId))
                 .onErrorMap(error -> new AppException(
                         ErrorCode.COMMENT_FETCH_FAILED,
                         String.format("Fetch child comments failed for parentId=%s", parentId),
                         error
                 ));
+    }
+
+    private Mono<Comment> enrichCommentForViewer(Comment comment, String viewerId) {
+        Mono<Long> replyCount = commentRepository.countByParentId(comment.getId()).defaultIfEmpty(0L);
+        Mono<Boolean> hasLiked = viewerId == null || viewerId.isBlank()
+                ? Mono.just(false)
+                : r2dbcEntityTemplate.exists(
+                        Query.query(Criteria.where("actorId").is(viewerId)
+                                .and("targetId").is(comment.getId())
+                                .and("targetType").is(EntityType.COMMENT.name())),
+                        Like.class
+                ).defaultIfEmpty(false);
+
+        return Mono.zip(replyCount, hasLiked)
+                .map(state -> {
+                    comment.setReplyCount(state.getT1());
+                    comment.setHasLiked(state.getT2());
+                    return transformCommentMedia(comment);
+                });
     }
 
     public Mono<Comment> getCommentById(String commentId) {
@@ -208,6 +272,7 @@ public class CommentService {
                         ErrorCode.COMMENT_NOT_FOUND,
                         String.format("Comment not found for commentId=%s", commentId)
                 )))
+                .map(this::transformCommentMedia)
                 .doOnSuccess(comment -> log.info("|CommentService|getCommentById|success|commentId={}", commentId))
                 .onErrorMap(error -> wrapFetchCommentError(commentId, error))
                 .doOnError(error -> log.error("|CommentService|getCommentById|failed|commentId={}|error={}", commentId, error.getMessage()));
@@ -256,6 +321,7 @@ public class CommentService {
 
         return commentRepository.countByUserId(userId)
                 .flatMap(totalElements -> commentRepository.findByUserId(userId, pageSize, offset)
+                        .map(this::transformCommentMedia)
                         .collectList()
                         .map(content -> PageResponse.of(content, pageNumber, totalElements, pageSize)))
                 .onErrorMap(error -> new AppException(
@@ -377,6 +443,39 @@ public class CommentService {
         return POST_COMMENT_COUNT_PREFIX + postId;
     }
 
+    private Mono<Void> validateParent(CommentCreateRequest request) {
+        String parentId = request.getParentId();
+        if (parentId == null || parentId.isBlank()) {
+            return Mono.empty();
+        }
+        return commentRepository.findById(parentId)
+                .switchIfEmpty(Mono.error(new AppException(
+                        ErrorCode.COMMENT_NOT_FOUND,
+                        String.format("Parent comment not found for commentId=%s", parentId)
+                )))
+                .flatMap(parent -> {
+                    if (!request.getPostId().equals(parent.getPostId())) {
+                        return Mono.error(new AppException(
+                                ErrorCode.COMMENT_CREATE_FAILED,
+                                "Parent comment belongs to another post"
+                        ));
+                    }
+                    if (parent.getParentId() == null || parent.getParentId().isBlank()) {
+                        return Mono.empty();
+                    }
+                    return commentRepository.findById(parent.getParentId())
+                            .switchIfEmpty(Mono.error(new AppException(
+                                    ErrorCode.COMMENT_NOT_FOUND,
+                                    String.format("Parent comment chain is invalid for commentId=%s", parentId)
+                            )))
+                            .flatMap(grandParent -> grandParent.getParentId() != null && !grandParent.getParentId().isBlank()
+                                    ? Mono.error(new AppException(
+                                            ErrorCode.COMMENT_CREATE_FAILED,
+                                            "Comments support at most three levels"
+                                    ))
+                                    : Mono.empty());
+                });
+    }
     private void validateCreateRequest(CommentCreateRequest request) {
         if (request == null) {
             throw new AppException(ErrorCode.COMMENT_CREATE_FAILED, "Request is required");
@@ -387,6 +486,29 @@ public class CommentService {
         if (request.getUserId() == null || request.getUserId().isBlank()) {
             throw new AppException(ErrorCode.COMMENT_CREATE_FAILED, "userId is required");
         }
+    }
+
+    private void validateMediaList(List<MediaUploadRequest> mediaList) {
+        if (mediaList.size() > 1) {
+            throw new AppException(ErrorCode.COMMENT_CREATE_FAILED, "A comment supports at most one media item");
+        }
+        for (MediaUploadRequest media : mediaList) {
+            if (media == null
+                    || media.getSecureUrl() == null || media.getSecureUrl().isBlank()
+                    || media.getPublicId() == null || media.getPublicId().isBlank()) {
+                throw new AppException(ErrorCode.COMMENT_CREATE_FAILED, "Comment media identifiers are required");
+            }
+        }
+    }
+
+    private Comment transformCommentMedia(Comment comment) {
+        if (comment.getMediaUrl() != null && !comment.getMediaUrl().isBlank()) {
+            comment.setMediaUrl(cloudinaryMediaService.transformDeliveryUrl(
+                    comment.getMediaUrl(),
+                    MediaDisplayType.COMMENT
+            ));
+        }
+        return comment;
     }
 
     private void validatePostId(String postId) {
@@ -494,16 +616,16 @@ public class CommentService {
         payload.addProperty("parentId", comment.getParentId());
         payload.addProperty("result", "SUCCESSED");
         payload.addProperty("message", "Comment approved");
-
-        postSseService.sendToUser(comment.getUserId(), "comment_success_event", payload.toString());
-        return Mono.empty();
+        return postSseService.sendToUser(
+                comment.getUserId(),
+                "comment_success_event",
+                payload.toString());
     }
 
-    private void sendTextCommentFailureSse(Comment comment, String message) {
+    private Mono<Void> sendTextCommentFailureSse(Comment comment, String message) {
         if (comment.getUserId() == null || comment.getUserId().isBlank()) {
-            return;
+            return Mono.empty();
         }
-
         JsonObject payload = new JsonObject();
         payload.addProperty("commentId", comment.getId());
         payload.addProperty("userId", comment.getUserId());
@@ -511,8 +633,10 @@ public class CommentService {
         payload.addProperty("parentId", comment.getParentId());
         payload.addProperty("result", "FAILED");
         payload.addProperty("message", message);
-
-        postSseService.sendToUser(comment.getUserId(), "comment_failed_event", payload.toString());
+        return postSseService.sendToUser(
+                comment.getUserId(),
+                "comment_failed_event",
+                payload.toString());
     }
 
     private Mono<Void> sendCommentSuccessEvent(Comment comment) {

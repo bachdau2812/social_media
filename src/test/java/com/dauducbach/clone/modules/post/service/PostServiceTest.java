@@ -4,6 +4,7 @@ import com.dauducbach.clone.commons.constant.PostNotificationCacheKeys;
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.post.repositoty.PostDetailsRepository;
+import com.dauducbach.clone.modules.post.repositoty.PostItemRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -25,6 +26,8 @@ class PostServiceTest {
     @Mock
     PostDetailsRepository postDetailsRepository;
     @Mock
+    PostItemRepository postItemRepository;
+    @Mock
     R2dbcEntityTemplate r2dbcEntityTemplate;
     @Mock
     ReactiveRedisTemplate<String, String> reactiveRedisStringTemplate;
@@ -34,6 +37,8 @@ class PostServiceTest {
     KafkaSender<String, String> kafkaSender;
     @Mock
     PostSseService postSseService;
+    @Mock
+    PostMediaModerationOrchestrator postMediaModerationOrchestrator;
 
     @Test
     void mutePostNotificationsStoresRedisKeyForSixtyDays() {
@@ -66,10 +71,12 @@ class PostServiceTest {
     private PostService newService() {
         return new PostService(
                 postDetailsRepository,
+                postItemRepository,
                 r2dbcEntityTemplate,
                 reactiveRedisStringTemplate,
                 kafkaSender,
-                postSseService
+                postSseService,
+                postMediaModerationOrchestrator
         );
     }
 }

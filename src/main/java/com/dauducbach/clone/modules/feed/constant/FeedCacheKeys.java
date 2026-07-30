@@ -2,7 +2,7 @@ package com.dauducbach.clone.modules.feed.constant;
 
 public final class FeedCacheKeys {
     public static final String USER_FEED_PREFIX = "feed:";
-    public static final String POST_DETAILS_PREFIX = "post_details:";
+    public static final String POST_DETAILS_PREFIX = "feed:post-details:v4:";
     public static final String SEEN_POST_PREFIX = "seen_post:";
     public static final String USER_SHORT_TERM_VECTOR_PREFIX = "user_short_term_vector:";
     public static final String USER_LONG_TERM_VECTOR_SNAPSHOT_PREFIX = "user_long_term_vector_snapshot:";

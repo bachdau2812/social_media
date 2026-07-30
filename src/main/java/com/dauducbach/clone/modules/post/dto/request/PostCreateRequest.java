@@ -17,6 +17,10 @@ import java.util.List;
 public class PostCreateRequest {
     String userId;
     String content;
-    List<String> hashtag;
-    List<MediaUploadRequest> mediaList;
+    List<String> hashtags;
+    String mediaRatio;
+    String musicId;
+    Long musicStart;
+    Long musicEnd;
+    List<PostItemCreateRequest> items;
 }

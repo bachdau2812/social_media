@@ -1,7 +1,8 @@
 package com.dauducbach.clone.modules.post.controller;
 
+import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import com.dauducbach.clone.commons.response.PageResponse;
-import com.dauducbach.clone.modules.post.constant.OwnerType;
+import com.dauducbach.clone.modules.media.constant.OwnerType;
 import com.dauducbach.clone.modules.post.dto.request.CommentCreateRequest;
 import com.dauducbach.clone.modules.post.dto.request.CommentUpdateRequest;
 import com.dauducbach.clone.modules.post.dto.request.LikeRequest;
@@ -9,22 +10,26 @@ import com.dauducbach.clone.modules.post.dto.request.PostCreateRequest;
 import com.dauducbach.clone.modules.post.dto.request.PostUpdateRequest;
 import com.dauducbach.clone.modules.post.dto.response.CommentCreateResponse;
 import com.dauducbach.clone.modules.post.dto.response.LikeToggleResponse;
-import com.dauducbach.clone.modules.post.dto.response.MediaSignatureResponse;
+import com.dauducbach.clone.modules.media.dto.response.MediaSignatureResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostCreateResponse;
+import com.dauducbach.clone.modules.post.dto.response.PostDetailResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostNotificationMuteResponse;
 import com.dauducbach.clone.modules.post.entity.Comment;
-import com.dauducbach.clone.modules.post.entity.Media;
+import com.dauducbach.clone.modules.media.entity.Media;
 import com.dauducbach.clone.modules.post.entity.PostDetails;
-import com.dauducbach.clone.modules.post.service.CloudinarySignatureService;
+import com.dauducbach.clone.modules.media.controller.MediaUploadController;
+import com.dauducbach.clone.modules.media.service.CloudinarySignatureService;
 import com.dauducbach.clone.modules.post.service.CommentService;
 import com.dauducbach.clone.modules.post.service.LikeService;
-import com.dauducbach.clone.modules.post.service.MediaService;
+import com.dauducbach.clone.modules.media.service.MediaService;
 import com.dauducbach.clone.modules.post.service.PostSearchService;
+import com.dauducbach.clone.modules.post.service.PostDetailQueryService;
 import com.dauducbach.clone.modules.post.service.PostService;
 import com.dauducbach.clone.modules.post.service.PostSseService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.codec.ServerSentEvent;
+import org.springframework.security.authentication.TestingAuthenticationToken;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -36,6 +41,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.mockAuthentication;
 
 class PostModuleControllerTest {
     PostService postService;
@@ -45,6 +51,7 @@ class PostModuleControllerTest {
     MediaService mediaService;
     PostSseService postSseService;
     PostSearchService postSearchService;
+    PostDetailQueryService postDetailQueryService;
     WebTestClient client;
 
     @BeforeEach
@@ -56,14 +63,18 @@ class PostModuleControllerTest {
         mediaService = mock(MediaService.class);
         postSseService = mock(PostSseService.class);
         postSearchService = mock(PostSearchService.class);
+        postDetailQueryService = mock(PostDetailQueryService.class);
 
         client = WebTestClient.bindToController(
-                        new PostController(postService, postSearchService),
+                        new PostController(postService, postSearchService, postDetailQueryService),
                         new CommentController(commentService),
                         new LikeController(likeService),
                         new MediaUploadController(cloudinarySignatureService, mediaService),
                         new PostSseController(postSseService)
                 )
+                .webFilter((exchange, chain) -> chain.filter(exchange.mutate()
+                        .principal(Mono.just(new TestingAuthenticationToken("user-1", "n/a")))
+                        .build()))
                 .build();
     }
 
@@ -79,7 +90,7 @@ class PostModuleControllerTest {
                 .uri("/posts")
                 .bodyValue(PostCreateRequest.builder().userId("user-1").content("hello").build())
                 .exchange()
-                .expectStatus().isAccepted()
+                .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.result.postId").isEqualTo("post-1")
                 .jsonPath("$.message").isEqualTo("Dang doi xu ly va duyet media");
@@ -89,6 +100,7 @@ class PostModuleControllerTest {
     void updatePostReturnsUpdatedPost() {
         PostDetails post = post("post-1", "user-1");
         when(postService.updatePost(any(PostUpdateRequest.class))).thenReturn(Mono.just(post));
+        when(postDetailQueryService.getPostDetail("post-1", MediaDisplayType.POST)).thenReturn(Mono.just(postDetail("post-1")));
 
         client.put()
                 .uri("/posts")
@@ -115,7 +127,7 @@ class PostModuleControllerTest {
 
     @Test
     void getPostByIdReturnsPost() {
-        when(postService.getPostById("post-1")).thenReturn(Mono.just(post("post-1", "user-1")));
+        when(postDetailQueryService.getPostDetail("post-1", MediaDisplayType.POST)).thenReturn(Mono.just(postDetail("post-1")));
 
         client.get()
                 .uri("/posts/post-1")
@@ -141,7 +153,7 @@ class PostModuleControllerTest {
 
     @Test
     void deletePostReturnsDeletedMessage() {
-        when(postService.deletePostById("post-1")).thenReturn(Mono.empty());
+        when(postService.deletePostById("post-1", "user-1")).thenReturn(Mono.empty());
 
         client.delete()
                 .uri("/posts/post-1")
@@ -224,7 +236,7 @@ class PostModuleControllerTest {
 
     @Test
     void deleteCommentReturnsDeletedMessage() {
-        when(commentService.deleteComment("comment-1")).thenReturn(Mono.empty());
+        when(commentService.deleteComment("comment-1", "user-1")).thenReturn(Mono.empty());
 
         client.delete()
                 .uri("/comments/comment-1")
@@ -377,6 +389,10 @@ class PostModuleControllerTest {
                 .exchange()
                 .expectStatus().isOk()
                 .expectHeader().valueMatches("Content-Type", "text/event-stream.*");
+    }
+
+    private PostDetailResponse postDetail(String postId) {
+        return new PostDetailResponse(postId, "user-1", "content", "PUBLIC", "PUBLIC", null, List.of(), "APPROVED", null, null, 0L, 0L, null, List.of(), Instant.now(), Instant.now());
     }
 
     private PostDetails post(String postId, String userId) {

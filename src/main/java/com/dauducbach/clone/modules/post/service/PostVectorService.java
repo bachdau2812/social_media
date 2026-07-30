@@ -1,12 +1,12 @@
 package com.dauducbach.clone.modules.post.service;
 
-import com.dauducbach.clone.utils.GetVectorEmbedding;
 import com.dauducbach.clone.modules.post.elastic.PostVector;
-import com.dauducbach.clone.modules.post.repositoty.PostVectorRepository;
+import com.dauducbach.clone.utils.GetVectorEmbedding;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.elasticsearch.core.ReactiveElasticsearchOperations;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
@@ -17,12 +17,12 @@ public class PostVectorService {
     private static final Logger log = LoggerFactory.getLogger(PostVectorService.class);
 
     GetVectorEmbedding getVectorEmbedding;
-    PostVectorRepository postVectorRepository;
+    ReactiveElasticsearchOperations elasticsearchOperations;
 
     public Mono<Void> processPostEmbedding(String postId, String content) {
         log.info("|PostVectorService|processPostEmbedding|start|postId={}", postId);
         return getVectorEmbedding.getEmbedding(content)
-                .flatMap(vector -> postVectorRepository.save(PostVector.builder()
+                .flatMap(vector -> elasticsearchOperations.save(PostVector.builder()
                         .postId(postId)
                         .contentVector(vector)
                         .build()))
@@ -32,4 +32,3 @@ public class PostVectorService {
                 .onErrorResume(error -> Mono.empty());
     }
 }
-

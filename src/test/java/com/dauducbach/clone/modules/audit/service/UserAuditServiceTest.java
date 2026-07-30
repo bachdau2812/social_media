@@ -51,22 +51,22 @@ class UserAuditServiceTest {
     }
 
     @Test
-    void handleLikeEventStoresCommentLikeAudit() {
+    void handleStorySuccessEventStoresStoryUploadAudit() {
         UserAuditService service = new UserAuditService(auditLogsRepository, r2dbcEntityTemplate);
         when(r2dbcEntityTemplate.insert(eq(AuditLogs.class)).using(any(AuditLogs.class)))
                 .thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
 
-        service.handleLikeEvent("""
-                {"actorId":"user-1","targetId":"comment-1","targetType":"COMMENT","targetOwnerId":"owner-1","postId":"post-1","parentCommentId":"","likeCount":3}
+        service.handleStorySuccessEvent("""
+                {"userId":"user-1","storyId":"story-1","mediaId":"media-1","mediaType":"IMAGE","musicUrl":""}
                 """);
 
         ArgumentCaptor<AuditLogs> captor = ArgumentCaptor.forClass(AuditLogs.class);
         verify(r2dbcEntityTemplate.insert(AuditLogs.class), timeout(1000)).using(captor.capture());
         AuditLogs saved = captor.getValue();
-        assertThat(saved.getAction()).isEqualTo(AuditActionType.LIKE_COMMENT);
+        assertThat(saved.getAction()).isEqualTo(AuditActionType.UPLOAD_STORY);
         assertThat(saved.getActorId()).isEqualTo("user-1");
-        assertThat(saved.getResourceType()).isEqualTo("COMMENT");
-        assertThat(saved.getResourceId()).isEqualTo("comment-1");
-        assertThat(saved.getMetadata()).contains("post-1");
+        assertThat(saved.getResourceType()).isEqualTo("STORY");
+        assertThat(saved.getResourceId()).isEqualTo("story-1");
+        assertThat(saved.getMetadata()).contains("media-1");
     }
 }
