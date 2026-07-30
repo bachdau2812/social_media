@@ -15,6 +15,7 @@ import reactor.core.publisher.Mono;
 
 import java.util.List;
 import java.util.Set;
+import java.time.Instant;
 
 @Service
 @RequiredArgsConstructor
@@ -28,9 +29,18 @@ public class StoryTrayQueryService {
     private final MediaCompatibilityFacade mediaFacade;
 
     public Mono<List<StoryTrayResponse>> getHomeStoryTray(String viewerId) {
-        return userStoriesRepository.findHomeStoryTray(viewerId, HOME_STORY_LIMIT)
+        Instant now = Instant.now();
+        return userStoriesRepository.findHomeStoryTray(viewerId, now, HOME_STORY_LIMIT)
+                .filter(story -> isActive(story, now))
                 .collectList()
                 .flatMap(stories -> hydrateStories(viewerId, stories));
+    }
+
+    private boolean isActive(UserStories story, Instant now) {
+        Instant expiresAt = story.getExpiredAt();
+        if (expiresAt != null) return expiresAt.isAfter(now);
+        Instant createdAt = story.getCreatedAt();
+        return createdAt != null && createdAt.plusSeconds(24 * 60 * 60).isAfter(now);
     }
 
     private Mono<List<StoryTrayResponse>> hydrateStories(String viewerId, List<UserStories> stories) {

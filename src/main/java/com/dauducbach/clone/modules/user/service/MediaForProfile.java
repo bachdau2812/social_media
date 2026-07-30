@@ -251,12 +251,13 @@ public class MediaForProfile {
         int pageSize = Math.clamp(size, 1, 100);
         boolean owner = userId.equals(viewerId);
         long offset = (long) pageNumber * pageSize;
+        Instant now = Instant.now();
         Mono<Long> total = owner
                 ? userStoriesRepository.countByUserIdAndStatus(userId, STATUS_APPROVED)
-                : userStoriesRepository.countActiveApprovedByUserId(userId);
+                : userStoriesRepository.countActiveApprovedByUserId(userId, now);
         Flux<UserStories> content = owner
                 ? userStoriesRepository.findByUserIdAndStatusOrderByCreatedAtDesc(userId, STATUS_APPROVED, PageRequest.of(pageNumber, pageSize))
-                : userStoriesRepository.findActiveApprovedByUserId(userId, pageSize, offset);
+                : userStoriesRepository.findActiveApprovedByUserId(userId, now, pageSize, offset);
         log.info("|MediaForProfile|getStories|userId={}|viewerId={}|owner={}|page={}|size={}", userId, viewerId, owner, pageNumber, pageSize);
         return total.flatMap(count -> content.collectList()
                         .flatMap(stories -> hydrateViewerSeen(stories, viewerId, owner))
