@@ -70,7 +70,8 @@ public class HomeScreenService {
                 story.publicationId(),
                 story.publicationOrder(),
                 story.publicationItemCount(),
-                story.viewerSeen()
+                story.viewerSeen(),
+                story.viewerReaction()
         );
     }
 }

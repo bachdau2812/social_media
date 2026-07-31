@@ -4,6 +4,7 @@ import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
 import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import com.dauducbach.clone.modules.user.dto.response.StoryTrayResponse;
 import com.dauducbach.clone.modules.user.entity.Musics;
+import com.dauducbach.clone.modules.user.entity.StoryView;
 import com.dauducbach.clone.modules.user.entity.UserStories;
 import com.dauducbach.clone.modules.user.repositoty.MusicsRepository;
 import com.dauducbach.clone.modules.user.repositoty.StoryViewRepository;
@@ -14,7 +15,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
-import java.util.Set;
+import java.util.function.Function;
 import java.time.Instant;
 
 @Service
@@ -49,15 +50,27 @@ public class StoryTrayQueryService {
             return Mono.just(List.of());
         }
         List<String> storyIds = stories.stream().map(UserStories::getId).toList();
-        return storyViewRepository.findViewedStoryIds(viewerId, storyIds)
+        return storyViewRepository.findByViewerIdAndStoryIdIn(viewerId, storyIds)
                 .collectList()
-                .map(Set::copyOf)
-                .flatMapMany(seen -> Flux.fromIterable(stories)
-                        .concatMap(story -> toResponse(story, seen.contains(story.getId()))))
+                .map(views -> views.stream().collect(java.util.stream.Collectors.toMap(
+                        StoryView::getStoryId,
+                        Function.identity(),
+                        (first, ignored) -> first)))
+                .flatMapMany(views -> Flux.fromIterable(stories)
+                        .concatMap(story -> {
+                            StoryView view = views.get(story.getId());
+                            boolean viewerSeen = viewerId.equals(story.getUserId()) || view != null;
+                            String viewerReaction = view == null ? null : normalizeOptional(view.getReaction());
+                            return toResponse(story, viewerSeen, viewerReaction);
+                        }))
                 .collectList();
     }
 
-    private Mono<StoryTrayResponse> toResponse(UserStories story, boolean viewerSeen) {
+    private Mono<StoryTrayResponse> toResponse(
+            UserStories story,
+            boolean viewerSeen,
+            String viewerReaction
+    ) {
         String musicId = normalizeOptional(story.getMusicId());
         Mono<Musics> music = musicId == null
                 ? Mono.just(Musics.builder().build())
@@ -90,7 +103,8 @@ public class StoryTrayQueryService {
                         story.getPublicationId(),
                         story.getPublicationOrder(),
                         story.getPublicationItemCount(),
-                        viewerSeen
+                        viewerSeen,
+                        viewerReaction
                 ));
     }
 

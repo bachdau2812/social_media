@@ -14,4 +14,25 @@ public interface StoryViewRepository extends ReactiveCrudRepository<StoryView, S
 
     @Query("SELECT story_id FROM story_views WHERE viewer_id = :viewerId AND story_id IN (:storyIds)")
     Flux<String> findViewedStoryIds(String viewerId, Collection<String> storyIds);
+
+    @Query("SELECT * FROM story_views WHERE viewer_id = :viewerId AND story_id IN (:storyIds)")
+    Flux<StoryView> findByViewerIdAndStoryIdIn(String viewerId, Collection<String> storyIds);
+
+    @Query("""
+            UPDATE story_views
+            SET reaction = 'LIKE', viewed_at = CURRENT_TIMESTAMP(6)
+            WHERE story_id = :storyId
+              AND viewer_id = :viewerId
+              AND (reaction IS NULL OR reaction <> 'LIKE')
+            """)
+    Mono<Integer> markLiked(String storyId, String viewerId);
+
+    @Query("""
+            UPDATE story_views
+            SET reaction = NULL
+            WHERE story_id = :storyId
+              AND viewer_id = :viewerId
+              AND reaction = 'LIKE'
+            """)
+    Mono<Integer> clearLike(String storyId, String viewerId);
 }

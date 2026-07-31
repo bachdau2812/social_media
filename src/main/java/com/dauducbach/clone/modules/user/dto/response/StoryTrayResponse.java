@@ -22,6 +22,7 @@ public record StoryTrayResponse(
         String publicationId,
         Integer publicationOrder,
         Integer publicationItemCount,
-        boolean viewerSeen
+        boolean viewerSeen,
+        String viewerReaction
 ) {
 }

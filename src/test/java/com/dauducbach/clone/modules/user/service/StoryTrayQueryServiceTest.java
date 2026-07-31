@@ -4,6 +4,7 @@ import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
 import com.dauducbach.clone.modules.user.dto.response.UserDiscoveryResponse;
 import com.dauducbach.clone.modules.user.entity.Musics;
+import com.dauducbach.clone.modules.user.entity.StoryView;
 import com.dauducbach.clone.modules.user.entity.UserStories;
 import com.dauducbach.clone.modules.user.repositoty.MusicsRepository;
 import com.dauducbach.clone.modules.user.repositoty.StoryViewRepository;
@@ -79,9 +80,15 @@ class StoryTrayQueryServiceTest {
                 any(Instant.class),
                 org.mockito.ArgumentMatchers.eq(20)))
                 .thenReturn(Flux.just(story));
-        when(storyViewRepository.findViewedStoryIds(
+        when(storyViewRepository.findByViewerIdAndStoryIdIn(
                 org.mockito.ArgumentMatchers.eq("viewer-1"), anyList()))
-                .thenReturn(Flux.empty());
+                .thenReturn(Flux.just(StoryView.builder()
+                        .id("view-1")
+                        .storyId("story-1")
+                        .viewerId("viewer-1")
+                        .reaction("LIKE")
+                        .viewedAt(now)
+                        .build()));
         when(musicsRepository.findById("music-1"))
                 .thenReturn(Mono.just(Musics.builder()
                         .id("music-1")
@@ -112,8 +119,11 @@ class StoryTrayQueryServiceTest {
         StepVerifier.create(service.getHomeStoryTray("viewer-1"))
                 .assertNext(items -> org.assertj.core.api.Assertions.assertThat(items)
                         .singleElement()
-                        .extracting(item -> item.durationSeconds())
-                        .isEqualTo(45L))
+                        .satisfies(item -> {
+                            org.assertj.core.api.Assertions.assertThat(item.durationSeconds()).isEqualTo(45L);
+                            org.assertj.core.api.Assertions.assertThat(item.viewerSeen()).isTrue();
+                            org.assertj.core.api.Assertions.assertThat(item.viewerReaction()).isEqualTo("LIKE");
+                        }))
                 .verifyComplete();
     }
 }

@@ -6,6 +6,7 @@ import com.dauducbach.clone.modules.user.dto.request.StoryHighlightRequest;
 import com.dauducbach.clone.modules.user.dto.response.StoryHighlightResponse;
 import com.dauducbach.clone.modules.user.dto.response.StoryViewerResponse;
 import com.dauducbach.clone.modules.user.service.StoryLibraryService;
+import com.dauducbach.clone.modules.user.service.StoryReactionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -25,6 +26,7 @@ import reactor.core.publisher.Mono;
 @RequestMapping("/profile-media")
 public class StoryLibraryController {
     private final StoryLibraryService service;
+    private final StoryReactionService reactionService;
 
     @PostMapping("/stories/{storyId}/views")
     public Mono<ApiResponse<Void>> recordView(
@@ -35,6 +37,24 @@ public class StoryLibraryController {
     ) {
         return service.recordView(storyId, authentication.getName(), reaction)
                 .thenReturn(ApiResponse.<Void>builder().message("Story view recorded").build());
+    }
+
+    @PutMapping("/stories/{storyId}/like")
+    public Mono<ApiResponse<Boolean>> likeStory(@PathVariable String storyId, Authentication authentication) {
+        return reactionService.like(storyId, authentication.getName())
+                .map(changed -> ApiResponse.<Boolean>builder()
+                        .message(changed ? "Story liked" : "Story already liked")
+                        .result(changed)
+                        .build());
+    }
+
+    @DeleteMapping("/stories/{storyId}/like")
+    public Mono<ApiResponse<Boolean>> unlikeStory(@PathVariable String storyId, Authentication authentication) {
+        return reactionService.unlike(storyId, authentication.getName())
+                .map(changed -> ApiResponse.<Boolean>builder()
+                        .message(changed ? "Story unliked" : "Story was not liked")
+                        .result(changed)
+                        .build());
     }
 
     @GetMapping("/stories/{storyId}/viewers")
