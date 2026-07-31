@@ -1,6 +1,9 @@
 package com.dauducbach.clone.modules.user.service;
 
+import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
+import com.dauducbach.clone.modules.user.dto.response.UserDiscoveryResponse;
+import com.dauducbach.clone.modules.user.entity.Musics;
 import com.dauducbach.clone.modules.user.entity.UserStories;
 import com.dauducbach.clone.modules.user.repositoty.MusicsRepository;
 import com.dauducbach.clone.modules.user.repositoty.StoryViewRepository;
@@ -10,12 +13,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 import java.time.Instant;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -45,11 +50,70 @@ class StoryTrayQueryServiceTest {
                 musicsRepository,
                 storyViewRepository,
                 userDiscoveryHydrator,
-                mediaFacade
+                mediaFacade,
+                new StoryMusicSegmentPolicy()
         );
 
         StepVerifier.create(service.getHomeStoryTray("viewer-1"))
                 .expectNext(List.of())
+                .verifyComplete();
+    }
+
+    @Test
+    void derivesImageStoryDurationFromSelectedMusicSegment() {
+        Instant now = Instant.now();
+        UserStories story = UserStories.builder()
+                .id("story-1")
+                .userId("author-1")
+                .mediaUrl("https://cdn.example.test/story.jpg")
+                .mediaType("IMAGE")
+                .musicId("music-1")
+                .musicStart(12L)
+                .musicEnd(57L)
+                .status("APPROVED")
+                .createdAt(now.minusSeconds(60))
+                .expiredAt(now.plusSeconds(3_600))
+                .build();
+        when(userStoriesRepository.findHomeStoryTray(
+                org.mockito.ArgumentMatchers.eq("viewer-1"),
+                any(Instant.class),
+                org.mockito.ArgumentMatchers.eq(20)))
+                .thenReturn(Flux.just(story));
+        when(storyViewRepository.findViewedStoryIds(
+                org.mockito.ArgumentMatchers.eq("viewer-1"), anyList()))
+                .thenReturn(Flux.empty());
+        when(musicsRepository.findById("music-1"))
+                .thenReturn(Mono.just(Musics.builder()
+                        .id("music-1")
+                        .songUrl("/music.mp3")
+                        .build()));
+        when(userDiscoveryHydrator.hydrate("author-1", "author-1"))
+                .thenReturn(Mono.just(new UserDiscoveryResponse(
+                        "author-1",
+                        "author",
+                        "Author",
+                        "/avatar.jpg",
+                        false,
+                        false,
+                        false,
+                        "SELF")));
+        when(mediaFacade.transformDeliveryUrl(story.getMediaUrl(), MediaDisplayType.STORY))
+                .thenReturn(story.getMediaUrl());
+
+        StoryTrayQueryService service = new StoryTrayQueryService(
+                userStoriesRepository,
+                musicsRepository,
+                storyViewRepository,
+                userDiscoveryHydrator,
+                mediaFacade,
+                new StoryMusicSegmentPolicy()
+        );
+
+        StepVerifier.create(service.getHomeStoryTray("viewer-1"))
+                .assertNext(items -> org.assertj.core.api.Assertions.assertThat(items)
+                        .singleElement()
+                        .extracting(item -> item.durationSeconds())
+                        .isEqualTo(45L))
                 .verifyComplete();
     }
 }

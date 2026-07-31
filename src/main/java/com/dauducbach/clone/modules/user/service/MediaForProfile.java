@@ -78,6 +78,7 @@ public class MediaForProfile {
     R2dbcEntityTemplate r2dbcEntityTemplate;
     MediaScanUtils mediaScanUtils;
     UserAuditService userAuditService;
+    StoryMusicSegmentPolicy storyMusicSegmentPolicy;
 
     public Mono<ProfileMediaUploadResponse> uploadAvatar(AvatarUploadRequest request) {
         String userId = normalizeRequired(request.userId(), "userId");
@@ -103,7 +104,7 @@ public class MediaForProfile {
         String musicUrl = normalizeOptional(request.musicUrl());
         Long musicStart = request.musicStart();
         Long musicEnd = request.musicEnd();
-        validateStoryMusicSegment(firstNonBlank(musicId, musicUrl), musicStart, musicEnd);
+        storyMusicSegmentPolicy.validate(firstNonBlank(musicId, musicUrl), musicStart, musicEnd);
         String publicId = resolvePublicId(mediaUrl);
         String storyId = UUID.randomUUID().toString();
         boolean explicitPublication = request.publicationId() != null && !request.publicationId().isBlank();
@@ -614,19 +615,6 @@ public class MediaForProfile {
         }
     }
 
-    private void validateStoryMusicSegment(String musicReference, Long musicStart, Long musicEnd) {
-        if (musicStart == null && musicEnd == null) {
-            return;
-        }
-        if (musicReference == null || musicReference.isBlank()) {
-            throw new AppException(ErrorCode.PROFILE_MEDIA_INVALID, "musicId is required when musicStart or musicEnd is provided");
-        }
-        try {
-            cloudinaryMediaService.validateMusicSegment(musicStart, musicEnd);
-        } catch (IllegalArgumentException ex) {
-            throw new AppException(ErrorCode.PROFILE_MEDIA_INVALID, ex.getMessage(), ex);
-        }
-    }
     private String firstNonBlank(String first, String second) {
         String normalizedFirst = normalizeOptional(first);
         return normalizedFirst != null ? normalizedFirst : normalizeOptional(second);

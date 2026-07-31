@@ -162,8 +162,6 @@ class MediaForProfileTest {
 
     @Test
     void createStoryRejectsInvalidMusicSegment() {
-        org.mockito.Mockito.doThrow(new IllegalArgumentException("musicEnd must be greater than musicStart"))
-                .when(cloudinaryMediaService).validateMusicSegment(45L, 30L);
         MediaForProfile service = newService();
 
         assertThatThrownBy(() -> service.createStory(new StoryCreateRequest(
@@ -173,7 +171,7 @@ class MediaForProfileTest {
                         45L,
                         30L
                 )))
-                .hasMessage("musicEnd must be greater than musicStart");
+                .hasMessage("Story music segment must be between 1 and 60 seconds");
     }
 
     private MediaForProfile newService() {
@@ -188,7 +186,8 @@ class MediaForProfileTest {
                 kafkaSender,
                 r2dbcEntityTemplate,
                 mediaScanUtils,
-                userAuditService
+                userAuditService,
+                new StoryMusicSegmentPolicy()
         );
     }
 }

@@ -27,6 +27,7 @@ public class StoryTrayQueryService {
     private final StoryViewRepository storyViewRepository;
     private final UserDiscoveryHydrator userDiscoveryHydrator;
     private final MediaCompatibilityFacade mediaFacade;
+    private final StoryMusicSegmentPolicy storyMusicSegmentPolicy;
 
     public Mono<List<StoryTrayResponse>> getHomeStoryTray(String viewerId) {
         Instant now = Instant.now();
@@ -79,7 +80,10 @@ public class StoryTrayQueryService {
                                 tuple.getT1().getSlugName())),
                         story.getMusicStart(),
                         story.getMusicEnd(),
-                        "VIDEO".equalsIgnoreCase(story.getMediaType()) ? null : 5L,
+                        storyMusicSegmentPolicy.durationSeconds(
+                                story.getMediaType(),
+                                story.getMusicStart(),
+                                story.getMusicEnd()),
                         story.getStatus(),
                         story.getCreatedAt(),
                         story.getExpiredAt(),
