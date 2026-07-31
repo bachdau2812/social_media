@@ -105,6 +105,9 @@ public class ChatMessageNotificationListener {
 
 
     private String notificationBody(String sender, ChatMessageResponse message, String preview) {
+        if (message.messageType() == MessageType.STORY_REPLY) {
+            return sender + " đã trả lời tin của bạn: " + (char) 34 + preview + (char) 34;
+        }
         if (message.content() != null && !message.content().isBlank()) {
             return sender + " \u0111\u00e3 g\u1eedi cho b\u1ea1n m\u1ed9t tin nh\u1eafn m\u1edbi: \u201c" + preview + "\u201d";
         }
