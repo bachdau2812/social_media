@@ -113,6 +113,7 @@ public class PushModuleNotificationHandler {
         String targetType = firstString(payloadJson, "targetType", "target_type");
         String targetOwnerId = firstString(payloadJson, "targetOwnerId", "target_owner_id");
         String postId = firstString(payloadJson, "postId", "post_id");
+        String interactionId = firstString(payloadJson, "interactionId", "interaction_id");
         Long likeCount = firstLong(payloadJson, "likeCount", "like_count");
 
         if (actorId.isBlank() || targetId.isBlank() || targetType.isBlank()) {
@@ -121,9 +122,12 @@ public class PushModuleNotificationHandler {
             return CompletableFuture.completedFuture(null);
         }
 
-        Mono<Void> notification = EntityType.POST.name().equals(targetType)
-                ? handlePostLike(actorId, targetId, targetOwnerId, likeCount)
-                : handleCommentLike(actorId, targetId, targetOwnerId, postId);
+        Mono<Void> notification = switch (targetType.trim().toUpperCase()) {
+            case "POST" -> handlePostLike(actorId, targetId, targetOwnerId, likeCount);
+            case "COMMENT" -> handleCommentLike(actorId, targetId, targetOwnerId, postId);
+            case "STORY" -> handleStoryLike(actorId, targetId, targetOwnerId, interactionId);
+            default -> Mono.empty();
+        };
 
         return notification
                 .doOnSuccess(v -> log.info("|PushModuleNotificationHandler|handleLikeEvent|completed|targetId={}|targetType={}", targetId, targetType))
@@ -206,6 +210,34 @@ public class PushModuleNotificationHandler {
                         sendPush(UserActionType.LIKE_COMMENT, actorId, commentId, EntityType.COMMENT.name(), List.of(commentOwner), metadata, true)));
     }
 
+    private Mono<Void> handleStoryLike(
+            String actorId,
+            String storyId,
+            String targetOwnerId,
+            String interactionId
+    ) {
+        if (targetOwnerId == null || targetOwnerId.isBlank()
+                || interactionId == null || interactionId.isBlank()) {
+            log.warn("|PushModuleNotificationHandler|handleStoryLike|missing data|storyId={}|ownerId={}|interactionId={}",
+                    storyId, targetOwnerId, interactionId);
+            return Mono.empty();
+        }
+        Map<String, String> metadata = baseMetadata(actorId, storyId, EntityType.STORY.name());
+        metadata.put("STORY_ID", storyId);
+        metadata.put("STORY_OWNER_ID", targetOwnerId);
+        metadata.put("INTERACTION_ID", interactionId);
+        metadata.put("DEDUP_KEY", "LIKE_STORY:" + interactionId);
+        return enrichActorUsername(actorId, metadata)
+                .then(sendPush(
+                        UserActionType.LIKE_STORY,
+                        actorId,
+                        storyId,
+                        EntityType.STORY.name(),
+                        List.of(targetOwnerId),
+                        metadata,
+                        true));
+    }
+
     private Mono<Void> sendPush(
             UserActionType actionType,
             String actorId,
@@ -250,6 +282,7 @@ public class PushModuleNotificationHandler {
                                 .title(actionType.name())
                                 .content(processTemplate(template, metadata))
                                 .metadata(metadata)
+                                .dedupKey(metadata.get("DEDUP_KEY"))
                                 .notificationType(NotificationType.PUSH)
                                 .build()))
                             .then();

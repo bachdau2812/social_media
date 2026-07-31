@@ -53,6 +53,23 @@ class NotificationDestinationBuilderTest {
     }
 
     @Test
+    void buildsSingleStoryDestinationForStoryLikesWithoutChangingUpStoryLinks() {
+        NotificationForService storyLike = NotificationForService.builder()
+                .actorId("actor-1")
+                .actionType(UserActionType.LIKE_STORY)
+                .entityId("story-1")
+                .entityType("STORY")
+                .metadata(Map.of(
+                        "STORY_OWNER_ID", "owner-1",
+                        "STORY_ID", "story-1",
+                        "INTERACTION_ID", "interaction-1"))
+                .build();
+
+        assertThat(builder.build(storyLike))
+                .isEqualTo("/stories?ownerId=owner-1&storyId=story-1&storyScope=single");
+    }
+
+    @Test
     void buildsGroupRequestDestinationWithRequestsPanel() {
         NotificationForService notification = NotificationForService.builder()
                 .actionType(UserActionType.CHAT_MEMBER_REQUEST)

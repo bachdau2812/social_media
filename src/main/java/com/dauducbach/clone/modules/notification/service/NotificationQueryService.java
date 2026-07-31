@@ -150,7 +150,7 @@ public class NotificationQueryService {
         String normalized = filter == null ? "ALL" : filter.trim().toUpperCase();
         return switch (normalized) {
             case "UNREAD" -> base + " AND un.notification_status <> 'READ' ";
-            case "INTERACTIONS" -> base + " AND UPPER(COALESCE(ne.action_type, '')) IN ('LIKE', 'LIKES', 'LIKE_COMMENT', 'COMMENT', 'COMMENTS', 'REPLY_COMMENT', 'MENTION', 'TAG', 'UP_STORY', 'STORY_INTERACTION', 'FEATURED_STORY_INTERACTION', 'POST_SHARED') ";
+            case "INTERACTIONS" -> base + " AND UPPER(COALESCE(ne.action_type, '')) IN ('LIKE', 'LIKES', 'LIKE_COMMENT', 'LIKE_STORY', 'COMMENT', 'COMMENTS', 'REPLY_COMMENT', 'MENTION', 'TAG', 'UP_STORY', 'STORY_INTERACTION', 'FEATURED_STORY_INTERACTION', 'POST_SHARED') ";
             case "CONNECTIONS" -> base + " AND UPPER(COALESCE(ne.action_type, '')) IN ('FOLLOW', 'FOLLOW_EVENT', 'FOLLOW_BACK', 'ADD_FRIEND', 'ACCEPT_FRIEND', 'MUTUAL_FRIENDSHIP_CREATED') ";
             case "SYSTEM" -> base + " AND (ne.action_type IS NULL OR UPPER(ne.action_type) IN ('SYSTEM', 'REGISTRATION', 'LOGIN', 'LOGOUT', 'FORGOT_PASSWORD', 'RESET_PASSWORD', 'RESET_PASSWORD_AND_USERNAME', 'WELCOME_USER', 'SECURITY')) ";
             default -> base;

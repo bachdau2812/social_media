@@ -112,6 +112,31 @@ class PushNotificationDeliveryTest {
         verifyNoInteractions(pushGateway);
     }
 
+    @Test
+    void skipsDeliveryWhenStoryLikeInteractionDedupKeyAlreadyExists() {
+        PushNotificationService service = newService();
+        NotificationEvents existing = NotificationEvents.builder()
+                .id("event-existing")
+                .dedupKey("LIKE_STORY:interaction-1:recipient-1")
+                .build();
+        when(eventRepository.findByDedupKey("LIKE_STORY:interaction-1:recipient-1"))
+                .thenReturn(Mono.just(existing));
+
+        NotificationForService request = notificationRequest();
+        request.setActionType(UserActionType.LIKE_STORY);
+        request.setEntityId("story-1");
+        request.setEntityType("STORY");
+        request.setDedupKey("LIKE_STORY:interaction-1");
+
+        StepVerifier.create(service.sendPushNotification(request))
+                .expectNext("Duplicate notification skipped")
+                .verifyComplete();
+
+        verify(entityTemplate, never()).insert(NotificationEvents.class);
+        verify(entityTemplate, never()).insert(UserNotifications.class);
+        verifyNoInteractions(pushGateway);
+    }
+
     private PushNotificationService newService() {
         lenient().when(eventRepository.findByDedupKey(anyString())).thenReturn(Mono.empty());
         return new PushNotificationService(

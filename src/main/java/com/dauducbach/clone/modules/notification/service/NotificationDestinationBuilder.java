@@ -45,8 +45,9 @@ public class NotificationDestinationBuilder {
                 || actionType == UserActionType.STORY_ACTIVITY) {
             return profileDestination(firstNonBlank(notification.getActorId(), metadataValue(metadata, "USER_ID")));
         }
-        if (actionType == UserActionType.UP_STORY) {
-            return storyDestination(notification, metadata);
+        if (actionType == UserActionType.UP_STORY
+                || actionType == UserActionType.LIKE_STORY) {
+            return storyDestination(notification, metadata, actionType == UserActionType.LIKE_STORY);
         }
         if (COMMENT_ACTIONS.contains(actionType)) {
             return commentDestination(notification, metadata);
@@ -106,7 +107,11 @@ public class NotificationDestinationBuilder {
         return builder.buildAndExpand(postId).encode().toUriString();
     }
 
-    private String storyDestination(NotificationForService notification, Map<String, String> metadata) {
+    private String storyDestination(
+            NotificationForService notification,
+            Map<String, String> metadata,
+            boolean singleStory
+    ) {
         String ownerId = firstNonBlank(
                 metadataValue(metadata, "STORY_OWNER_ID"),
                 metadataValue(metadata, "USER_ID"),
@@ -118,8 +123,12 @@ public class NotificationDestinationBuilder {
         UriComponentsBuilder builder = UriComponentsBuilder.fromPath("/stories")
                 .queryParam("ownerId", ownerId);
         addQueryParam(builder, "storyId", storyId);
-        addQueryParam(builder, "storyItemId", metadataValue(metadata, "STORY_ITEM_ID"));
-        builder.queryParam("scoped", "true");
+        if (singleStory) {
+            builder.queryParam("storyScope", "single");
+        } else {
+            addQueryParam(builder, "storyItemId", metadataValue(metadata, "STORY_ITEM_ID"));
+            builder.queryParam("scoped", "true");
+        }
         return builder.build().encode().toUriString();
     }
 
@@ -130,7 +139,7 @@ public class NotificationDestinationBuilder {
         return switch (entityType) {
             case "POST" -> postDestination(notification.getEntityId());
             case "USER" -> profileDestination(notification.getEntityId());
-            case "STORY" -> storyDestination(notification, metadata);
+            case "STORY" -> storyDestination(notification, metadata, false);
             case "CHAT_CONVERSATION" -> groupDestination(notification, metadata, false);
             default -> "/";
         };

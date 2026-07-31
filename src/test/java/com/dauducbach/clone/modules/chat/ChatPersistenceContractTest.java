@@ -7,6 +7,10 @@ import com.dauducbach.clone.modules.chat.entity.Conversation;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ChatPersistenceContractTest {
@@ -48,5 +52,23 @@ class ChatPersistenceContractTest {
 
         assertThat(conversation.getId()).isEqualTo("conversation-1");
         assertThat(conversation.getLastMessageSeq()).isZero();
+    }
+
+    @Test
+    void storyReplyMigrationPreservesEveryExistingMessageType() throws IOException {
+        String migration = Files.readString(Path.of(
+                "src/main/resources/db/manual/story_reply_schema.sql"));
+
+        assertThat(migration)
+                .contains("chk_message_type")
+                .contains("'TEXT'")
+                .contains("'IMAGE'")
+                .contains("'VIDEO'")
+                .contains("'FILE'")
+                .contains("'AUDIO'")
+                .contains("'SYSTEM'")
+                .contains("'STORY_REPLY'")
+                .contains("LIKE_STORY")
+                .contains("story_like_dedup_key");
     }
 }

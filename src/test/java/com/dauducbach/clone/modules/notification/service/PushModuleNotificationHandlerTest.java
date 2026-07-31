@@ -263,6 +263,39 @@ class PushModuleNotificationHandlerTest {
         assertThat(request.getContent()).isEqualTo("Nam liked comment noi dung binh luan");
     }
 
+    @Test
+    void handleStoryLikeNotifiesOnlyTheOwnerWithInteractionDedupMetadata() {
+        PushModuleNotificationHandler handler = newHandler();
+
+        when(userIdentityQueryService.resolveUsername("actor-1")).thenReturn(Mono.just("Nam"));
+        when(notificationTemplatesRepository.findByActionType(UserActionType.LIKE_STORY))
+                .thenReturn(Mono.just(NotificationTemplates.builder()
+                        .id(8)
+                        .actionType(UserActionType.LIKE_STORY)
+                        .template("{{USERNAME}} đã thích tin của bạn")
+                        .build()));
+        when(notificationService.sendNotification(any(NotificationRequest.class))).thenReturn(Mono.just("ok"));
+
+        handler.handleLikeEvent("""
+                {"actorId":"actor-1","targetId":"story-1","targetType":"STORY","targetOwnerId":"owner-1","interactionId":"interaction-1"}
+                """).join();
+
+        ArgumentCaptor<NotificationRequest> captor = ArgumentCaptor.forClass(NotificationRequest.class);
+        verify(notificationService).sendNotification(captor.capture());
+
+        NotificationRequest request = captor.getValue();
+        assertThat(request.getActionType()).isEqualTo(UserActionType.LIKE_STORY);
+        assertThat(request.getRecipientIds()).containsExactly("owner-1");
+        assertThat(request.getEntityId()).isEqualTo("story-1");
+        assertThat(request.getEntityType()).isEqualTo("STORY");
+        assertThat(request.getContent()).isEqualTo("Nam đã thích tin của bạn");
+        assertThat(request.getMetadata())
+                .containsEntry("STORY_ID", "story-1")
+                .containsEntry("STORY_OWNER_ID", "owner-1")
+                .containsEntry("INTERACTION_ID", "interaction-1");
+        assertThat(request.getDedupKey()).isEqualTo("LIKE_STORY:interaction-1");
+    }
+
     private PushModuleNotificationHandler newHandler() {
         return new PushModuleNotificationHandler(
                 notificationService,

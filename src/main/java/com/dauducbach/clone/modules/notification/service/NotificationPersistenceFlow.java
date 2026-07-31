@@ -99,8 +99,8 @@ final class NotificationPersistenceFlow {
     }
 
     private Mono<Boolean> persist(NotificationEvents event, UserNotifications userNotification) {
-        boolean storyPublication = event.getDedupKey() != null && event.getDedupKey().startsWith("UP_STORY:");
-        Mono<Boolean> duplicateCheck = storyPublication
+        boolean durableDedup = hasDurableDedupKey(event.getDedupKey());
+        Mono<Boolean> duplicateCheck = durableDedup
                 ? eventRepository.findByDedupKey(event.getDedupKey()).hasElement()
                 : Mono.just(false);
         return duplicateCheck
@@ -118,10 +118,16 @@ final class NotificationPersistenceFlow {
                                 .then(Mono.error(error))))
                 .thenReturn(true))
                 .onErrorResume(DataIntegrityViolationException.class, error -> {
-                    if (!storyPublication) return Mono.error(error);
+                    if (!durableDedup) return Mono.error(error);
                     log.info("|NotificationPersistenceFlow|persist|duplicate skipped|dedupKey={}", event.getDedupKey());
                     return Mono.just(false);
                 });
+    }
+
+    private boolean hasDurableDedupKey(String dedupKey) {
+        return dedupKey != null
+                && (dedupKey.startsWith("UP_STORY:")
+                || dedupKey.startsWith("LIKE_STORY:"));
     }
 
     private Mono<String> deliver(
