@@ -5,6 +5,7 @@ import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.chat.constant.MessageType;
 import com.dauducbach.clone.modules.chat.dto.request.MediaMetadataRequest;
 import com.dauducbach.clone.modules.chat.dto.request.SendMessageRequest;
+import com.dauducbach.clone.modules.chat.dto.request.StoryContextRequest;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.springframework.stereotype.Service;
@@ -36,11 +37,14 @@ public class ChatMessageValidator {
         if (request.messageType() == MessageType.TEXT) {
             return validateTextMessage(request);
         }
+        if (request.messageType() == MessageType.STORY_REPLY) {
+            return validateStoryReply(request);
+        }
         return validateMediaMessage(request);
     }
 
     private ValidatedMessage validateTextMessage(SendMessageRequest request) {
-        if (request.metadata() != null) {
+        if (request.metadata() != null || request.storyContext() != null) {
             throw new AppException(ErrorCode.CHAT_MESSAGE_TYPE_INVALID, "Text messages cannot include media metadata");
         }
         if (request.content() == null) {
@@ -51,10 +55,41 @@ public class ChatMessageValidator {
         if (sanitized.isBlank()) {
             throw new AppException(ErrorCode.CHAT_MESSAGE_CONTENT_INVALID, "Text message content is empty after sanitization");
         }
-        return new ValidatedMessage(sanitized, null);
+        return new ValidatedMessage(sanitized, null, null);
+    }
+
+    private ValidatedMessage validateStoryReply(SendMessageRequest request) {
+        if (request.metadata() != null) {
+            throw new AppException(ErrorCode.CHAT_MESSAGE_TYPE_INVALID, "Story replies cannot include media metadata");
+        }
+        if (request.content() == null) {
+            throw new AppException(ErrorCode.CHAT_MESSAGE_CONTENT_INVALID, "Story reply content is required");
+        }
+        String sanitized = toPlainText(request.content());
+        StoryContextRequest context = request.storyContext();
+        if (sanitized.isBlank()
+                || context == null
+                || isBlank(context.storyId())
+                || isBlank(context.storyOwnerId())
+                || !("IMAGE".equalsIgnoreCase(context.mediaType()) || "VIDEO".equalsIgnoreCase(context.mediaType()))
+                || context.previewAtMs() == null
+                || context.previewAtMs() < 0
+                || context.expiresAt() == null) {
+            throw new AppException(ErrorCode.CHAT_MESSAGE_CONTENT_INVALID, "Story reply is invalid");
+        }
+        StoryContextRequest normalized = new StoryContextRequest(
+                context.storyId().trim(),
+                context.storyOwnerId().trim(),
+                context.mediaType().trim().toUpperCase(Locale.ROOT),
+                context.previewAtMs(),
+                context.expiresAt());
+        return new ValidatedMessage(sanitized, null, normalized);
     }
 
     private ValidatedMessage validateMediaMessage(SendMessageRequest request) {
+        if (request.storyContext() != null) {
+            throw new AppException(ErrorCode.CHAT_MESSAGE_TYPE_INVALID, "Media messages cannot include Story context");
+        }
         if (request.content() != null && !request.content().isBlank()) {
             throw new AppException(ErrorCode.CHAT_MESSAGE_TYPE_INVALID, "Media messages cannot include text content");
         }
@@ -64,7 +99,7 @@ public class ChatMessageValidator {
         }
 
         validateMetadata(metadata, request.messageType());
-        return new ValidatedMessage(null, metadata);
+        return new ValidatedMessage(null, metadata, null);
     }
 
     private void validateClientMessageId(String clientMessageId) {
@@ -97,7 +132,7 @@ public class ChatMessageValidator {
             case VIDEO -> mimeType.startsWith("video/");
             case AUDIO -> mimeType.startsWith("audio/") || mimeType.equals("video/webm");
             case FILE -> true;
-            case TEXT, SYSTEM -> false;
+            case TEXT, STORY_REPLY, SYSTEM -> false;
         };
         if (!matchesType) {
             throw new AppException(ErrorCode.CHAT_MESSAGE_CONTENT_INVALID, "Media MIME type does not match message type");
@@ -143,6 +178,9 @@ public class ChatMessageValidator {
         return value == null || value.isBlank();
     }
 
-    public record ValidatedMessage(String content, MediaMetadataRequest metadata) {
+    public record ValidatedMessage(
+            String content,
+            MediaMetadataRequest metadata,
+            StoryContextRequest storyContext) {
     }
 }

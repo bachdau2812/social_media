@@ -6,5 +6,6 @@ public enum MessageType {
     VIDEO,
     FILE,
     AUDIO,
+    STORY_REPLY,
     SYSTEM
 }

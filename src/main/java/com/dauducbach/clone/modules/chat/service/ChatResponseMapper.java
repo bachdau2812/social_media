@@ -6,6 +6,8 @@ import com.dauducbach.clone.modules.chat.dto.response.ChatMessageResponse;
 import com.dauducbach.clone.modules.chat.dto.response.ConversationResponse;
 import com.dauducbach.clone.modules.chat.dto.response.MediaMetadataResponse;
 import com.dauducbach.clone.modules.chat.dto.response.ReplyMessageResponse;
+import com.dauducbach.clone.modules.chat.dto.response.StoryContextResponse;
+import com.dauducbach.clone.modules.chat.constant.MessageType;
 import com.dauducbach.clone.modules.chat.entity.ChatMessage;
 import com.dauducbach.clone.modules.chat.entity.Conversation;
 import com.dauducbach.clone.modules.chat.entity.ConversationMember;
@@ -83,14 +85,15 @@ public class ChatResponseMapper {
                 message.getSenderAvatarUrl(),
                 message.getMessageType(),
                 deleted ? null : message.getContent(),
-                deleted || message.getMessageType() == com.dauducbach.clone.modules.chat.constant.MessageType.SYSTEM
-                        ? null
-                        : toMediaMetadataResponse(message.getMetadata()),
+                deleted || !isMediaType(message.getMessageType())
+                        ? null : toMediaMetadataResponse(message.getMetadata()),
                 message.getReplyToSeq(),
                 toReplyMessageResponse(message),
                 message.getCreatedAt(),
                 message.getEditedAt(),
-                deleted);
+                deleted,
+                deleted || message.getMessageType() != MessageType.STORY_REPLY
+                        ? null : toStoryContextResponse(message.getMetadata()));
     }
 
     private ReplyMessageResponse toReplyMessageResponse(ChatMessage message) {
@@ -121,12 +124,41 @@ public class ChatResponseMapper {
         if (row.lastMessageContent() != null && !row.lastMessageContent().isBlank()) {
             return row.lastMessageContent().trim();
         }
+        if (row.lastMessageType() == MessageType.STORY_REPLY) {
+            return "Đã trả lời một tin";
+        }
         return switch (row.lastMessageType()) {
             case IMAGE -> "Đã gửi một ảnh";
             case VIDEO -> "Đã gửi một video";
             case AUDIO -> "Đã gửi một tin nhắn thoại";
             default -> "Đã gửi một tin nhắn";
         };
+    }
+
+    private boolean isMediaType(MessageType type) {
+        return type == MessageType.IMAGE
+                || type == MessageType.VIDEO
+                || type == MessageType.FILE
+                || type == MessageType.AUDIO;
+    }
+
+    public StoryContextResponse toStoryContextResponse(String metadata) {
+        if (metadata == null || metadata.isBlank()) {
+            return null;
+        }
+        try {
+            JsonObject object = JsonParser.parseString(metadata).getAsJsonObject();
+            return new StoryContextResponse(
+                    string(object, "storyId"),
+                    string(object, "storyOwnerId"),
+                    string(object, "mediaType"),
+                    longValue(object, "previewAtMs"),
+                    instantValue(object, "expiresAt"),
+                    null,
+                    null);
+        } catch (RuntimeException error) {
+            throw new AppException(ErrorCode.CHAT_MESSAGE_FETCH_FAILED, "Parse Story reply context failed", error);
+        }
     }
     private long unreadCount(long lastMessageSeq, long lastReadSeq, long joinedSeq, Long lastDeletedMessageSeq) {
         long hiddenThrough = Math.max(lastReadSeq, Math.max(joinedSeq - 1,
@@ -167,5 +199,10 @@ public class ChatResponseMapper {
     private Integer integerValue(JsonObject object, String name) {
         JsonElement value = object.get(name);
         return value == null || value.isJsonNull() ? null : value.getAsInt();
+    }
+
+    private java.time.Instant instantValue(JsonObject object, String name) {
+        String value = string(object, name);
+        return value == null ? null : java.time.Instant.parse(value);
     }
 }

@@ -5,12 +5,14 @@ import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.chat.constant.MessageType;
 import com.dauducbach.clone.modules.chat.dto.request.MediaMetadataRequest;
 import com.dauducbach.clone.modules.chat.dto.request.SendMessageRequest;
+import com.dauducbach.clone.modules.chat.dto.request.StoryContextRequest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.UUID;
+import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -41,14 +43,14 @@ class ChatMessageValidatorTest {
 
     @Test
     void rejectsNonUuidClientMessageId() {
-        SendMessageRequest request = new SendMessageRequest("not-a-uuid", MessageType.TEXT, "hello", null, null, null, null);
+        SendMessageRequest request = new SendMessageRequest("not-a-uuid", MessageType.TEXT, "hello", null, null, null, null, null);
 
         assertChatError(request, ErrorCode.CHAT_MESSAGE_CONTENT_INVALID);
     }
 
     @Test
     void rejectsNonCanonicalUuidClientMessageId() {
-        SendMessageRequest request = new SendMessageRequest("1-1-1-1-1", MessageType.TEXT, "hello", null, null, null, null);
+        SendMessageRequest request = new SendMessageRequest("1-1-1-1-1", MessageType.TEXT, "hello", null, null, null, null, null);
 
         assertChatError(request, ErrorCode.CHAT_MESSAGE_CONTENT_INVALID);
     }
@@ -56,7 +58,7 @@ class ChatMessageValidatorTest {
     @Test
     void rejectsWhitespaceAroundClientMessageId() {
         SendMessageRequest request = new SendMessageRequest(
-                " " + UUID.randomUUID() + " ", MessageType.TEXT, "hello", null, null, null, null);
+                " " + UUID.randomUUID() + " ", MessageType.TEXT, "hello", null, null, null, null, null);
 
         assertChatError(request, ErrorCode.CHAT_MESSAGE_CONTENT_INVALID);
     }
@@ -128,6 +130,7 @@ class ChatMessageValidatorTest {
                 new MediaMetadataRequest("https://host/a.jpg", "p1", "image/jpeg", 10L, "a.jpg", null, null, null),
                 null,
                 null,
+                null,
                 null);
 
         assertChatError(request, ErrorCode.CHAT_MESSAGE_TYPE_INVALID);
@@ -142,9 +145,40 @@ class ChatMessageValidatorTest {
                 new MediaMetadataRequest("https://host/a.jpg", "p1", "image/jpeg", 10L, "a.jpg", null, null, null),
                 null,
                 null,
+                null,
                 null);
 
         assertChatError(request, ErrorCode.CHAT_MESSAGE_TYPE_INVALID);
+    }
+
+    @Test
+    void storyReplyRequiresTextAndStoryContextAndForbidsMediaMetadata() {
+        StoryContextRequest context = storyContext(0L);
+
+        ChatMessageValidator.ValidatedMessage validated = validator.validate(new SendMessageRequest(
+                UUID.randomUUID().toString(), MessageType.STORY_REPLY, "<b>hello</b>", null,
+                null, null, null, context));
+
+        assertThat(validated.content()).isEqualTo("hello");
+        assertThat(validated.storyContext()).isEqualTo(context);
+
+        assertChatError(new SendMessageRequest(
+                UUID.randomUUID().toString(), MessageType.STORY_REPLY, " ", null,
+                null, null, null, context), ErrorCode.CHAT_MESSAGE_CONTENT_INVALID);
+        assertChatError(new SendMessageRequest(
+                UUID.randomUUID().toString(), MessageType.STORY_REPLY, "hello", null,
+                null, null, null, null), ErrorCode.CHAT_MESSAGE_CONTENT_INVALID);
+        assertChatError(new SendMessageRequest(
+                UUID.randomUUID().toString(), MessageType.STORY_REPLY, "hello",
+                new MediaMetadataRequest("https://host/a.jpg", "p1", "image/jpeg", 10L, "a.jpg", null, null, null),
+                null, null, null, context), ErrorCode.CHAT_MESSAGE_TYPE_INVALID);
+    }
+
+    @Test
+    void storyReplyRejectsNegativePreviewTime() {
+        assertChatError(new SendMessageRequest(
+                UUID.randomUUID().toString(), MessageType.STORY_REPLY, "hello", null,
+                null, null, null, storyContext(-1L)), ErrorCode.CHAT_MESSAGE_CONTENT_INVALID);
     }
 
     @ParameterizedTest
@@ -162,11 +196,16 @@ class ChatMessageValidatorTest {
     }
 
     private SendMessageRequest textRequest(String content) {
-        return new SendMessageRequest(UUID.randomUUID().toString(), MessageType.TEXT, content, null, null, null, null);
+        return new SendMessageRequest(UUID.randomUUID().toString(), MessageType.TEXT, content, null, null, null, null, null);
     }
 
     private SendMessageRequest mediaRequest(MessageType messageType, MediaMetadataRequest metadata) {
-        return new SendMessageRequest(UUID.randomUUID().toString(), messageType, null, metadata, 4L, null, null);
+        return new SendMessageRequest(UUID.randomUUID().toString(), messageType, null, metadata, 4L, null, null, null);
+    }
+
+    private StoryContextRequest storyContext(long previewAtMs) {
+        return new StoryContextRequest(
+                "story-1", "owner-1", "IMAGE", previewAtMs, Instant.parse("2026-08-01T00:00:00Z"));
     }
 
     private void assertChatError(SendMessageRequest request, ErrorCode expected) {

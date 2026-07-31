@@ -30,7 +30,7 @@ class ChatEventTest {
         Instant createdAt = Instant.parse("2026-07-24T00:00:00Z");
         ChatMessageResponse message = new ChatMessageResponse(
                 "m1", "c1", 1L, "client-1", "u1", null, null,
-                MessageType.TEXT, "hello", null, null, null, createdAt, null, false);
+                MessageType.TEXT, "hello", null, null, null, createdAt, null, false, null);
 
         ChatEvent event = ChatEvent.messageCreated(message, List.of("u2"));
 

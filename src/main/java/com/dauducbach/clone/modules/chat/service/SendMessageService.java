@@ -17,6 +17,7 @@ import com.dauducbach.clone.modules.media.entity.Media;
 import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
 import com.dauducbach.clone.modules.media.service.MediaService;
 import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
@@ -225,7 +226,7 @@ public class SendMessageService {
                 .senderId(actorId)
                 .messageType(request.messageType())
                 .content(validated.content())
-                .metadata(preparedMedia.metadata() == null ? null : GSON.toJson(preparedMedia.metadata()))
+                .metadata(persistedMetadata(validated, preparedMedia))
                 .replyToSeq(request.replyToSeq())
                 .createdAt(now)
                 .build();
@@ -242,6 +243,22 @@ public class SendMessageService {
             return Mono.empty();
         }
         return mediaService.registerFetchedMedia(media, messageId, OwnerType.CHAT_MESSAGE).then();
+    }
+
+    private String persistedMetadata(
+            ChatMessageValidator.ValidatedMessage validated,
+            PreparedMedia preparedMedia
+    ) {
+        if (validated.storyContext() != null) {
+            JsonObject context = new JsonObject();
+            context.addProperty("storyId", validated.storyContext().storyId());
+            context.addProperty("storyOwnerId", validated.storyContext().storyOwnerId());
+            context.addProperty("mediaType", validated.storyContext().mediaType());
+            context.addProperty("previewAtMs", validated.storyContext().previewAtMs());
+            context.addProperty("expiresAt", validated.storyContext().expiresAt().toString());
+            return context.toString();
+        }
+        return preparedMedia.metadata() == null ? null : GSON.toJson(preparedMedia.metadata());
     }
 
     private String firstNonBlank(String... values) {

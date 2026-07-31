@@ -11,6 +11,7 @@ import com.dauducbach.clone.modules.chat.dto.response.ChatMessageResponse;
 import com.dauducbach.clone.modules.chat.dto.response.ConversationResponse;
 import com.dauducbach.clone.modules.chat.dto.response.MediaMetadataResponse;
 import com.dauducbach.clone.modules.chat.dto.response.ReplyMessageResponse;
+import com.dauducbach.clone.modules.chat.dto.response.StoryContextResponse;
 import com.dauducbach.clone.modules.chat.entity.ChatMessage;
 import com.dauducbach.clone.modules.chat.repository.ChatReadRepository;
 import org.junit.jupiter.api.Test;
@@ -51,6 +52,7 @@ class ChatResponseMapperTest {
                 new MediaMetadataRequest("https://host/a.jpg", "p1", "image/jpeg", 10L, "a.jpg", 100, 200, 300L),
                 5L,
                 null,
+                null,
                 null));
         ChatMessage message = ChatMessage.builder()
                 .id("m1")
@@ -71,7 +73,31 @@ class ChatResponseMapperTest {
         assertThat(response).isEqualTo(new ChatMessageResponse(
                 "m1", "c1", 7L, "client-1", "u1", null, null, MessageType.IMAGE, null,
                 new MediaMetadataResponse("https://host/a.jpg", "p1", "image/jpeg", 10L, "a.jpg", 100, 200, 300L),
-                5L, new ReplyMessageResponse(5L, null, null, null, null, null, true), createdAt, editedAt, false));
+                5L, new ReplyMessageResponse(5L, null, null, null, null, null, true), createdAt, editedAt, false, null));
+    }
+
+    @Test
+    void mapsStoryContextOnlyForStoryReplyMessages() {
+        Instant expiresAt = Instant.parse("2026-08-01T00:00:00Z");
+        ChatMessage storyReply = ChatMessage.builder()
+                .id("m-story")
+                .conversationId("c1")
+                .messageSeq(8L)
+                .clientMessageId("client-story")
+                .senderId("u1")
+                .messageType(MessageType.STORY_REPLY)
+                .content("hello")
+                .metadata("""
+                        {"storyId":"story-1","storyOwnerId":"owner-1","mediaType":"VIDEO","previewAtMs":12400,"expiresAt":"2026-08-01T00:00:00Z"}
+                        """)
+                .createdAt(Instant.parse("2026-07-31T00:00:00Z"))
+                .build();
+
+        ChatMessageResponse response = mapper.toChatMessageResponse(storyReply);
+
+        assertThat(response.metadata()).isNull();
+        assertThat(response.storyContext()).isEqualTo(new StoryContextResponse(
+                "story-1", "owner-1", "VIDEO", 12400L, expiresAt, null, null));
     }
 
     @Test

@@ -9,5 +9,6 @@ public record ChatMessageResponse(
         String senderId, String senderDisplayName, String senderAvatarUrl,
         MessageType messageType, String content,
         MediaMetadataResponse metadata, Long replyToSeq, ReplyMessageResponse reply,
-        Instant createdAt, Instant editedAt, boolean deleted) {
+        Instant createdAt, Instant editedAt, boolean deleted,
+        StoryContextResponse storyContext) {
 }

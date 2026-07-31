@@ -14,5 +14,6 @@ public record SendMessageRequest(
         @Valid MediaMetadataRequest metadata,
         Long replyToSeq,
         String recipientId,
-        List<String> recipientIds) {
+        List<String> recipientIds,
+        @Valid StoryContextRequest storyContext) {
 }
