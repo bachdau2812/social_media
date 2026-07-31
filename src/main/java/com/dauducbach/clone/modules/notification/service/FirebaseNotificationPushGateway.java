@@ -1,5 +1,6 @@
 package com.dauducbach.clone.modules.notification.service;
 
+import com.google.firebase.FirebaseApp;
 import com.google.firebase.messaging.FirebaseMessaging;
 import com.google.firebase.messaging.Message;
 import com.google.firebase.messaging.Notification;
@@ -14,7 +15,14 @@ public class FirebaseNotificationPushGateway implements NotificationPushGateway 
 
     @Override
     public Mono<String> send(NotificationPushPayload payload) {
-        return Mono.fromCallable(() -> FirebaseMessaging.getInstance().send(buildMessage(payload)))
+        return Mono.fromCallable(() -> {
+                    if (FirebaseApp.getApps().isEmpty()) {
+                        throw new IllegalStateException(
+                                "Firebase push is not initialized. Set FIREBASE_ENABLED=true and configure "
+                                        + "FIREBASE_CREDENTIALS_PATH or GOOGLE_APPLICATION_CREDENTIALS.");
+                    }
+                    return FirebaseMessaging.getInstance().send(buildMessage(payload));
+                })
                 .subscribeOn(Schedulers.boundedElastic());
     }
 

@@ -33,7 +33,8 @@ public class FirebaseConfig {
     @PostConstruct
     public void init() throws Exception {
         if (!enabled) {
-            log.info("|FirebaseConfig|init|disabled");
+            log.warn("|FirebaseConfig|init|disabled; device push is unavailable; set FIREBASE_ENABLED=true "
+                    + "and configure FIREBASE_CREDENTIALS_PATH or GOOGLE_APPLICATION_CREDENTIALS");
             return;
         }
 
