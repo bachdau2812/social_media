@@ -11,7 +11,6 @@ import com.dauducbach.clone.modules.user.dto.response.StoryReplyResponse;
 import com.dauducbach.clone.modules.chat.service.StoryReplyMessaging;
 import com.dauducbach.clone.modules.user.entity.StoryHighlight;
 import com.dauducbach.clone.modules.user.entity.StoryHighlightItem;
-import com.dauducbach.clone.modules.user.entity.StoryView;
 import com.dauducbach.clone.modules.user.entity.UserStories;
 import com.dauducbach.clone.modules.user.repositoty.StoryHighlightItemRepository;
 import com.dauducbach.clone.modules.user.repositoty.StoryHighlightRepository;
@@ -88,21 +87,13 @@ public class StoryLibraryService {
         return ownedStory(storyId)
                 .flatMap(story -> {
                     if (viewer.equals(story.getUserId())) return Mono.empty();
-                    return viewRepository.findByStoryIdAndViewerId(storyId, viewer)
-                            .flatMap(existing -> {
-                                if (reaction != null) existing.setReaction(normalize(reaction));
-                                existing.setViewedAt(Instant.now());
-                                return viewRepository.save(existing).then();
-                            })
-                            .switchIfEmpty(Mono.defer(() -> entityTemplate.insert(StoryView.class)
-                                    .using(StoryView.builder()
-                                            .id(UUID.randomUUID().toString())
-                                            .storyId(storyId)
-                                            .viewerId(viewer)
-                                            .reaction(normalize(reaction))
-                                            .viewedAt(Instant.now())
-                                            .build())
-                                    .then()));
+                    return viewRepository.upsertView(
+                                    UUID.randomUUID().toString(),
+                                    storyId,
+                                    viewer,
+                                    normalize(reaction),
+                                    Instant.now())
+                            .then();
                 });
     }
 

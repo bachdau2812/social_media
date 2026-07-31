@@ -19,12 +19,37 @@ import java.time.Instant;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class StoryLibraryServiceTest {
+
+    @Test
+    void recordsAViewWithOneAtomicUpsert() {
+        UserStoriesRepository stories = mock(UserStoriesRepository.class);
+        StoryViewRepository views = mock(StoryViewRepository.class);
+        StoryReplyMessaging messaging = mock(StoryReplyMessaging.class);
+        StoryLibraryService service = service(stories, views, messaging);
+        when(stories.findById("story-1"))
+                .thenReturn(Mono.just(story(
+                        "story-1", "owner-1", "APPROVED", Instant.now().plusSeconds(3600))));
+        when(views.upsertView(
+                anyString(), eq("story-1"), eq("viewer-1"), isNull(), any(Instant.class)))
+                .thenReturn(Mono.just(1));
+
+        StepVerifier.create(service.recordView("story-1", "viewer-1", null))
+                .verifyComplete();
+
+        verify(views).upsertView(
+                anyString(), eq("story-1"), eq("viewer-1"), isNull(), any(Instant.class));
+        verify(views, never()).findByStoryIdAndViewerId(anyString(), anyString());
+    }
 
     @Test
     void rejectsOwnRemovedAndExpiredStoriesBeforeCallingChat() {
@@ -49,9 +74,17 @@ class StoryLibraryServiceTest {
     }
 
     private StoryLibraryService service(UserStoriesRepository stories, StoryReplyMessaging messaging) {
+        return service(stories, mock(StoryViewRepository.class), messaging);
+    }
+
+    private StoryLibraryService service(
+            UserStoriesRepository stories,
+            StoryViewRepository views,
+            StoryReplyMessaging messaging
+    ) {
         return new StoryLibraryService(
                 stories,
-                mock(StoryViewRepository.class),
+                views,
                 mock(StoryHighlightRepository.class),
                 mock(StoryHighlightItemRepository.class),
                 mock(R2dbcEntityTemplate.class),
