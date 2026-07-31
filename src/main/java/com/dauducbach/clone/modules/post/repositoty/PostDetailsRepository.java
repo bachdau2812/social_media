@@ -1,6 +1,7 @@
 package com.dauducbach.clone.modules.post.repositoty;
 
 import com.dauducbach.clone.modules.post.entity.PostDetails;
+import com.dauducbach.clone.modules.post.repositoty.projection.FriendFeedActivityProjection;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.data.repository.reactive.ReactiveCrudRepository;
@@ -93,6 +94,61 @@ public interface PostDetailsRepository extends ReactiveCrudRepository<PostDetail
             OFFSET :offset
             """)
     Flux<PostDetails> findRecentApprovedPostsFromMutualFriends(String userId, int limit, int offset);
+
+    @Query("""
+            SELECT activity.feed_entry_id,
+                   activity.post_id,
+                   activity.activity_type,
+                   activity.actor_id,
+                   activity.activity_at
+            FROM (
+                SELECT CONCAT('post:', post.post_id) AS feed_entry_id,
+                       post.post_id AS post_id,
+                       'ORIGINAL_POST' AS activity_type,
+                       post.user_id AS actor_id,
+                       post.created_at AS activity_at
+                FROM post_details post
+                WHERE post.validate_status = 'APPROVED'
+                  AND post.user_id IN (
+                    SELECT following.following_id
+                    FROM user_follower following
+                    INNER JOIN user_follower follower_back
+                      ON follower_back.follower_id = following.following_id
+                     AND follower_back.following_id = :userId
+                    WHERE following.follower_id = :userId
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM user_archive_items archived
+                    WHERE archived.content_id = post.post_id
+                      AND UPPER(archived.content_type) = 'POST'
+                  )
+                UNION ALL
+                SELECT repost.id AS feed_entry_id,
+                       repost.post_id AS post_id,
+                       'REPOST' AS activity_type,
+                       repost.actor_id AS actor_id,
+                       repost.created_at AS activity_at
+                FROM post_reposts repost
+                INNER JOIN post_details post ON post.post_id = repost.post_id
+                WHERE post.validate_status = 'APPROVED'
+                  AND repost.actor_id IN (
+                    SELECT following.following_id
+                    FROM user_follower following
+                    INNER JOIN user_follower follower_back
+                      ON follower_back.follower_id = following.following_id
+                     AND follower_back.following_id = :userId
+                    WHERE following.follower_id = :userId
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM user_archive_items archived
+                    WHERE archived.content_id = post.post_id
+                      AND UPPER(archived.content_type) = 'POST'
+                  )
+            ) activity
+            ORDER BY activity.activity_at DESC, activity.feed_entry_id DESC
+            LIMIT :limit OFFSET :offset
+            """)
+    Flux<FriendFeedActivityProjection> findRecentFriendFeedActivities(String userId, int limit, int offset);
 
     @Query("""
             SELECT COUNT(*) FROM post_details p

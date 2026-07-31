@@ -1,5 +1,6 @@
 package com.dauducbach.clone.modules.feed.dto.response;
 
+import com.dauducbach.clone.modules.feed.constant.FeedActivityType;
 import com.dauducbach.clone.modules.post.dto.response.PostItemResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostMusicResponse;
 
@@ -29,7 +30,11 @@ public record FeedItemResponse(
         String recommendationReason,
         String rankingVersion,
         String experimentId,
-        String impressionToken
+        String impressionToken,
+        String feedEntryId,
+        FeedActivityType activityType,
+        Instant activityAt,
+        FeedActorResponse reposter
 ) {
     public FeedItemResponse(
             String postId,
@@ -74,7 +79,27 @@ public record FeedItemResponse(
                 null,
                 null,
                 null,
+                null,
+                null,
+                null,
+                null,
                 null
+        );
+    }
+
+    public FeedItemResponse withActivity(
+            String feedEntryId,
+            FeedActivityType activityType,
+            Instant activityAt,
+            FeedActorResponse reposter
+    ) {
+        return new FeedItemResponse(
+                postId, userId, authorUsername, authorFullName, authorAvatarUrl,
+                content, hashtags, mediaRatio, media, music, items,
+                likeCount, commentCount, repostCount, likedByCurrentUser,
+                repostedByCurrentUser, createdAt, updatedAt, sourceType,
+                recommendationReason, rankingVersion, experimentId, impressionToken,
+                feedEntryId, activityType, activityAt, reposter
         );
     }
 }

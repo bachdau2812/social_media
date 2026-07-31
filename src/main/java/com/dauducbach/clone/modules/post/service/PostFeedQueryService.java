@@ -2,6 +2,7 @@ package com.dauducbach.clone.modules.post.service;
 
 import co.elastic.clients.json.JsonData;
 import com.dauducbach.clone.modules.post.elastic.PostVector;
+import com.dauducbach.clone.modules.post.dto.response.FriendFeedActivityResponse;
 import com.dauducbach.clone.modules.post.entity.PostDetails;
 import com.dauducbach.clone.modules.post.repositoty.PostDetailsRepository;
 import lombok.RequiredArgsConstructor;
@@ -61,6 +62,25 @@ public class PostFeedQueryService {
                 safeLimit,
                 Math.max(offset, 0)
         );
+    }
+
+    public Flux<FriendFeedActivityResponse> getRecentFriendFeedActivities(String userId, int limit, int offset) {
+        int safeLimit = Math.max(limit, 0);
+        if (safeLimit == 0) {
+            return Flux.empty();
+        }
+        return postDetailsRepository.findRecentFriendFeedActivities(
+                        userId,
+                        safeLimit,
+                        Math.max(offset, 0)
+                )
+                .map(activity -> new FriendFeedActivityResponse(
+                        activity.getFeedEntryId(),
+                        activity.getPostId(),
+                        activity.getActivityType(),
+                        activity.getActorId(),
+                        activity.getActivityAt()
+                ));
     }
     public Mono<List<String>> searchRecommendedPostIds(List<Double> queryVector, int limit, Set<String> excludedPostIds) {
         int safeLimit = Math.max(limit, 0);

@@ -71,12 +71,20 @@ public class FeedService {
         int offset = safePage * safeLimit;
 
         return postFeedQueryService
-                .getRecentApprovedPostsFromMutualFriends(cleanUserId, safeLimit + 1, offset)
+                .getRecentFriendFeedActivities(cleanUserId, safeLimit + 1, offset)
                 .collectList()
-                .flatMap(posts -> {
-                    boolean hasMore = posts.size() > safeLimit;
-                    return Flux.fromIterable(posts.stream().limit(safeLimit).toList())
-                            .concatMap(post -> getFeedItemForViewer(cleanUserId, post.getPostId(), displayType))
+                .flatMap(activities -> {
+                    boolean hasMore = activities.size() > safeLimit;
+                    return Flux.fromIterable(activities.stream().limit(safeLimit).toList())
+                            .concatMap(activity -> itemHydrator
+                                    .hydrateFriendActivity(cleanUserId, activity, displayType)
+                                    .onErrorResume(error -> {
+                                        log.warn(
+                                                "|FeedService|getFriendsFeed|skipActivity|feedEntryId={}|postId={}|error={}",
+                                                activity.feedEntryId(), activity.postId(), error.getMessage()
+                                        );
+                                        return Mono.empty();
+                                    }))
                             .collectList()
                             .map(items -> new FeedResponse(cleanUserId, safeLimit, items, hasMore));
                 });
