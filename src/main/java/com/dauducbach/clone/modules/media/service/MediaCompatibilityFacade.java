@@ -42,6 +42,10 @@ public class MediaCompatibilityFacade {
         return cloudinaryMediaService.transformDeliveryUrl(mediaUrl, displayType);
     }
 
+    public String storyVideoStill(String mediaUrl, long previewAtMs) {
+        return cloudinaryMediaService.storyVideoStill(mediaUrl, previewAtMs);
+    }
+
     public void validateMusicSegment(Long musicStart, Long musicEnd) {
         CloudinaryUtils.validateAudioSegment(musicStart, musicEnd);
     }

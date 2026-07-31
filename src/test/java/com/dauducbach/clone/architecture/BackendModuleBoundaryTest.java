@@ -126,6 +126,18 @@ class BackendModuleBoundaryTest {
     }
 
     @Test
+    void chatDoesNotImportUserPersistenceInternals() throws IOException {
+        List<String> violations = javaSources(MAIN_SOURCE.resolve("modules/chat"))
+                .filter(source -> source.content().contains("modules.user.repositoty")
+                        || source.content().contains("modules.user.repository")
+                        || source.content().contains("modules.user.entity"))
+                .map(SourceFile::relativePath)
+                .toList();
+
+        assertTrue(violations.isEmpty(), () -> "Chat imports User/Story persistence internals: " + violations);
+    }
+
+    @Test
     void notificationDoesNotImportOtherModuleRepositoriesOrEntities() throws IOException {
         List<String> violations = javaSources(MAIN_SOURCE.resolve("modules/notification"))
                 .filter(source -> source.content().lines()

@@ -4,8 +4,11 @@ import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.commons.response.PageResponse;
 import com.dauducbach.clone.modules.user.dto.request.StoryHighlightRequest;
+import com.dauducbach.clone.modules.user.dto.request.StoryReplyRequest;
 import com.dauducbach.clone.modules.user.dto.response.StoryHighlightResponse;
 import com.dauducbach.clone.modules.user.dto.response.StoryViewerResponse;
+import com.dauducbach.clone.modules.user.dto.response.StoryReplyResponse;
+import com.dauducbach.clone.modules.chat.service.StoryReplyMessaging;
 import com.dauducbach.clone.modules.user.entity.StoryHighlight;
 import com.dauducbach.clone.modules.user.entity.StoryHighlightItem;
 import com.dauducbach.clone.modules.user.entity.StoryView;
@@ -34,6 +37,51 @@ public class StoryLibraryService {
     private final StoryHighlightItemRepository highlightItemRepository;
     private final R2dbcEntityTemplate entityTemplate;
     private final DatabaseClient databaseClient;
+    private final StoryReplyMessaging storyReplyMessaging;
+
+    public Mono<StoryReplyResponse> reply(
+            String storyId,
+            String authenticatedUserId,
+            StoryReplyRequest request
+    ) {
+        String senderId = requireText(authenticatedUserId, "authenticatedUserId");
+        if (request == null) {
+            return Mono.error(new AppException(ErrorCode.STORY_SAVE_FAILED, "Story reply request is required"));
+        }
+        Instant now = Instant.now();
+        return storiesRepository.findById(requireText(storyId, "storyId"))
+                .switchIfEmpty(Mono.error(new AppException(ErrorCode.STORY_NOT_FOUND, "Story not found")))
+                .flatMap(story -> {
+                    Instant expiresAt = effectiveExpiry(story);
+                    if (senderId.equals(story.getUserId())) {
+                        return Mono.error(new AppException(
+                                ErrorCode.STORY_SAVE_FAILED, "Cannot reply to your own Story"));
+                    }
+                    if (!"APPROVED".equalsIgnoreCase(story.getStatus())
+                            || expiresAt == null
+                            || !expiresAt.isAfter(now)) {
+                        return Mono.error(new AppException(ErrorCode.STORY_NOT_FOUND, "Story is unavailable"));
+                    }
+                    long previewAtMs = request.previewAtMs() == null ? -1L : request.previewAtMs();
+                    if (previewAtMs < 0 || (!"VIDEO".equalsIgnoreCase(story.getMediaType()) && previewAtMs != 0)) {
+                        return Mono.error(new AppException(
+                                ErrorCode.STORY_SAVE_FAILED, "Story preview time is invalid"));
+                    }
+                    StoryReplyMessaging.StoryReplyCommand command =
+                            new StoryReplyMessaging.StoryReplyCommand(
+                                    senderId,
+                                    story.getId(),
+                                    story.getUserId(),
+                                    request.content(),
+                                    request.clientMessageId(),
+                                    story.getMediaType(),
+                                    previewAtMs,
+                                    expiresAt);
+                    return storyReplyMessaging.send(command)
+                            .map(message -> new StoryReplyResponse(
+                                    message.conversationId(), message.id(), message.messageSeq()));
+                });
+    }
 
     public Mono<Void> recordView(String storyId, String viewerId, String reaction) {
         String viewer = requireText(viewerId, "viewerId");
@@ -204,6 +252,12 @@ public class StoryLibraryService {
     private Mono<UserStories> ownedStory(String storyId) {
         return storiesRepository.findById(requireText(storyId, "storyId"))
                 .switchIfEmpty(Mono.error(new AppException(ErrorCode.STORY_SAVE_FAILED, "Story not found")));
+    }
+
+    private Instant effectiveExpiry(UserStories story) {
+        return story.getExpiredAt() != null
+                ? story.getExpiredAt()
+                : story.getCreatedAt() == null ? null : story.getCreatedAt().plusSeconds(24 * 60 * 60);
     }
 
     private String requireText(String value, String field) {

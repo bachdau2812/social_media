@@ -3,8 +3,11 @@ package com.dauducbach.clone.modules.user.controller;
 import com.dauducbach.clone.commons.response.ApiResponse;
 import com.dauducbach.clone.commons.response.PageResponse;
 import com.dauducbach.clone.modules.user.dto.request.StoryHighlightRequest;
+import com.dauducbach.clone.modules.user.dto.request.StoryReplyRequest;
 import com.dauducbach.clone.modules.user.dto.response.StoryHighlightResponse;
 import com.dauducbach.clone.modules.user.dto.response.StoryViewerResponse;
+import com.dauducbach.clone.modules.user.dto.response.StoryReplyResponse;
+import jakarta.validation.Valid;
 import com.dauducbach.clone.modules.user.service.StoryLibraryService;
 import com.dauducbach.clone.modules.user.service.StoryReactionService;
 import lombok.RequiredArgsConstructor;
@@ -54,6 +57,19 @@ public class StoryLibraryController {
                 .map(changed -> ApiResponse.<Boolean>builder()
                         .message(changed ? "Story unliked" : "Story was not liked")
                         .result(changed)
+                        .build());
+    }
+
+    @PostMapping("/stories/{storyId}/replies")
+    public Mono<ApiResponse<StoryReplyResponse>> replyStory(
+            @PathVariable String storyId,
+            @Valid @RequestBody StoryReplyRequest request,
+            Authentication authentication
+    ) {
+        return service.reply(storyId, authentication.getName(), request)
+                .map(result -> ApiResponse.<StoryReplyResponse>builder()
+                        .message("Story reply sent")
+                        .result(result)
                         .build());
     }
 

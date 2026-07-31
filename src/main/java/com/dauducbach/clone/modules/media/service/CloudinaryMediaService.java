@@ -174,6 +174,23 @@ public class CloudinaryMediaService {
         }
     }
 
+    public String storyVideoStill(String mediaUrl, long previewAtMs) {
+        if (mediaUrl == null || mediaUrl.isBlank() || previewAtMs < 0
+                || !CloudinaryUtils.isCloudinaryDeliveryUrl(mediaUrl)) {
+            return null;
+        }
+        try {
+            String seconds = java.math.BigDecimal.valueOf(previewAtMs, 3)
+                    .stripTrailingZeros()
+                    .toPlainString();
+            return CloudinaryUtils.withTransformations(
+                    mediaUrl, "so_" + seconds, "f_jpg", "q_auto");
+        } catch (IllegalArgumentException error) {
+            log.warn("|CloudinaryMediaService|storyVideoStill|fallback|error={}", error.getMessage());
+            return null;
+        }
+    }
+
     public String buildTransformedUrl(String mediaUrl, MediaTransformRequest request) {
         if (request == null) {
             throw new AppException(ErrorCode.CLOUDINARY_API_ERROR, "Media transform request is required");

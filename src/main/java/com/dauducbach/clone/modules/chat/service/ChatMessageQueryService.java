@@ -4,6 +4,7 @@ import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.chat.dto.response.ChatMessageResponse;
 import com.dauducbach.clone.modules.chat.dto.response.CursorPageResponse;
+import com.dauducbach.clone.modules.chat.dto.response.StoryContextResponse;
 import com.dauducbach.clone.modules.chat.entity.ChatMessage;
 import com.dauducbach.clone.modules.chat.repository.ChatReadRepository;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +14,8 @@ import reactor.core.publisher.Mono;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.time.Instant;
+import java.util.LinkedHashSet;
 
 @Service
 @RequiredArgsConstructor
@@ -25,6 +28,7 @@ public class ChatMessageQueryService {
     ChatReadRepository chatReadRepository;
     ChatResponseMapper mapper;
     ChatCursorService cursorService;
+    StoryAvailabilityPort storyAvailabilityPort;
 
     public Mono<CursorPageResponse<ChatMessageResponse>> getMessages(
             String actorId,
@@ -52,10 +56,57 @@ public class ChatMessageQueryService {
                 })
                 .collectList()
                 .map(rows -> toCursorPage(rows, pageSize, backward))
+                .flatMap(this::hydrateStoryAvailability)
                 .flatMap(page -> markFetchedMessagesDelivered(actorId, conversationId, page))
                 .onErrorMap(error -> error instanceof AppException
                         ? error
                         : new AppException(ErrorCode.CHAT_MESSAGE_FETCH_FAILED, "Fetch chat messages failed", error));
+    }
+
+    private Mono<CursorPageResponse<ChatMessageResponse>> hydrateStoryAvailability(
+            CursorPageResponse<ChatMessageResponse> page
+    ) {
+        var references = page.items().stream()
+                .map(ChatMessageResponse::storyContext)
+                .filter(java.util.Objects::nonNull)
+                .map(context -> new StoryAvailabilityPort.StoryReference(
+                        context.storyId(), context.previewAtMs() == null ? 0L : context.previewAtMs()))
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        if (references.isEmpty()) {
+            return Mono.just(page);
+        }
+        return storyAvailabilityPort.resolve(references, Instant.now())
+                .map(resolved -> new CursorPageResponse<>(
+                        page.items().stream()
+                                .map(message -> hydrateStoryContext(message, resolved))
+                                .toList(),
+                        page.nextCursor(),
+                        page.hasMore()));
+    }
+
+    private ChatMessageResponse hydrateStoryContext(
+            ChatMessageResponse message,
+            java.util.Map<StoryAvailabilityPort.StoryReference, StoryAvailabilityPort.StoryAvailability> resolved
+    ) {
+        StoryContextResponse context = message.storyContext();
+        if (context == null) {
+            return message;
+        }
+        StoryAvailabilityPort.StoryReference reference = new StoryAvailabilityPort.StoryReference(
+                context.storyId(), context.previewAtMs() == null ? 0L : context.previewAtMs());
+        StoryAvailabilityPort.StoryAvailability availability = resolved.get(reference);
+        StoryContextResponse hydrated = availability == null
+                ? new StoryContextResponse(
+                        context.storyId(), context.storyOwnerId(), context.mediaType(), context.previewAtMs(),
+                        context.expiresAt(), false, null)
+                : new StoryContextResponse(
+                        context.storyId(), context.storyOwnerId(), availability.mediaType(), availability.previewAtMs(),
+                        availability.expiresAt(), availability.available(), availability.previewUrl());
+        return new ChatMessageResponse(
+                message.id(), message.conversationId(), message.messageSeq(), message.clientMessageId(),
+                message.senderId(), message.senderDisplayName(), message.senderAvatarUrl(),
+                message.messageType(), message.content(), message.metadata(), message.replyToSeq(), message.reply(),
+                message.createdAt(), message.editedAt(), message.deleted(), hydrated);
     }
 
     private Mono<CursorPageResponse<ChatMessageResponse>> markFetchedMessagesDelivered(
