@@ -1,5 +1,6 @@
 package com.dauducbach.clone.modules.media.service.music;
 
+import com.dauducbach.clone.modules.media.dto.music.response.MusicFetchAcceptedResponse;
 import com.dauducbach.clone.modules.media.entity.music.Musics;
 import com.dauducbach.clone.modules.media.repositoty.music.MusicsRepository;
 import org.junit.jupiter.api.Test;
@@ -19,10 +20,12 @@ import static org.mockito.Mockito.when;
 class MusicServiceTest {
     @Mock
     MusicsRepository musicsRepository;
+    @Mock
+    SpotifyMusicFetchService spotifyMusicFetchService;
 
     @Test
     void getMusicByIdReturnsSpotifyCatalogShape() {
-        MusicService service = new MusicService(musicsRepository);
+        MusicService service = new MusicService(musicsRepository, spotifyMusicFetchService);
         Musics music = Musics.builder()
                 .id("1Gqm6KaobG2A1mFVjGnJsS")
                 .displayName("Ca Khuc Cuoi")
@@ -46,7 +49,7 @@ class MusicServiceTest {
 
     @Test
     void getMusicsSearchesByKeywordAndCategory() {
-        MusicService service = new MusicService(musicsRepository);
+        MusicService service = new MusicService(musicsRepository, spotifyMusicFetchService);
         Musics music = Musics.builder()
                 .id("2plbrEY59IikOBgBGLjaoe")
                 .displayName("Song")
@@ -68,6 +71,23 @@ class MusicServiceTest {
                     assertThat(page.totalElements()).isEqualTo(1L);
                     assertThat(page.totalPages()).isEqualTo(1);
                 })
+                .verifyComplete();
+    }
+
+    @Test
+    void delegatesSpotifyFetchWithAuthenticatedUserId() {
+        MusicService service = new MusicService(musicsRepository, spotifyMusicFetchService);
+        MusicFetchAcceptedResponse accepted = new MusicFetchAcceptedResponse(
+                "1Gqm6KaobG2A1mFVjGnJsS",
+                MusicFetchAcceptedResponse.Status.STARTED);
+        when(spotifyMusicFetchService.requestFetch(
+                "1Gqm6KaobG2A1mFVjGnJsS",
+                "user-1")).thenReturn(Mono.just(accepted));
+
+        StepVerifier.create(service.fetchSpotifyMusic(
+                        "1Gqm6KaobG2A1mFVjGnJsS",
+                        "user-1"))
+                .expectNext(accepted)
                 .verifyComplete();
     }
 }

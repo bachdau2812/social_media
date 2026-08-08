@@ -3,6 +3,7 @@ package com.dauducbach.clone.modules.media.service.music;
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.commons.response.PageResponse;
+import com.dauducbach.clone.modules.media.dto.music.response.MusicFetchAcceptedResponse;
 import com.dauducbach.clone.modules.media.entity.music.Musics;
 import com.dauducbach.clone.modules.media.repositoty.music.MusicsRepository;
 import lombok.RequiredArgsConstructor;
@@ -23,7 +24,13 @@ public class MusicService {
     private static final int MAX_PAGE_SIZE = 100;
 
     MusicsRepository musicsRepository;
+    SpotifyMusicFetchService spotifyMusicFetchService;
 
+    public Mono<MusicFetchAcceptedResponse> fetchSpotifyMusic(
+            String trackId,
+            String userId) {
+        return spotifyMusicFetchService.requestFetch(trackId, userId);
+    }
     public Mono<PageResponse<Musics>> getMusics(int page, int size, String keyword, String category) {
         int pageNumber = Math.max(page, 0);
         int pageSize = Math.clamp(size, 1, MAX_PAGE_SIZE);
