@@ -1,5 +1,7 @@
 package com.dauducbach.clone.modules.media.service.music;
 
+import com.dauducbach.clone.commons.exception.AppException;
+import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.commons.realtime.UserSsePublisher;
 import com.dauducbach.clone.modules.media.configuration.SpotifyMusicFetchProperties;
 import com.dauducbach.clone.modules.media.dto.music.response.MusicFetchAcceptedResponse;
@@ -27,8 +29,12 @@ import reactor.core.scheduler.Schedulers;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Queue;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -59,6 +65,7 @@ class SpotifyMusicFetchServiceTest {
     Path tempDirectory;
 
     private Scheduler scheduler;
+    private Scheduler processScheduler;
     private Queue<Runnable> scheduledTasks;
     private SpotifyMusicFetchProperties properties;
 
@@ -66,6 +73,7 @@ class SpotifyMusicFetchServiceTest {
     void setUp() {
         scheduledTasks = new ArrayDeque<>();
         scheduler = Schedulers.fromExecutor(scheduledTasks::add);
+        processScheduler = Schedulers.immediate();
         properties = new SpotifyMusicFetchProperties();
         properties.setTempRoot(tempDirectory.toString());
     }
@@ -201,9 +209,193 @@ class SpotifyMusicFetchServiceTest {
     }
 
     @Test
+    void queueRejectionIsReturnedSynchronouslyAndReleasesTheOwnedLock() {
+        Musics music = catalogMusic();
+        Scheduler rejectingScheduler = org.mockito.Mockito.mock(Scheduler.class);
+        when(repository.findById(TRACK_ID)).thenReturn(Mono.just(music));
+        when(lock.tryAcquire(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
+        when(lock.release(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
+        when(ssePublisher.sendToUser(anyString(), anyString(), anyString()))
+                .thenReturn(Mono.empty());
+        when(rejectingScheduler.schedule(any(Runnable.class)))
+                .thenThrow(new RejectedExecutionException("queue full"));
+
+        StepVerifier.create(service(rejectingScheduler).requestFetch(TRACK_ID, "user-1"))
+                .expectErrorSatisfies(error -> {
+                    assertThat(error).isInstanceOf(AppException.class);
+                    assertThat(((AppException) error).getErrorCode())
+                            .isEqualTo(ErrorCode.MUSIC_FETCH_UNAVAILABLE);
+                })
+                .verify();
+
+        verify(lock).release(eq(TRACK_ID), anyString());
+        verify(spotiFlac, never()).download(eq(TRACK_ID), any(Path.class));
+    }
+
+    @Test
+    void queueRejectionNotifiesRequesterThatAlreadyJoinedProcessingState() {
+        Musics music = catalogMusic();
+        Scheduler rejectingScheduler = org.mockito.Mockito.mock(Scheduler.class);
+        when(repository.findById(TRACK_ID)).thenReturn(Mono.just(music));
+        when(lock.tryAcquire(eq(TRACK_ID), anyString()))
+                .thenReturn(Mono.just(true), Mono.just(false));
+        when(lock.release(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
+        when(ssePublisher.sendToUser(anyString(), anyString(), anyString()))
+                .thenReturn(Mono.empty());
+
+        AtomicReference<SpotifyMusicFetchService> serviceRef = new AtomicReference<>();
+        when(rejectingScheduler.schedule(any(Runnable.class)))
+                .thenAnswer(invocation -> {
+                    MusicFetchAcceptedResponse joined = serviceRef.get()
+                            .requestFetch(TRACK_ID, "user-2")
+                            .block();
+                    assertThat(joined.status())
+                            .isEqualTo(MusicFetchAcceptedResponse.Status.PROCESSING);
+                    throw new RejectedExecutionException("queue full");
+                });
+
+        SpotifyMusicFetchService service = service(rejectingScheduler);
+        serviceRef.set(service);
+        StepVerifier.create(service.requestFetch(TRACK_ID, "user-1"))
+                .expectError(AppException.class)
+                .verify();
+
+        verify(ssePublisher).sendToUser(
+                eq("user-2"), eq("music_fetch_failed"), anyString());
+    }
+    @Test
+    void lateWaiterReceivesTerminalSuccessWithoutStartingAnotherJob() throws Exception {
+        Musics requestView = catalogMusic();
+        Musics jobView = catalogMusic();
+        Musics lateStaleView = catalogMusic();
+        Path flac = Files.writeString(tempDirectory.resolve("late-waiter.flac"), "audio");
+        stubUntilPersistence(jobView, flac);
+        when(repository.findById(TRACK_ID)).thenReturn(
+                Mono.just(requestView),
+                Mono.just(jobView),
+                Mono.just(lateStaleView));
+        when(repository.save(any(Musics.class)))
+                .thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+        when(lock.tryAcquire(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
+
+        AtomicReference<SpotifyMusicFetchService> serviceRef = new AtomicReference<>();
+        AtomicBoolean lateRequestSent = new AtomicBoolean();
+        when(ssePublisher.sendToUser(anyString(), anyString(), anyString()))
+                .thenAnswer(invocation -> {
+                    if ("user-1".equals(invocation.getArgument(0))
+                            && "music_fetch_success".equals(invocation.getArgument(1))
+                            && lateRequestSent.compareAndSet(false, true)) {
+                        serviceRef.get().requestFetch(TRACK_ID, "user-2").block();
+                    }
+                    return Mono.empty();
+                });
+
+        SpotifyMusicFetchService service = service();
+        serviceRef.set(service);
+        service.requestFetch(TRACK_ID, "user-1").block();
+        runScheduledJobs();
+
+        verify(ssePublisher).sendToUser(
+                eq("user-2"), eq("music_fetch_success"), anyString());
+        verify(lock, times(1)).tryAcquire(eq(TRACK_ID), anyString());
+        verify(spotiFlac, times(1)).download(eq(TRACK_ID), any(Path.class));
+    }
+
+    @Test
+    void acquiredJobRechecksFetchedStateBeforeDownloading() {
+        Musics stale = catalogMusic();
+        Musics fetched = catalogMusic();
+        fetched.setFetched(true);
+        fetched.setSongUrl("https://cdn/already-fetched.flac");
+        when(repository.findById(TRACK_ID)).thenReturn(Mono.just(stale), Mono.just(fetched));
+        when(lock.tryAcquire(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
+        when(lock.release(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
+        when(ssePublisher.sendToUser(anyString(), eq("music_fetch_success"), anyString()))
+                .thenReturn(Mono.empty());
+
+        service().requestFetch(TRACK_ID, "user-1").block();
+        runScheduledJobs();
+
+        verify(spotiFlac, never()).download(eq(TRACK_ID), any(Path.class));
+        verify(ssePublisher).sendToUser(
+                eq("user-1"), eq("music_fetch_success"), anyString());
+    }
+
+    @Test
+    void failedConcurrentRequestDoesNotRemoveSameUsersActiveWaiter() throws Exception {
+        Musics music = catalogMusic();
+        Path flac = Files.writeString(tempDirectory.resolve("same-user.flac"), "audio");
+        stubSuccessfulJob(music, flac);
+        when(lock.tryAcquire(eq(TRACK_ID), anyString()))
+                .thenReturn(
+                        Mono.just(true),
+                        Mono.error(new IllegalStateException("redis unavailable")));
+
+        SpotifyMusicFetchService service = service();
+        service.requestFetch(TRACK_ID, "user-1").block();
+        StepVerifier.create(service.requestFetch(TRACK_ID, "user-1"))
+                .expectErrorMessage("redis unavailable")
+                .verify();
+
+        runScheduledJobs();
+
+        verify(ssePublisher).sendToUser(
+                eq("user-1"), eq("music_fetch_success"), anyString());
+    }
+
+    @Test
+    void queuedJobRenewsLockAndDoesNotRunAfterOwnershipIsLost() throws Exception {
+        Musics music = catalogMusic();
+        properties.setLockTtl(Duration.ofMillis(30));
+        when(repository.findById(TRACK_ID)).thenReturn(Mono.just(music));
+        when(lock.tryAcquire(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
+        when(lock.extend(eq(TRACK_ID), anyString())).thenReturn(Mono.just(false));
+        when(lock.release(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
+        when(ssePublisher.sendToUser(anyString(), anyString(), anyString()))
+                .thenReturn(Mono.empty());
+
+        SpotifyMusicFetchService service = service();
+        service.requestFetch(TRACK_ID, "user-1").block();
+
+        Thread.sleep(1_200);
+        runScheduledJobs();
+
+        verify(lock, atLeastOnce()).extend(eq(TRACK_ID), anyString());
+        verify(spotiFlac, never()).download(eq(TRACK_ID), any(Path.class));
+        verify(ssePublisher).sendToUser(
+                eq("user-1"), eq("music_fetch_failed"), anyString());
+    }
+
+    @Test
+    void renewalThatHangsPastConfirmedLeaseDeadlineFencesQueuedJob() throws Exception {
+        Musics music = catalogMusic();
+        properties.setLockTtl(Duration.ofMillis(90));
+        when(repository.findById(TRACK_ID)).thenReturn(Mono.just(music));
+        when(lock.tryAcquire(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
+        when(lock.extend(eq(TRACK_ID), anyString())).thenReturn(Mono.never());
+        when(lock.release(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
+        when(ssePublisher.sendToUser(anyString(), anyString(), anyString()))
+                .thenReturn(Mono.empty());
+
+        SpotifyMusicFetchService service = service();
+        service.requestFetch(TRACK_ID, "user-1").block();
+
+        Thread.sleep(180);
+        runScheduledJobs();
+
+        verify(lock, atLeastOnce()).extend(eq(TRACK_ID), anyString());
+        verify(spotiFlac, never()).download(eq(TRACK_ID), any(Path.class));
+        verify(ssePublisher).sendToUser(
+                eq("user-1"), eq("music_fetch_failed"), anyString());
+    }
+    @Test
     void invalidTrackIdFailsBeforeRepositoryLookup() {
         StepVerifier.create(service().requestFetch("invalid", "user-1"))
-                .expectError(IllegalArgumentException.class)
+                .expectErrorSatisfies(error -> {
+                    assertThat(error).isInstanceOf(AppException.class);
+                    assertThat(((AppException) error).getErrorCode())
+                            .isEqualTo(ErrorCode.MUSIC_REQUEST_INVALID);
+                })
                 .verify();
 
         verify(repository, never()).findById(anyString());
@@ -215,7 +407,12 @@ class SpotifyMusicFetchServiceTest {
             task.run();
         }
     }
+
     private SpotifyMusicFetchService service() {
+        return service(scheduler);
+    }
+
+    private SpotifyMusicFetchService service(Scheduler selectedJobScheduler) {
         return new SpotifyMusicFetchService(
                 repository,
                 lock,
@@ -229,7 +426,8 @@ class SpotifyMusicFetchServiceTest {
                 new ObjectMapper(),
                 transactionalOperator,
                 properties,
-                scheduler);
+                selectedJobScheduler,
+                processScheduler);
     }
 
     private Musics catalogMusic() {

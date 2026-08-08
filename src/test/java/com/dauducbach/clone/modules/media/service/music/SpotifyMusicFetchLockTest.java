@@ -40,6 +40,26 @@ class SpotifyMusicFetchLockTest {
     }
 
     @Test
+    void extendsOnlyThroughAtomicTokenCheckedScript() {
+        ReactiveStringRedisTemplate redis = mock(ReactiveStringRedisTemplate.class);
+        when(redis.execute(
+                any(RedisScript.class),
+                eq(List.of(KEY)),
+                eq(List.of("token-1", "600000"))))
+                .thenReturn(Flux.just(1L));
+
+        StepVerifier.create(new SpotifyMusicFetchLock(redis, properties())
+                        .extend(TRACK_ID, "token-1"))
+                .expectNext(true)
+                .verifyComplete();
+
+        verify(redis).execute(
+                any(RedisScript.class),
+                eq(List.of(KEY)),
+                eq(List.of("token-1", "600000")));
+    }
+
+    @Test
     void releasesOnlyThroughAtomicCompareAndDeleteScript() {
         ReactiveStringRedisTemplate redis = mock(ReactiveStringRedisTemplate.class);
         when(redis.execute(

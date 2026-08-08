@@ -64,6 +64,15 @@ SET @column_exists = (
 );
 SET @sql = IF(
     @column_exists = 1,
+    'UPDATE musics SET release_year = YEAR(release_date) WHERE release_year IS NULL AND release_date IS NOT NULL',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = IF(
+    @column_exists = 1,
     'ALTER TABLE musics DROP COLUMN release_date',
     'SELECT 1'
 );

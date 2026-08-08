@@ -23,7 +23,7 @@ public class ProcessBuilderCliCommandRunner implements CliCommandRunner {
     private final Scheduler scheduler;
 
     public ProcessBuilderCliCommandRunner(
-            @Qualifier("spotifyMusicFetchScheduler") Scheduler scheduler) {
+            @Qualifier("spotifyMusicProcessScheduler") Scheduler scheduler) {
         this.scheduler = scheduler;
     }
 

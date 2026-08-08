@@ -11,6 +11,14 @@ import java.util.List;
 @Component
 public class SpotifyMusicFetchLock {
     private static final String KEY_PREFIX = "music:fetch:lock:";
+    private static final DefaultRedisScript<Long> EXTEND_SCRIPT = new DefaultRedisScript<>(
+            """
+            if redis.call('get', KEYS[1]) == ARGV[1] then
+                return redis.call('pexpire', KEYS[1], ARGV[2])
+            end
+            return 0
+            """,
+            Long.class);
     private static final DefaultRedisScript<Long> RELEASE_SCRIPT = new DefaultRedisScript<>(
             """
             if redis.call('get', KEYS[1]) == ARGV[1] then
@@ -33,6 +41,16 @@ public class SpotifyMusicFetchLock {
     public Mono<Boolean> tryAcquire(String trackId, String token) {
         return redisTemplate.opsForValue()
                 .setIfAbsent(key(trackId), token, properties.getLockTtl())
+                .defaultIfEmpty(false);
+    }
+
+    public Mono<Boolean> extend(String trackId, String token) {
+        return redisTemplate.execute(
+                        EXTEND_SCRIPT,
+                        List.of(key(trackId)),
+                        List.of(token, String.valueOf(properties.getLockTtl().toMillis())))
+                .next()
+                .map(updated -> updated != null && updated > 0)
                 .defaultIfEmpty(false);
     }
 

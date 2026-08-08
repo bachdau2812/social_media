@@ -21,14 +21,21 @@ import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Scheduler;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -52,8 +59,9 @@ public class SpotifyMusicFetchService {
     private final ObjectMapper objectMapper;
     private final TransactionalOperator transactionalOperator;
     private final SpotifyMusicFetchProperties properties;
-    private final Scheduler scheduler;
-    private final ConcurrentHashMap<String, Set<String>> waitersByTrack =
+    private final Scheduler jobScheduler;
+    private final Scheduler processScheduler;
+    private final ConcurrentHashMap<String, FetchNotificationState> notificationsByTrack =
             new ConcurrentHashMap<>();
 
     public SpotifyMusicFetchService(
@@ -69,7 +77,8 @@ public class SpotifyMusicFetchService {
             ObjectMapper objectMapper,
             TransactionalOperator transactionalOperator,
             SpotifyMusicFetchProperties properties,
-            @Qualifier("spotifyMusicFetchScheduler") Scheduler scheduler) {
+            @Qualifier("spotifyMusicFetchScheduler") Scheduler jobScheduler,
+            @Qualifier("spotifyMusicProcessScheduler") Scheduler processScheduler) {
         this.repository = repository;
         this.lock = lock;
         this.oEmbedClient = oEmbedClient;
@@ -82,12 +91,14 @@ public class SpotifyMusicFetchService {
         this.objectMapper = objectMapper;
         this.transactionalOperator = transactionalOperator;
         this.properties = properties;
-        this.scheduler = scheduler;
+        this.jobScheduler = jobScheduler;
+        this.processScheduler = processScheduler;
     }
 
     public Mono<MusicFetchAcceptedResponse> requestFetch(String trackId, String userId) {
         if (trackId == null || !SPOTIFY_TRACK_ID.matcher(trackId).matches()) {
-            return Mono.error(new IllegalArgumentException(
+            return Mono.error(new AppException(
+                    ErrorCode.MUSIC_REQUEST_INVALID,
                     "Spotify trackId must contain 22 base-62 characters"));
         }
         if (userId == null || userId.isBlank()) {
@@ -110,82 +121,176 @@ public class SpotifyMusicFetchService {
     private Mono<MusicFetchAcceptedResponse> requestUnfetched(
             String trackId,
             String userId) {
-        registerWaiter(trackId, userId);
+        FetchRegistration registration = registerWaiter(trackId, userId);
+        FetchNotificationState notifications = registration.state();
+        if (registration.terminal() != null) {
+            return sendTerminal(userId, registration.terminal())
+                    .thenReturn(new MusicFetchAcceptedResponse(
+                            trackId,
+                            MusicFetchAcceptedResponse.Status.PROCESSING));
+        }
+
         String token = UUID.randomUUID().toString();
         return lock.tryAcquire(trackId, token)
                 .flatMap(acquired -> {
                     if (!Boolean.TRUE.equals(acquired)) {
-                        return Mono.just(new MusicFetchAcceptedResponse(
-                                trackId,
-                                MusicFetchAcceptedResponse.Status.PROCESSING));
+                        return repository.findById(trackId)
+                                .flatMap(latest -> Boolean.TRUE.equals(latest.getFetched())
+                                        ? completeSuccess(trackId, notifications, latest)
+                                                .thenReturn(new MusicFetchAcceptedResponse(
+                                                        trackId,
+                                                        MusicFetchAcceptedResponse.Status.ALREADY_FETCHED))
+                                        : Mono.just(new MusicFetchAcceptedResponse(
+                                                trackId,
+                                                MusicFetchAcceptedResponse.Status.PROCESSING)));
                     }
                     Path jobDirectory = properties.resolvedTempRoot()
                             .resolve(trackId + "-" + token)
                             .normalize();
+                    LockHeartbeat heartbeat = startLockHeartbeat(trackId, token);
                     try {
-                        scheduler.schedule(() ->
-                                executeJob(trackId, token, jobDirectory)
-                                        .subscribe(
-                                                unused -> { },
-                                                error -> log.error(
-                                                        "|SpotifyMusicFetchService|job|terminal error|trackId={}|error={}",
-                                                        trackId,
-                                                        error.getMessage())));
+                        jobScheduler.schedule(() -> executeJob(
+                                trackId,
+                                token,
+                                jobDirectory,
+                                notifications,
+                                heartbeat).block());
                     } catch (RuntimeException schedulingError) {
-                        unregisterWaiter(trackId, userId);
-                        return lock.release(trackId, token)
-                                .onErrorResume(error -> Mono.just(false))
-                                .then(Mono.error(new AppException(
-                                        ErrorCode.MUSIC_FETCH_UNAVAILABLE,
-                                        "Spotify music fetch queue is full",
-                                        schedulingError)));
+                        heartbeat.dispose();
+                        AppException unavailable = new AppException(
+                                ErrorCode.MUSIC_FETCH_UNAVAILABLE,
+                                "Spotify music fetch queue is full",
+                                schedulingError);
+                        return completeFailure(trackId, notifications)
+                                .then(lock.release(trackId, token)
+                                        .onErrorResume(error -> Mono.just(false)))
+                                .then(Mono.<MusicFetchAcceptedResponse>error(unavailable))
+                                .doFinally(signal -> retireNotificationState(
+                                        trackId,
+                                        notifications));
                     }
                     return Mono.just(new MusicFetchAcceptedResponse(
                             trackId,
                             MusicFetchAcceptedResponse.Status.STARTED));
                 })
-                .doOnError(error -> unregisterWaiter(trackId, userId));
+                .doOnError(error -> unregisterWaiter(trackId, registration));
     }
 
     private Mono<Void> executeJob(
             String trackId,
             String token,
-            Path jobDirectory) {
+            Path jobDirectory,
+            FetchNotificationState notifications,
+            LockHeartbeat heartbeat) {
         Mono<Musics> fetch = Mono.fromCallable(() -> Files.createDirectories(jobDirectory))
                 .then(repository.findById(trackId)
                         .switchIfEmpty(Mono.error(new AppException(ErrorCode.MUSIC_NOT_FOUND))))
-                .flatMap(music -> resolveThumbnail(music)
-                        .then(spotiFlacClient.download(trackId, jobDirectory))
-                        .flatMap(flacFile -> metadataReader.read(flacFile)
-                                .flatMap(metadata -> audioStorage.uploadMusic(flacFile, trackId)
-                                        .flatMap(upload -> persistFetchedMusic(
-                                                music,
-                                                metadata,
-                                                upload)
-                                                .onErrorResume(error -> cleanupUploadedAsset(
-                                                        upload,
-                                                        error))))));
+                .flatMap(music -> Boolean.TRUE.equals(music.getFetched())
+                        ? Mono.just(music)
+                        : resolveThumbnail(music)
+                                .then(spotiFlacClient.download(trackId, jobDirectory))
+                                .flatMap(flacFile -> metadataReader.read(flacFile)
+                                        .flatMap(metadata -> audioStorage.uploadMusic(flacFile, trackId)
+                                                .flatMap(upload -> persistFetchedMusic(
+                                                        music,
+                                                        metadata,
+                                                        upload)
+                                                        .onErrorResume(error -> cleanupUploadedAsset(
+                                                                upload,
+                                                                error))))));
+        Mono<Musics> guardedFetch = heartbeat.isOwnershipLost()
+                ? Mono.error(lockOwnershipLost())
+                : Mono.firstWithSignal(
+                        fetch,
+                        heartbeat.ownershipLost().then(Mono.never()));
 
-        Mono<Void> outcome = fetch
-                .flatMap(this::publishSuccess)
+        Mono<Void> outcome = guardedFetch
+                .flatMap(music -> completeSuccess(trackId, notifications, music))
                 .onErrorResume(error -> {
                     log.error(
                             "|SpotifyMusicFetchService|job|failed|trackId={}|error={}",
                             trackId,
                             error.getMessage());
-                    return publishFailure(trackId);
+                    return completeFailure(trackId, notifications);
                 });
 
         return outcome
-                .then(finalizeJob(trackId, token, jobDirectory))
+                .then(finalizeJob(trackId, token, jobDirectory, notifications))
                 .onErrorResume(error -> {
                     log.warn(
                             "|SpotifyMusicFetchService|job|finalization failed|trackId={}|error={}",
                             trackId,
                             error.getMessage());
-                    waitersByTrack.remove(trackId);
+                    retireNotificationState(trackId, notifications);
                     return Mono.empty();
+                })
+                .doFinally(signal -> heartbeat.dispose());
+    }
+
+    private LockHeartbeat startLockHeartbeat(String trackId, String token) {
+        Duration ttl = properties.getLockTtl();
+        long ttlNanos = Math.max(1L, ttl.toNanos());
+        Duration period = Duration.ofNanos(Math.max(1L, ttlNanos / 3L));
+        AtomicLong confirmedUntilNanos = new AtomicLong(System.nanoTime() + ttlNanos);
+        Sinks.Empty<Void> ownershipLost = Sinks.empty();
+        AtomicBoolean ownershipLostFlag = new AtomicBoolean();
+        Disposable disposable = Flux.interval(period, period)
+                .onBackpressureDrop()
+                .concatMap(ignored -> renewLockBeforeDeadline(
+                        trackId,
+                        token,
+                        ttlNanos,
+                        period,
+                        confirmedUntilNanos))
+                .doOnNext(owned -> {
+                    if (!owned) {
+                        log.warn(
+                                "|SpotifyMusicFetchService|lock heartbeat lost ownership|trackId={}",
+                                trackId);
+                        ownershipLostFlag.set(true);
+                        ownershipLost.tryEmitError(lockOwnershipLost());
+                    }
+                })
+                .takeUntil(owned -> !owned)
+                .subscribe();
+        return new LockHeartbeat(disposable, ownershipLost.asMono(), ownershipLostFlag);
+    }
+
+    private Mono<Boolean> renewLockBeforeDeadline(
+            String trackId,
+            String token,
+            long ttlNanos,
+            Duration period,
+            AtomicLong confirmedUntilNanos) {
+        long remainingNanos = confirmedUntilNanos.get() - System.nanoTime();
+        if (remainingNanos <= 0L) {
+            return Mono.just(false);
+        }
+        Duration attemptTimeout = Duration.ofNanos(Math.max(
+                1L,
+                Math.min(period.toNanos(), remainingNanos)));
+        return lock.extend(trackId, token)
+                .timeout(attemptTimeout)
+                .map(extended -> {
+                    if (Boolean.TRUE.equals(extended)) {
+                        confirmedUntilNanos.set(System.nanoTime() + ttlNanos);
+                        return true;
+                    }
+                    return false;
+                })
+                .onErrorResume(error -> {
+                    log.warn(
+                            "|SpotifyMusicFetchService|lock heartbeat failed|trackId={}|error={}",
+                            trackId,
+                            error.getMessage());
+                    return Mono.just(System.nanoTime() < confirmedUntilNanos.get());
                 });
+    }
+
+    private AppException lockOwnershipLost() {
+        return new AppException(
+                ErrorCode.MUSIC_FETCH_FAILED,
+                "Spotify music fetch lock ownership was lost");
     }
 
     private Mono<Void> resolveThumbnail(Musics music) {
@@ -245,15 +350,20 @@ public class SpotifyMusicFetchService {
                         payload));
     }
 
-    private Mono<Void> publishSuccess(Musics music) {
+    private Mono<Void> completeSuccess(
+            String trackId,
+            FetchNotificationState notifications,
+            Musics music) {
         return serialize(music)
-                .flatMap(payload -> notifyWaiters(
-                        music.getId(),
-                        SUCCESS_EVENT,
-                        payload));
+                .flatMap(payload -> completeAndNotify(
+                        trackId,
+                        notifications,
+                        new FetchTerminal(SUCCESS_EVENT, payload)));
     }
 
-    private Mono<Void> publishFailure(String trackId) {
+    private Mono<Void> completeFailure(
+            String trackId,
+            FetchNotificationState notifications) {
         return serialize(new MusicFetchFailedEvent(trackId, SAFE_FAILURE_MESSAGE))
                 .onErrorResume(error -> {
                     log.error(
@@ -266,44 +376,47 @@ public class SpotifyMusicFetchService {
                                     + SAFE_FAILURE_MESSAGE
                                     + "\"}");
                 })
-                .flatMap(payload -> notifyWaiters(
+                .flatMap(payload -> completeAndNotify(
                         trackId,
-                        FAILED_EVENT,
-                        payload));
+                        notifications,
+                        new FetchTerminal(FAILED_EVENT, payload)));
     }
 
-    private Mono<Void> notifyWaiters(
+    private Mono<Void> completeAndNotify(
             String trackId,
-            String event,
-            String payload) {
-        Set<String> waiters = takeWaiters(trackId);
+            FetchNotificationState notifications,
+            FetchTerminal terminal) {
+        Set<String> waiters = notifications.complete(terminal);
         return Flux.fromIterable(waiters)
-                .flatMap(userId -> ssePublisher.sendToUser(userId, event, payload)
+                .flatMap(userId -> sendTerminal(userId, terminal)
                         .onErrorResume(error -> {
                             log.warn(
                                     "|SpotifyMusicFetchService|sse failed|trackId={}|userId={}|event={}|error={}",
                                     trackId,
                                     userId,
-                                    event,
+                                    terminal.event(),
                                     error.getMessage());
                             return Mono.empty();
                         }))
                 .then();
     }
 
+    private Mono<Void> sendTerminal(String userId, FetchTerminal terminal) {
+        return ssePublisher.sendToUser(userId, terminal.event(), terminal.payload());
+    }
+
     private Mono<String> serialize(Object payload) {
         return Mono.fromCallable(() -> objectMapper.writeValueAsString(payload));
     }
-
     private Mono<Void> finalizeJob(
             String trackId,
             String token,
-            Path jobDirectory) {
+            Path jobDirectory,
+            FetchNotificationState notifications) {
         return Mono.defer(() -> {
-            waitersByTrack.remove(trackId);
             Mono<Void> tempCleanup = Mono.<Void>fromRunnable(
                             () -> deleteJobDirectory(jobDirectory))
-                    .subscribeOn(scheduler)
+                    .subscribeOn(processScheduler)
                     .onErrorResume(error -> {
                         log.warn(
                                 "|SpotifyMusicFetchService|temp cleanup failed|trackId={}|error={}",
@@ -327,7 +440,9 @@ public class SpotifyMusicFetchService {
                         return Mono.empty();
                     })
                     .then();
-            return tempCleanup.then(lockRelease);
+            return tempCleanup
+                    .then(lockRelease)
+                    .doFinally(signal -> retireNotificationState(trackId, notifications));
         });
     }
 
@@ -362,23 +477,119 @@ public class SpotifyMusicFetchService {
         }
     }
 
-    private void registerWaiter(String trackId, String userId) {
-        waitersByTrack.computeIfAbsent(
-                        trackId,
-                        ignored -> ConcurrentHashMap.newKeySet())
-                .add(userId);
+    private FetchRegistration registerWaiter(String trackId, String userId) {
+        AtomicReference<FetchRegistration> registration = new AtomicReference<>();
+        notificationsByTrack.compute(trackId, (ignored, current) -> {
+            FetchNotificationState state = current == null
+                    ? new FetchNotificationState()
+                    : current;
+            registration.set(state.register(userId));
+            return state;
+        });
+        return registration.get();
     }
 
-    private void unregisterWaiter(String trackId, String userId) {
-        waitersByTrack.computeIfPresent(trackId, (ignored, waiters) -> {
-            waiters.remove(userId);
-            return waiters.isEmpty() ? null : waiters;
+    private void unregisterWaiter(String trackId, FetchRegistration registration) {
+        if (!registration.release()) {
+            return;
+        }
+        notificationsByTrack.compute(trackId, (ignored, current) -> {
+            if (current != registration.state()) {
+                return current;
+            }
+            return current.unregisterAndIsEmpty(registration.userId())
+                    ? null
+                    : current;
         });
     }
 
-    private Set<String> takeWaiters(String trackId) {
-        Set<String> waiters = waitersByTrack.remove(trackId);
-        return waiters == null ? Set.of() : Set.copyOf(waiters);
+    private void retireNotificationState(
+            String trackId,
+            FetchNotificationState notifications) {
+        notificationsByTrack.compute(
+                trackId,
+                (ignored, current) -> current == notifications ? null : current);
+    }
+
+    private record FetchTerminal(String event, String payload) { }
+
+    private record LockHeartbeat(
+            Disposable disposable,
+            Mono<Void> ownershipLost,
+            AtomicBoolean ownershipLostFlag) {
+        boolean isOwnershipLost() {
+            return ownershipLostFlag.get();
+        }
+
+        void dispose() {
+            disposable.dispose();
+        }
+    }
+
+    private static final class FetchRegistration {
+        private final FetchNotificationState state;
+        private final String userId;
+        private final FetchTerminal terminal;
+        private final AtomicBoolean active;
+
+        private FetchRegistration(
+                FetchNotificationState state,
+                String userId,
+                FetchTerminal terminal) {
+            this.state = state;
+            this.userId = userId;
+            this.terminal = terminal;
+            this.active = new AtomicBoolean(terminal == null);
+        }
+
+        FetchNotificationState state() {
+            return state;
+        }
+
+        String userId() {
+            return userId;
+        }
+
+        FetchTerminal terminal() {
+            return terminal;
+        }
+
+        boolean release() {
+            return active.compareAndSet(true, false);
+        }
+    }
+
+    private static final class FetchNotificationState {
+        private final Map<String, Integer> waiterCounts = new HashMap<>();
+        private FetchTerminal terminal;
+
+        synchronized FetchRegistration register(String userId) {
+            if (terminal == null) {
+                waiterCounts.merge(userId, 1, Integer::sum);
+            }
+            return new FetchRegistration(this, userId, terminal);
+        }
+
+        synchronized boolean unregisterAndIsEmpty(String userId) {
+            Integer count = waiterCounts.get(userId);
+            if (count != null) {
+                if (count <= 1) {
+                    waiterCounts.remove(userId);
+                } else {
+                    waiterCounts.put(userId, count - 1);
+                }
+            }
+            return terminal == null && waiterCounts.isEmpty();
+        }
+
+        synchronized Set<String> complete(FetchTerminal result) {
+            if (terminal == null) {
+                terminal = result;
+            }
+            Set<String> snapshot = Set.copyOf(waiterCounts.keySet());
+            waiterCounts.clear();
+            return snapshot;
+        }
     }
 
     private String firstNonBlank(String preferred, String fallback) {
