@@ -1,6 +1,6 @@
-package com.dauducbach.clone.modules.user.repositoty;
+package com.dauducbach.clone.modules.post.repositoty.story;
 
-import com.dauducbach.clone.modules.user.entity.UserStories;
+import com.dauducbach.clone.modules.post.entity.story.UserStories;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.data.repository.reactive.ReactiveCrudRepository;

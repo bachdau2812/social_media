@@ -1,4 +1,4 @@
-package com.dauducbach.clone.modules.user.dto.response;
+package com.dauducbach.clone.modules.post.dto.story.response;
 
 import java.time.Instant;
 

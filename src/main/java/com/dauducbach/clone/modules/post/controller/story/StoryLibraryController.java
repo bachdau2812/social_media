@@ -1,15 +1,15 @@
-package com.dauducbach.clone.modules.user.controller;
+package com.dauducbach.clone.modules.post.controller.story;
 
 import com.dauducbach.clone.commons.response.ApiResponse;
 import com.dauducbach.clone.commons.response.PageResponse;
-import com.dauducbach.clone.modules.user.dto.request.StoryHighlightRequest;
-import com.dauducbach.clone.modules.user.dto.request.StoryReplyRequest;
-import com.dauducbach.clone.modules.user.dto.response.StoryHighlightResponse;
-import com.dauducbach.clone.modules.user.dto.response.StoryViewerResponse;
-import com.dauducbach.clone.modules.user.dto.response.StoryReplyResponse;
+import com.dauducbach.clone.modules.post.dto.story.request.StoryHighlightRequest;
+import com.dauducbach.clone.modules.post.dto.story.request.StoryReplyRequest;
+import com.dauducbach.clone.modules.post.dto.story.response.StoryHighlightResponse;
+import com.dauducbach.clone.modules.post.dto.story.response.StoryViewerResponse;
+import com.dauducbach.clone.modules.post.dto.story.response.StoryReplyResponse;
 import jakarta.validation.Valid;
-import com.dauducbach.clone.modules.user.service.StoryLibraryService;
-import com.dauducbach.clone.modules.user.service.StoryReactionService;
+import com.dauducbach.clone.modules.post.service.story.StoryLibraryService;
+import com.dauducbach.clone.modules.post.service.story.StoryReactionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;

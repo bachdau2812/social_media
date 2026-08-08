@@ -1,4 +1,4 @@
-package com.dauducbach.clone.modules.user.entity;
+package com.dauducbach.clone.modules.post.entity.story;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -15,12 +15,12 @@ import java.time.Instant;
 @NoArgsConstructor
 @AllArgsConstructor
 @FieldDefaults(level = lombok.AccessLevel.PRIVATE)
-@Table("story_views")
-public class StoryView {
+@Table("story_highlight_items")
+public class StoryHighlightItem {
     @Id
     String id;
+    String highlightId;
     String storyId;
-    String viewerId;
-    String reaction;
-    Instant viewedAt;
+    Integer orderNumber;
+    Instant createdAt;
 }

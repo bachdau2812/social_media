@@ -1,10 +1,10 @@
-package com.dauducbach.clone.modules.user.service;
+package com.dauducbach.clone.modules.post.service.story;
 
 import com.dauducbach.clone.utils.GsonUtils;
-import com.dauducbach.clone.modules.user.entity.StoryView;
-import com.dauducbach.clone.modules.user.entity.UserStories;
-import com.dauducbach.clone.modules.user.repositoty.StoryViewRepository;
-import com.dauducbach.clone.modules.user.repositoty.UserStoriesRepository;
+import com.dauducbach.clone.modules.post.entity.story.StoryView;
+import com.dauducbach.clone.modules.post.entity.story.UserStories;
+import com.dauducbach.clone.modules.post.repositoty.story.StoryViewRepository;
+import com.dauducbach.clone.modules.post.repositoty.story.UserStoriesRepository;
 import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

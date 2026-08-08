@@ -1,6 +1,6 @@
-package com.dauducbach.clone.modules.user.repositoty;
+package com.dauducbach.clone.modules.post.repositoty.story;
 
-import com.dauducbach.clone.modules.user.entity.StoryHighlightItem;
+import com.dauducbach.clone.modules.post.entity.story.StoryHighlightItem;
 import org.springframework.data.repository.reactive.ReactiveCrudRepository;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;

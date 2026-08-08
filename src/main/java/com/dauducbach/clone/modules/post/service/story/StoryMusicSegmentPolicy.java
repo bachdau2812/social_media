@@ -1,4 +1,4 @@
-package com.dauducbach.clone.modules.user.service;
+package com.dauducbach.clone.modules.post.service.story;
 
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;

@@ -1,14 +1,15 @@
-package com.dauducbach.clone.modules.user.service;
+package com.dauducbach.clone.modules.post.service.story;
 
 import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
 import com.dauducbach.clone.modules.user.dto.response.UserDiscoveryResponse;
 import com.dauducbach.clone.modules.media.entity.music.Musics;
-import com.dauducbach.clone.modules.user.entity.StoryView;
-import com.dauducbach.clone.modules.user.entity.UserStories;
+import com.dauducbach.clone.modules.post.entity.story.StoryView;
+import com.dauducbach.clone.modules.post.entity.story.UserStories;
 import com.dauducbach.clone.modules.media.repositoty.music.MusicsRepository;
-import com.dauducbach.clone.modules.user.repositoty.StoryViewRepository;
-import com.dauducbach.clone.modules.user.repositoty.UserStoriesRepository;
+import com.dauducbach.clone.modules.post.repositoty.story.StoryViewRepository;
+import com.dauducbach.clone.modules.post.repositoty.story.UserStoriesRepository;
+import com.dauducbach.clone.modules.user.service.UserDiscoveryHydrator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;

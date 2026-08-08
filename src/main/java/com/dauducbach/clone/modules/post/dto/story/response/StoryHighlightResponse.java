@@ -1,6 +1,6 @@
-package com.dauducbach.clone.modules.user.dto.response;
+package com.dauducbach.clone.modules.post.dto.story.response;
 
-import com.dauducbach.clone.modules.user.entity.UserStories;
+import com.dauducbach.clone.modules.post.entity.story.UserStories;
 
 import java.time.Instant;
 import java.util.List;

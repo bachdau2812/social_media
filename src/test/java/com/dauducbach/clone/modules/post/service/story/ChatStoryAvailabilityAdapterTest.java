@@ -1,9 +1,9 @@
-package com.dauducbach.clone.modules.user.service;
+package com.dauducbach.clone.modules.post.service.story;
 
 import com.dauducbach.clone.modules.chat.service.StoryAvailabilityPort;
 import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
-import com.dauducbach.clone.modules.user.entity.UserStories;
-import com.dauducbach.clone.modules.user.repositoty.UserStoriesRepository;
+import com.dauducbach.clone.modules.post.entity.story.UserStories;
+import com.dauducbach.clone.modules.post.repositoty.story.UserStoriesRepository;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;

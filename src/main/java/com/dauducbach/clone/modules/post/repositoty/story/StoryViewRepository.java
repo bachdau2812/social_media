@@ -1,6 +1,6 @@
-package com.dauducbach.clone.modules.user.repositoty;
+package com.dauducbach.clone.modules.post.repositoty.story;
 
-import com.dauducbach.clone.modules.user.entity.StoryView;
+import com.dauducbach.clone.modules.post.entity.story.StoryView;
 import org.springframework.data.repository.reactive.ReactiveCrudRepository;
 import org.springframework.data.r2dbc.repository.Modifying;
 import org.springframework.data.r2dbc.repository.Query;

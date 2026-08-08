@@ -1,14 +1,14 @@
-package com.dauducbach.clone.modules.user.service;
+package com.dauducbach.clone.modules.post.service.story;
 
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.chat.service.StoryReplyMessaging;
-import com.dauducbach.clone.modules.user.dto.request.StoryReplyRequest;
-import com.dauducbach.clone.modules.user.entity.UserStories;
-import com.dauducbach.clone.modules.user.repositoty.StoryHighlightItemRepository;
-import com.dauducbach.clone.modules.user.repositoty.StoryHighlightRepository;
-import com.dauducbach.clone.modules.user.repositoty.StoryViewRepository;
-import com.dauducbach.clone.modules.user.repositoty.UserStoriesRepository;
+import com.dauducbach.clone.modules.post.dto.story.request.StoryReplyRequest;
+import com.dauducbach.clone.modules.post.entity.story.UserStories;
+import com.dauducbach.clone.modules.post.repositoty.story.StoryHighlightItemRepository;
+import com.dauducbach.clone.modules.post.repositoty.story.StoryHighlightRepository;
+import com.dauducbach.clone.modules.post.repositoty.story.StoryViewRepository;
+import com.dauducbach.clone.modules.post.repositoty.story.UserStoriesRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
 import org.springframework.r2dbc.core.DatabaseClient;

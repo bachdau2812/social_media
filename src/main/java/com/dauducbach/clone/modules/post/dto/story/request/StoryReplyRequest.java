@@ -1,4 +1,4 @@
-package com.dauducbach.clone.modules.user.dto.request;
+package com.dauducbach.clone.modules.post.dto.story.request;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;

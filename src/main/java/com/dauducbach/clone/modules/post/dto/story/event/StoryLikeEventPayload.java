@@ -1,4 +1,4 @@
-package com.dauducbach.clone.modules.user.dto.event;
+package com.dauducbach.clone.modules.post.dto.story.event;
 
 import java.time.Instant;
 
