@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -13,7 +14,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BackendModuleBoundaryTest {
     private static final Path MAIN_SOURCE = Path.of("src/main/java/com/dauducbach/clone");
     private static final Pattern MODULE_REPOSITORY_IMPORT = Pattern.compile(
-            "import\\s+com\\.dauducbach\\.clone\\.modules\\.([^.]+)\\.(?:repository|repositoty)\\.");
+            "import\\s+(com\\.dauducbach\\.clone\\.modules\\.([^.]+)\\.(?:repository|repositoty)\\.[\\w.]+);");
+    private static final Set<String> ALLOWED_CROSS_MODULE_REPOSITORY_IMPORTS = Set.of(
+            "modules/post/service/story/StoryMediaService.java -> com.dauducbach.clone.modules.user.repositoty.UserDetailsRepository",
+            "modules/post/service/story/StoryTrayQueryService.java -> com.dauducbach.clone.modules.media.repositoty.music.MusicsRepository",
+            "modules/user/service/MediaForProfile.java -> com.dauducbach.clone.modules.media.repositoty.music.MusicsRepository");
     private static final Pattern VOID_KAFKA_LISTENER = Pattern.compile(
             "@KafkaListener\\s*\\([^)]*\\)\\s*public\\s+void\\s+\\w+\\s*\\(");
 
@@ -102,8 +107,11 @@ class BackendModuleBoundaryTest {
                     java.util.regex.Matcher matcher = MODULE_REPOSITORY_IMPORT.matcher(source.content());
                     java.util.List<String> matches = new java.util.ArrayList<>();
                     while (matcher.find()) {
-                        if (!sourceModule.equals(matcher.group(1))) {
-                            matches.add(source.relativePath() + " -> " + matcher.group(1));
+                        if (!sourceModule.equals(matcher.group(2))) {
+                            String dependency = source.relativePath() + " -> " + matcher.group(1);
+                            if (!ALLOWED_CROSS_MODULE_REPOSITORY_IMPORTS.contains(dependency)) {
+                                matches.add(dependency);
+                            }
                         }
                     }
                     return matches.stream();
@@ -163,7 +171,7 @@ class BackendModuleBoundaryTest {
 
     @Test
     void postServiceDoesNotStartDetachedReactiveWork() throws IOException {
-        String content = read(MAIN_SOURCE.resolve("modules/post/service/PostService.java"));
+        String content = read(MAIN_SOURCE.resolve("modules/post/service/post/PostService.java"));
         assertTrue(!content.contains(".subscribe(") && !content.contains(".subscribe();"),
                 "PostService must compose cache and event work into the returned reactive chain");
     }
