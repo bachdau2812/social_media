@@ -127,3 +127,13 @@ auth:
 #    http://localhost:8888/app/oauth2/authorization/google
 #    http://localhost:8888/app/oauth2/authorization/facebook
 #    http://localhost:8888/app/oauth2/authorization/github
+
+music:
+  spotify:
+    spotiflac-command: spotiflac
+    ffprobe-command: ffprobe
+    temp-root: ""
+    process-timeout: 5m
+    lock-ttl: 10m
+    max-concurrent-fetches: 2
+    max-queued-fetches: 50
