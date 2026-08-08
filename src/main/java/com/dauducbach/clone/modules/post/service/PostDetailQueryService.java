@@ -15,9 +15,9 @@ import com.dauducbach.clone.modules.media.entity.Media;
 import com.dauducbach.clone.modules.post.entity.PostDetails;
 import com.dauducbach.clone.modules.post.entity.PostItem;
 import com.dauducbach.clone.modules.post.repositoty.PostItemRepository;
-import com.dauducbach.clone.modules.user.entity.Musics;
+import com.dauducbach.clone.modules.media.entity.music.Musics;
 import com.dauducbach.clone.modules.user.entity.UserDetails;
-import com.dauducbach.clone.modules.user.service.MusicService;
+import com.dauducbach.clone.modules.media.service.music.MusicService;
 import com.dauducbach.clone.modules.user.service.UserDetailsService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -194,3 +194,4 @@ public class PostDetailQueryService {
         return value != null && !value.isBlank();
     }
 }
+

@@ -1,12 +1,12 @@
-package com.dauducbach.clone.modules.user.controller;
+package com.dauducbach.clone.modules.media.controller;
 
 import com.dauducbach.clone.commons.response.ApiResponse;
 import com.dauducbach.clone.commons.response.PageResponse;
-import com.dauducbach.clone.modules.user.dto.request.JamendoMusicImportRequest;
-import com.dauducbach.clone.modules.user.dto.request.MusicCreateRequest;
-import com.dauducbach.clone.modules.user.dto.response.JamendoMusicImportResponse;
-import com.dauducbach.clone.modules.user.entity.Musics;
-import com.dauducbach.clone.modules.user.service.MusicService;
+import com.dauducbach.clone.modules.media.dto.music.request.JamendoMusicImportRequest;
+import com.dauducbach.clone.modules.media.dto.music.request.MusicCreateRequest;
+import com.dauducbach.clone.modules.media.dto.music.response.JamendoMusicImportResponse;
+import com.dauducbach.clone.modules.media.entity.music.Musics;
+import com.dauducbach.clone.modules.media.service.music.MusicService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -68,3 +68,4 @@ public class MusicsController {
                         .build());
     }
 }
+

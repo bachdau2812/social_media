@@ -16,11 +16,11 @@ import com.dauducbach.clone.modules.user.dto.request.AvatarUploadRequest;
 import com.dauducbach.clone.modules.user.dto.request.MusicSelectRequest;
 import com.dauducbach.clone.modules.user.dto.request.StoryCreateRequest;
 import com.dauducbach.clone.modules.user.dto.response.ProfileMediaUploadResponse;
-import com.dauducbach.clone.modules.user.entity.Musics;
+import com.dauducbach.clone.modules.media.entity.music.Musics;
 import com.dauducbach.clone.modules.user.entity.UserMusics;
 import com.dauducbach.clone.modules.user.entity.StoryView;
 import com.dauducbach.clone.modules.user.entity.UserStories;
-import com.dauducbach.clone.modules.user.repositoty.MusicsRepository;
+import com.dauducbach.clone.modules.media.repositoty.music.MusicsRepository;
 import com.dauducbach.clone.modules.user.repositoty.UserDetailsRepository;
 import com.dauducbach.clone.modules.user.repositoty.UserStoriesRepository;
 import com.dauducbach.clone.utils.GsonUtils;
@@ -728,3 +728,4 @@ public class MediaForProfile {
     private record StorySubmission(UserStories story, boolean shouldScan) {
     }
 }
+

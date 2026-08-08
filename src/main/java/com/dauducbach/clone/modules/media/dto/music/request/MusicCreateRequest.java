@@ -1,4 +1,4 @@
-package com.dauducbach.clone.modules.user.dto.request;
+package com.dauducbach.clone.modules.media.dto.music.request;
 
 import jakarta.validation.constraints.NotBlank;
 
@@ -20,3 +20,4 @@ public record MusicCreateRequest(
         LocalDate releaseDate
 ) {
 }
+

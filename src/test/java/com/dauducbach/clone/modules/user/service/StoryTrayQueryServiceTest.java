@@ -3,10 +3,10 @@ package com.dauducbach.clone.modules.user.service;
 import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
 import com.dauducbach.clone.modules.user.dto.response.UserDiscoveryResponse;
-import com.dauducbach.clone.modules.user.entity.Musics;
+import com.dauducbach.clone.modules.media.entity.music.Musics;
 import com.dauducbach.clone.modules.user.entity.StoryView;
 import com.dauducbach.clone.modules.user.entity.UserStories;
-import com.dauducbach.clone.modules.user.repositoty.MusicsRepository;
+import com.dauducbach.clone.modules.media.repositoty.music.MusicsRepository;
 import com.dauducbach.clone.modules.user.repositoty.StoryViewRepository;
 import com.dauducbach.clone.modules.user.repositoty.UserStoriesRepository;
 import org.junit.jupiter.api.Test;
@@ -127,3 +127,4 @@ class StoryTrayQueryServiceTest {
                 .verifyComplete();
     }
 }
+

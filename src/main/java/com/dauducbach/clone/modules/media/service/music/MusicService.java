@@ -1,4 +1,4 @@
-package com.dauducbach.clone.modules.user.service;
+package com.dauducbach.clone.modules.media.service.music;
 
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
@@ -6,11 +6,11 @@ import com.dauducbach.clone.commons.response.PageResponse;
 import com.dauducbach.clone.modules.media.dto.response.MediaAudioUploadResult;
 import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
 import com.dauducbach.clone.modules.media.service.MediaService;
-import com.dauducbach.clone.modules.user.dto.request.JamendoMusicImportRequest;
-import com.dauducbach.clone.modules.user.dto.request.MusicCreateRequest;
-import com.dauducbach.clone.modules.user.dto.response.JamendoMusicImportResponse;
-import com.dauducbach.clone.modules.user.entity.Musics;
-import com.dauducbach.clone.modules.user.repositoty.MusicsRepository;
+import com.dauducbach.clone.modules.media.dto.music.request.JamendoMusicImportRequest;
+import com.dauducbach.clone.modules.media.dto.music.request.MusicCreateRequest;
+import com.dauducbach.clone.modules.media.dto.music.response.JamendoMusicImportResponse;
+import com.dauducbach.clone.modules.media.entity.music.Musics;
+import com.dauducbach.clone.modules.media.repositoty.music.MusicsRepository;
 import com.dauducbach.clone.utils.GsonUtils;
 import com.dauducbach.clone.utils.KafkaUtils;
 import com.google.gson.JsonArray;
@@ -410,3 +410,4 @@ public class MusicService {
         FAILED
     }
 }
+

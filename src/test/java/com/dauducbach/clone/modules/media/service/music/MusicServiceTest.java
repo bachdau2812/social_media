@@ -1,13 +1,13 @@
-package com.dauducbach.clone.modules.user.service;
+package com.dauducbach.clone.modules.media.service.music;
 
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
 import com.dauducbach.clone.modules.media.service.MediaService;
-import com.dauducbach.clone.modules.user.dto.request.JamendoMusicImportRequest;
-import com.dauducbach.clone.modules.user.dto.request.MusicCreateRequest;
-import com.dauducbach.clone.modules.user.entity.Musics;
-import com.dauducbach.clone.modules.user.repositoty.MusicsRepository;
+import com.dauducbach.clone.modules.media.dto.music.request.JamendoMusicImportRequest;
+import com.dauducbach.clone.modules.media.dto.music.request.MusicCreateRequest;
+import com.dauducbach.clone.modules.media.entity.music.Musics;
+import com.dauducbach.clone.modules.media.repositoty.music.MusicsRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -122,3 +122,4 @@ class MusicServiceTest {
         );
     }
 }
+

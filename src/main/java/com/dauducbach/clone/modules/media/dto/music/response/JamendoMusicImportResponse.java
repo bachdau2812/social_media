@@ -1,4 +1,4 @@
-package com.dauducbach.clone.modules.user.dto.response;
+package com.dauducbach.clone.modules.media.dto.music.response;
 
 public record JamendoMusicImportResponse(
         int totalReceived,
@@ -8,3 +8,4 @@ public record JamendoMusicImportResponse(
         String message
 ) {
 }
+

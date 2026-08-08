@@ -1,6 +1,6 @@
-package com.dauducbach.clone.modules.user.repositoty;
+package com.dauducbach.clone.modules.media.repositoty.music;
 
-import com.dauducbach.clone.modules.user.entity.Musics;
+import com.dauducbach.clone.modules.media.entity.music.Musics;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.data.repository.reactive.ReactiveCrudRepository;
@@ -73,3 +73,4 @@ public interface MusicsRepository extends ReactiveCrudRepository<Musics, String>
             """)
     Mono<Long> countSearchByCategory(String keyword, String category);
 }
+

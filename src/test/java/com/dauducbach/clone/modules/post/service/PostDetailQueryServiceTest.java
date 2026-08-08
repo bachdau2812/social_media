@@ -8,9 +8,9 @@ import com.dauducbach.clone.modules.post.entity.PostItem;
 import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import com.dauducbach.clone.modules.media.service.MediaService;
 import com.dauducbach.clone.modules.post.repositoty.PostItemRepository;
-import com.dauducbach.clone.modules.user.entity.Musics;
+import com.dauducbach.clone.modules.media.entity.music.Musics;
 import com.dauducbach.clone.modules.user.entity.UserDetails;
-import com.dauducbach.clone.modules.user.service.MusicService;
+import com.dauducbach.clone.modules.media.service.music.MusicService;
 import com.dauducbach.clone.modules.user.service.UserDetailsService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -132,3 +132,4 @@ class PostDetailQueryServiceTest {
                 .verifyComplete();
     }
 }
+

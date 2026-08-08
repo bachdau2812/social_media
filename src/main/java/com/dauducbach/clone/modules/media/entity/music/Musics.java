@@ -1,4 +1,4 @@
-package com.dauducbach.clone.modules.user.entity;
+package com.dauducbach.clone.modules.media.entity.music;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -29,3 +29,4 @@ public class Musics {
     String category;
     LocalDate releaseDate;
 }
+
