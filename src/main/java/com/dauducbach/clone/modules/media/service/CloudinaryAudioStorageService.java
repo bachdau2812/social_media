@@ -10,6 +10,8 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 
 @Service
@@ -20,9 +22,9 @@ public class CloudinaryAudioStorageService {
 
     private final Cloudinary cloudinary;
 
-    public Mono<MediaAudioUploadResult> uploadMusic(byte[] bytes, String publicId) {
-        if (bytes == null || bytes.length == 0) {
-            return Mono.error(new IllegalArgumentException("Audio bytes are required"));
+    public Mono<MediaAudioUploadResult> uploadMusic(Path file, String publicId) {
+        if (file == null || !Files.isRegularFile(file)) {
+            return Mono.error(new IllegalArgumentException("Audio file is required"));
         }
         if (publicId == null || publicId.isBlank()) {
             return Mono.error(new IllegalArgumentException("Audio publicId is required"));
@@ -30,11 +32,13 @@ public class CloudinaryAudioStorageService {
 
         return Mono.fromCallable(() -> {
                     @SuppressWarnings("unchecked")
-                    Map<String, Object> result = cloudinary.uploader().upload(bytes, ObjectUtils.asMap(
-                            "resource_type", "video",
-                            "folder", MUSIC_FOLDER,
-                            "public_id", publicId.trim()
-                    ));
+                    Map<String, Object> result = cloudinary.uploader().upload(
+                            file.toFile(),
+                            ObjectUtils.asMap(
+                                    "resource_type", "video",
+                                    "folder", MUSIC_FOLDER,
+                                    "public_id", publicId.trim(),
+                                    "overwrite", true));
                     return toResult(result);
                 })
                 .subscribeOn(Schedulers.boundedElastic())

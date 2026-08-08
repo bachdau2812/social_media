@@ -221,7 +221,7 @@ public class MediaService {
                 ));
     }
 
-    public Mono<Media> saveImportedMusicMedia(
+    public Mono<Media> saveFetchedMusicMedia(
             String musicId,
             String displayName,
             com.dauducbach.clone.modules.media.dto.response.MediaAudioUploadResult uploadResult
@@ -232,47 +232,68 @@ public class MediaService {
                     "musicId and uploadResult are required"));
         }
 
-        log.info("|MediaService|saveImportedMusicMedia|start|musicId={}", musicId);
-        Instant now = Instant.now();
-        Media media = Media.builder()
-                .assetId(uploadResult.assetId() == null
-                        ? UUID.randomUUID().toString()
-                        : uploadResult.assetId())
-                .publicId(uploadResult.publicId() == null
-                        ? musicId
-                        : uploadResult.publicId())
-                .width(uploadResult.width())
-                .height(uploadResult.height())
-                .mediaFormat(uploadResult.mediaFormat() == null
-                        ? "mp3"
-                        : uploadResult.mediaFormat())
-                .resourceType(uploadResult.resourceType() == null
-                        ? "video"
-                        : uploadResult.resourceType())
-                .bytes(uploadResult.bytes())
-                .url(uploadResult.url())
-                .secureUrl(uploadResult.secureUrl())
-                .ownerId(musicId)
-                .ownerType(OwnerType.MUSIC)
-                .displayName(displayName)
-                .version(uploadResult.version())
-                .versionId(uploadResult.versionId())
-                .createdAt(now)
-                .updatedAt(now)
-                .build();
+        String cleanMusicId = musicId.trim();
+        String publicId = uploadResult.publicId() == null || uploadResult.publicId().isBlank()
+                ? cleanMusicId
+                : uploadResult.publicId().trim();
+        log.info("|MediaService|saveFetchedMusicMedia|start|musicId={}|publicId={}",
+                cleanMusicId, publicId);
 
-        return r2dbcEntityTemplate.insert(Media.class).using(media)
+        return mediaRepository.findByPublicId(publicId)
+                .flatMap(existing -> {
+                    if (cleanMusicId.equals(existing.getOwnerId())
+                            && OwnerType.MUSIC == existing.getOwnerType()) {
+                        log.info(
+                                "|MediaService|saveFetchedMusicMedia|idempotent hit|musicId={}|publicId={}",
+                                cleanMusicId, publicId);
+                        return Mono.just(existing);
+                    }
+                    return Mono.error(new AppException(
+                            ErrorCode.MEDIA_SAVE_FAILED,
+                            String.format(
+                                    "Media publicId=%s already belongs to ownerId=%s ownerType=%s",
+                                    publicId, existing.getOwnerId(), existing.getOwnerType())));
+                })
+                .switchIfEmpty(Mono.defer(() -> {
+                    Instant now = Instant.now();
+                    Media media = Media.builder()
+                            .assetId(uploadResult.assetId() == null
+                                    ? UUID.randomUUID().toString()
+                                    : uploadResult.assetId())
+                            .publicId(publicId)
+                            .width(uploadResult.width())
+                            .height(uploadResult.height())
+                            .mediaFormat(uploadResult.mediaFormat() == null
+                                    ? "flac"
+                                    : uploadResult.mediaFormat())
+                            .resourceType(uploadResult.resourceType() == null
+                                    ? "video"
+                                    : uploadResult.resourceType())
+                            .bytes(uploadResult.bytes())
+                            .url(uploadResult.url())
+                            .secureUrl(uploadResult.secureUrl())
+                            .ownerId(cleanMusicId)
+                            .ownerType(OwnerType.MUSIC)
+                            .displayName(displayName)
+                            .version(uploadResult.version())
+                            .versionId(uploadResult.versionId())
+                            .createdAt(now)
+                            .updatedAt(now)
+                            .build();
+                    return r2dbcEntityTemplate.insert(Media.class).using(media);
+                }))
                 .doOnSuccess(saved -> log.info(
-                        "|MediaService|saveImportedMusicMedia|saved|musicId={}|assetId={}|publicId={}",
-                        musicId, saved.getAssetId(), saved.getPublicId()))
+                        "|MediaService|saveFetchedMusicMedia|saved|musicId={}|assetId={}|publicId={}",
+                        cleanMusicId, saved.getAssetId(), saved.getPublicId()))
                 .doOnError(error -> log.error(
-                        "|MediaService|saveImportedMusicMedia|failed|musicId={}|error={}",
-                        musicId, error.getMessage()))
-                .onErrorMap(error -> new AppException(
-                        ErrorCode.MEDIA_SAVE_FAILED,
-                        String.format("Save imported music media failed for musicId=%s", musicId),
-                        error
-                ));
+                        "|MediaService|saveFetchedMusicMedia|failed|musicId={}|error={}",
+                        cleanMusicId, error.getMessage()))
+                .onErrorMap(error -> error instanceof AppException
+                        ? error
+                        : new AppException(
+                                ErrorCode.MEDIA_SAVE_FAILED,
+                                String.format("Save fetched music media failed for musicId=%s", cleanMusicId),
+                                error));
     }
 
     public Mono<PageResponse<Media>> getProfileMedia(String userId, OwnerType ownerType, int page, int size) {

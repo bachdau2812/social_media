@@ -2,6 +2,7 @@ package com.dauducbach.clone.modules.media.service;
 
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.modules.media.constant.OwnerType;
+import com.dauducbach.clone.modules.media.dto.response.MediaAudioUploadResult;
 import com.dauducbach.clone.modules.media.entity.Media;
 import com.dauducbach.clone.modules.media.repository.MediaRepository;
 import org.junit.jupiter.api.Test;
@@ -110,6 +111,76 @@ class MediaServiceTest {
         when(repository.findByPublicId("public-3")).thenReturn(Mono.just(existing));
 
         StepVerifier.create(service.registerFetchedMedia(fetched, "message-2", OwnerType.CHAT_MESSAGE))
+                .expectError(AppException.class)
+                .verify();
+
+        verifyNoInteractions(cloudinary, template);
+    }
+
+    @Test
+    void saveFetchedMusicMediaIsIdempotentForTheSameMusicOwner() {
+        MediaRepository repository = mock(MediaRepository.class);
+        CloudinaryMediaService cloudinary = mock(CloudinaryMediaService.class);
+        R2dbcEntityTemplate template = mock(R2dbcEntityTemplate.class);
+        @SuppressWarnings("unchecked")
+        org.springframework.data.r2dbc.core.ReactiveInsertOperation.ReactiveInsert<Media> insert =
+                mock(org.springframework.data.r2dbc.core.ReactiveInsertOperation.ReactiveInsert.class);
+        MediaService service = new MediaService(repository, cloudinary, template);
+        MediaAudioUploadResult upload = new MediaAudioUploadResult(
+                "asset-music", "1Gqm6KaobG2A1mFVjGnJsS", 0, 0,
+                "flac", "video", 1234,
+                "http://cdn/song.flac", "https://cdn/song.flac", "1", "version-1");
+        Media existing = Media.builder()
+                .assetId("asset-music")
+                .publicId("1Gqm6KaobG2A1mFVjGnJsS")
+                .ownerId("1Gqm6KaobG2A1mFVjGnJsS")
+                .ownerType(OwnerType.MUSIC)
+                .build();
+
+        when(repository.findByPublicId("1Gqm6KaobG2A1mFVjGnJsS"))
+                .thenReturn(Mono.empty(), Mono.just(existing));
+        when(template.insert(Media.class)).thenReturn(insert);
+        when(insert.using(org.mockito.ArgumentMatchers.any(Media.class)))
+                .thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+
+        StepVerifier.create(service.saveFetchedMusicMedia(
+                        "1Gqm6KaobG2A1mFVjGnJsS", "Song", upload))
+                .assertNext(saved -> {
+                    org.assertj.core.api.Assertions.assertThat(saved.getOwnerId())
+                            .isEqualTo("1Gqm6KaobG2A1mFVjGnJsS");
+                    org.assertj.core.api.Assertions.assertThat(saved.getOwnerType())
+                            .isEqualTo(OwnerType.MUSIC);
+                })
+                .verifyComplete();
+
+        StepVerifier.create(service.saveFetchedMusicMedia(
+                        "1Gqm6KaobG2A1mFVjGnJsS", "Song", upload))
+                .expectNext(existing)
+                .verifyComplete();
+
+        org.mockito.Mockito.verify(insert, org.mockito.Mockito.times(1))
+                .using(org.mockito.ArgumentMatchers.any(Media.class));
+    }
+
+    @Test
+    void saveFetchedMusicMediaRejectsConflictingPublicIdOwnership() {
+        MediaRepository repository = mock(MediaRepository.class);
+        CloudinaryMediaService cloudinary = mock(CloudinaryMediaService.class);
+        R2dbcEntityTemplate template = mock(R2dbcEntityTemplate.class);
+        MediaService service = new MediaService(repository, cloudinary, template);
+        MediaAudioUploadResult upload = new MediaAudioUploadResult(
+                "asset-music", "stable-track-id", 0, 0,
+                "flac", "video", 1234,
+                "http://cdn/song.flac", "https://cdn/song.flac", "1", "version-1");
+        Media existing = Media.builder()
+                .assetId("asset-music")
+                .publicId("stable-track-id")
+                .ownerId("another-track")
+                .ownerType(OwnerType.MUSIC)
+                .build();
+        when(repository.findByPublicId("stable-track-id")).thenReturn(Mono.just(existing));
+
+        StepVerifier.create(service.saveFetchedMusicMedia("track-id", "Song", upload))
                 .expectError(AppException.class)
                 .verify();
 

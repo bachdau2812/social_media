@@ -1,5 +1,6 @@
 package com.dauducbach.clone.modules.post.service.post;
 
+import com.dauducbach.clone.commons.realtime.UserSsePublisher;
 import com.dauducbach.clone.modules.post.service.SseRealtimeFanoutPublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,7 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class PostSseService {
+public class PostSseService implements UserSsePublisher {
     private static final Duration KEEP_ALIVE = Duration.ofSeconds(15);
 
     private final SseRealtimeFanoutPublisher fanoutPublisher;
@@ -34,6 +35,7 @@ public class PostSseService {
                 .doFinally(signal -> removeSubscriber(userId, channel));
     }
 
+    @Override
     public Mono<Void> sendToUser(String userId, String event, String data) {
         if (userId == null || userId.isBlank()) {
             return Mono.empty();

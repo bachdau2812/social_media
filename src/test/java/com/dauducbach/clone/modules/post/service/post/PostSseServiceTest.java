@@ -1,5 +1,6 @@
 package com.dauducbach.clone.modules.post.service.post;
 
+import com.dauducbach.clone.commons.realtime.UserSsePublisher;
 import com.dauducbach.clone.modules.post.service.SseRealtimeFanoutPublisher;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Sinks;
@@ -30,4 +31,10 @@ class PostSseServiceTest {
         result.join();
         verify(publisher).publish("user-1", "post_upload", "payload");
     }
+
+    @Test
+    void postSseImplementsNeutralPublisher() {
+        assertThat(UserSsePublisher.class).isAssignableFrom(PostSseService.class);
+    }
+
 }
