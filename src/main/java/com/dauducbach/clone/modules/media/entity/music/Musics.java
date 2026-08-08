@@ -8,8 +8,6 @@ import lombok.experimental.FieldDefaults;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.relational.core.mapping.Table;
 
-import java.time.LocalDate;
-
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -27,5 +25,7 @@ public class Musics {
     String songUrl;
     Long duration;
     String category;
-    LocalDate releaseDate;
+    Short releaseYear;
+    String albumName;
+    Boolean fetched;
 }

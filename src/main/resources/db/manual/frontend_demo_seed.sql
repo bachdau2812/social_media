@@ -297,26 +297,26 @@ INSERT INTO user_social_media (id, user_id, link) VALUES
 ('social-seed-mai-01', @mai, 'https://youtube.com/@mai-travel')
 ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), link = VALUES(link);
 
-INSERT INTO musics (id, slug_name, display_name, descriptions, display_images, single_name, song_url, duration, category, release_date) VALUES
-('1364979', 'quiet-city-lines', 'Quiet City Lines', 'Seeded music for image stories and post items.', 'https://picsum.photos/seed/music-1364979/360/360', 'Seed Audio', 'https://cdn.example.local/music/1364979.mp3', 184, 'seed', CURDATE()),
-('1368743', 'morning-archive', 'Morning Archive', 'Seeded music for image stories and post items.', 'https://picsum.photos/seed/music-1368743/360/360', 'Seed Audio', 'https://cdn.example.local/music/1368743.mp3', 202, 'seed', CURDATE()),
-('1380625', 'soft-window-light', 'Soft Window Light', 'Seeded music for image stories and post items.', 'https://picsum.photos/seed/music-1380625/360/360', 'Seed Audio', 'https://cdn.example.local/music/1380625.mp3', 176, 'seed', CURDATE()),
-('1380632', 'late-feed-motion', 'Late Feed Motion', 'Seeded music for image stories and post items.', 'https://picsum.photos/seed/music-1380632/360/360', 'Seed Audio', 'https://cdn.example.local/music/1380632.mp3', 193, 'seed', CURDATE()),
-('1381324', 'minimal-street-loop', 'Minimal Street Loop', 'Seeded music for image stories and post items.', 'https://picsum.photos/seed/music-1381324/360/360', 'Seed Audio', 'https://cdn.example.local/music/1381324.mp3', 210, 'seed', CURDATE()),
-('1384752', 'gray-coastline', 'Gray Coastline', 'Seeded music for image stories and post items.', 'https://picsum.photos/seed/music-1384752/360/360', 'Seed Audio', 'https://cdn.example.local/music/1384752.mp3', 167, 'seed', CURDATE()),
-('1407062', 'studio-pulse', 'Studio Pulse', 'Seeded music for image stories and post items.', 'https://picsum.photos/seed/music-1407062/360/360', 'Seed Audio', 'https://cdn.example.local/music/1407062.mp3', 188, 'seed', CURDATE()),
-('1421761', 'clean-carousel', 'Clean Carousel', 'Seeded music for image stories and post items.', 'https://picsum.photos/seed/music-1421761/360/360', 'Seed Audio', 'https://cdn.example.local/music/1421761.mp3', 199, 'seed', CURDATE()),
-('1449007', 'story-afterglow', 'Story Afterglow', 'Seeded music for image stories and post items.', 'https://picsum.photos/seed/music-1449007/360/360', 'Seed Audio', 'https://cdn.example.local/music/1449007.mp3', 205, 'seed', CURDATE()),
-('1451827', 'monochrome-daybook', 'Monochrome Daybook', 'Seeded music for image stories and post items.', 'https://picsum.photos/seed/music-1451827/360/360', 'Seed Audio', 'https://cdn.example.local/music/1451827.mp3', 181, 'seed', CURDATE())
-ON DUPLICATE KEY UPDATE display_name = VALUES(display_name), song_url = VALUES(song_url), duration = VALUES(duration), category = VALUES(category);
+INSERT INTO musics (id, slug_name, display_name, descriptions, display_images, single_name, song_url, duration, category, release_year, album_name, fetched) VALUES
+('1Gqm6KaobG2A1mFVjGnJsS', 'quiet-city-lines', 'Quiet City Lines', 'Seeded music for image stories and post items.', 'https://picsum.photos/seed/music-1Gqm6KaobG2A1mFVjGnJsS/360/360', 'Seed Audio', 'https://cdn.example.local/music/1Gqm6KaobG2A1mFVjGnJsS.mp3', 184, 'seed', 2026, 'Frontend Demo', 1),
+('2plbrEY59IikOBgBGLjaoe', 'morning-archive', 'Morning Archive', 'Seeded music for image stories and post items.', 'https://picsum.photos/seed/music-2plbrEY59IikOBgBGLjaoe/360/360', 'Seed Audio', 'https://cdn.example.local/music/2plbrEY59IikOBgBGLjaoe.mp3', 202, 'seed', 2026, 'Frontend Demo', 1),
+('3n3Ppam7vgaVa1iaRUc9Lp', 'soft-window-light', 'Soft Window Light', 'Seeded music for image stories and post items.', 'https://picsum.photos/seed/music-3n3Ppam7vgaVa1iaRUc9Lp/360/360', 'Seed Audio', 'https://cdn.example.local/music/3n3Ppam7vgaVa1iaRUc9Lp.mp3', 176, 'seed', 2026, 'Frontend Demo', 1),
+('4uLU6hMCjMI75M1A2tKUQC', 'late-feed-motion', 'Late Feed Motion', 'Seeded music for image stories and post items.', 'https://picsum.photos/seed/music-4uLU6hMCjMI75M1A2tKUQC/360/360', 'Seed Audio', 'https://cdn.example.local/music/4uLU6hMCjMI75M1A2tKUQC.mp3', 193, 'seed', 2026, 'Frontend Demo', 1),
+('7qiZfU4dY1lWllzX7mPBI3', 'minimal-street-loop', 'Minimal Street Loop', 'Seeded music for image stories and post items.', 'https://picsum.photos/seed/music-7qiZfU4dY1lWllzX7mPBI3/360/360', 'Seed Audio', 'https://cdn.example.local/music/7qiZfU4dY1lWllzX7mPBI3.mp3', 210, 'seed', 2026, 'Frontend Demo', 1),
+('6habFhsOp2NvshLv26DqMb', 'gray-coastline', 'Gray Coastline', 'Seeded music for image stories and post items.', 'https://picsum.photos/seed/music-6habFhsOp2NvshLv26DqMb/360/360', 'Seed Audio', 'https://cdn.example.local/music/6habFhsOp2NvshLv26DqMb.mp3', 167, 'seed', 2026, 'Frontend Demo', 1),
+('0VjIjW4GlUZAMYd2vXMi3b', 'studio-pulse', 'Studio Pulse', 'Seeded music for image stories and post items.', 'https://picsum.photos/seed/music-0VjIjW4GlUZAMYd2vXMi3b/360/360', 'Seed Audio', 'https://cdn.example.local/music/0VjIjW4GlUZAMYd2vXMi3b.mp3', 188, 'seed', 2026, 'Frontend Demo', 1),
+('5ChkMS8OtdzJeqyybCc9R5', 'clean-carousel', 'Clean Carousel', 'Seeded music for image stories and post items.', 'https://picsum.photos/seed/music-5ChkMS8OtdzJeqyybCc9R5/360/360', 'Seed Audio', 'https://cdn.example.local/music/5ChkMS8OtdzJeqyybCc9R5.mp3', 199, 'seed', 2026, 'Frontend Demo', 1),
+('3AJwUDP919kvQ9QcozQPxg', 'story-afterglow', 'Story Afterglow', 'Seeded music for image stories and post items.', 'https://picsum.photos/seed/music-3AJwUDP919kvQ9QcozQPxg/360/360', 'Seed Audio', 'https://cdn.example.local/music/3AJwUDP919kvQ9QcozQPxg.mp3', 205, 'seed', 2026, 'Frontend Demo', 1),
+('2takcwOaAZWiXQijPHIx7B', 'monochrome-daybook', 'Monochrome Daybook', 'Seeded music for image stories and post items.', 'https://picsum.photos/seed/music-2takcwOaAZWiXQijPHIx7B/360/360', 'Seed Audio', 'https://cdn.example.local/music/2takcwOaAZWiXQijPHIx7B.mp3', 181, 'seed', 2026, 'Frontend Demo', 1)
+ON DUPLICATE KEY UPDATE display_name = VALUES(display_name), song_url = VALUES(song_url), duration = VALUES(duration), category = VALUES(category), release_year = VALUES(release_year), album_name = VALUES(album_name), fetched = VALUES(fetched);
 
-UPDATE user_stories SET music_id = '1364979' WHERE id IN ('story-seed-viewer-01', 'story-seed-anna-01');
-UPDATE user_stories SET music_id = '1368743' WHERE id IN ('story-seed-minh-01', 'story-seed-linh-01');
-UPDATE user_stories SET music_id = '1380625' WHERE id IN ('story-seed-quang-01', 'story-seed-mai-01');
+UPDATE user_stories SET music_id = '1Gqm6KaobG2A1mFVjGnJsS' WHERE id IN ('story-seed-viewer-01', 'story-seed-anna-01');
+UPDATE user_stories SET music_id = '2plbrEY59IikOBgBGLjaoe' WHERE id IN ('story-seed-minh-01', 'story-seed-linh-01');
+UPDATE user_stories SET music_id = '3n3Ppam7vgaVa1iaRUc9Lp' WHERE id IN ('story-seed-quang-01', 'story-seed-mai-01');
 
 INSERT INTO user_stories (id, user_id, media_url, media_type, music_id, music_url, music_start, music_end, status, created_at, expired_at) VALUES
 ('story-seed-video-anna-01', @anna, 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4', 'VIDEO', NULL, NULL, NULL, NULL, 'APPROVED', DATE_SUB(@now, INTERVAL 7 MINUTE), DATE_ADD(@now, INTERVAL 20 HOUR)),
-('story-seed-image-music-mai-02', @mai, 'https://picsum.photos/seed/story-mai-music/720/1280', 'IMAGE', '1384752', NULL, 12, 32, 'APPROVED', DATE_SUB(@now, INTERVAL 11 MINUTE), DATE_ADD(@now, INTERVAL 21 HOUR)),
+('story-seed-image-music-mai-02', @mai, 'https://picsum.photos/seed/story-mai-music/720/1280', 'IMAGE', '6habFhsOp2NvshLv26DqMb', NULL, 12, 32, 'APPROVED', DATE_SUB(@now, INTERVAL 11 MINUTE), DATE_ADD(@now, INTERVAL 21 HOUR)),
 ('story-seed-video-quang-01', @quang, 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.webm', 'VIDEO', NULL, NULL, NULL, NULL, 'APPROVED', DATE_SUB(@now, INTERVAL 14 MINUTE), DATE_ADD(@now, INTERVAL 22 HOUR))
 ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), media_url = VALUES(media_url), media_type = VALUES(media_type), music_id = VALUES(music_id), music_url = VALUES(music_url), music_start = VALUES(music_start), music_end = VALUES(music_end), status = VALUES(status), created_at = VALUES(created_at), expired_at = VALUES(expired_at);
 
@@ -333,6 +333,6 @@ ON DUPLICATE KEY UPDATE public_id = VALUES(public_id), width = VALUES(width), he
 
 INSERT INTO post_items (id, post_id, order_number, media_id, caption, music_id, music_start, music_end, created_at, updated_at) VALUES
 ('post-item-seed-video-anna-03-01', 'post-seed-video-anna-03', 1, 'media-post-video-anna-03', 'Video item caption. Music fields are empty for videos.', NULL, NULL, NULL, DATE_SUB(@now, INTERVAL 4 MINUTE), DATE_SUB(@now, INTERVAL 4 MINUTE)),
-('post-item-seed-mai-03-01', 'post-seed-image-music-mai-03', 1, 'media-post-image-mai-03-a', 'First image has its own caption and music segment.', '1421761', 8, 28, DATE_SUB(@now, INTERVAL 8 MINUTE), DATE_SUB(@now, INTERVAL 8 MINUTE)),
-('post-item-seed-mai-03-02', 'post-seed-image-music-mai-03', 2, 'media-post-image-mai-03-b', 'Second image has a different caption and music segment.', '1451827', 0, 20, DATE_SUB(@now, INTERVAL 7 MINUTE), DATE_SUB(@now, INTERVAL 7 MINUTE))
+('post-item-seed-mai-03-01', 'post-seed-image-music-mai-03', 1, 'media-post-image-mai-03-a', 'First image has its own caption and music segment.', '5ChkMS8OtdzJeqyybCc9R5', 8, 28, DATE_SUB(@now, INTERVAL 8 MINUTE), DATE_SUB(@now, INTERVAL 8 MINUTE)),
+('post-item-seed-mai-03-02', 'post-seed-image-music-mai-03', 2, 'media-post-image-mai-03-b', 'Second image has a different caption and music segment.', '2takcwOaAZWiXQijPHIx7B', 0, 20, DATE_SUB(@now, INTERVAL 7 MINUTE), DATE_SUB(@now, INTERVAL 7 MINUTE))
 ON DUPLICATE KEY UPDATE media_id = VALUES(media_id), caption = VALUES(caption), music_id = VALUES(music_id), music_start = VALUES(music_start), music_end = VALUES(music_end), updated_at = VALUES(updated_at);

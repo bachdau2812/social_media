@@ -2,7 +2,6 @@ package com.dauducbach.clone.modules.media.service;
 
 import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import com.dauducbach.clone.modules.media.constant.OwnerType;
-import com.dauducbach.clone.modules.media.dto.response.MediaAudioUploadResult;
 import com.dauducbach.clone.modules.media.entity.Media;
 
 import lombok.RequiredArgsConstructor;
@@ -20,7 +19,6 @@ import java.util.List;
 public class MediaCompatibilityFacade {
     private final CloudinaryMediaService cloudinaryMediaService;
     private final MediaAssetCleanupService cleanupService;
-    private final CloudinaryAudioStorageService audioStorageService;
 
     public Mono<Media> fetchMediaByPublicId(String publicId) {
         return cloudinaryMediaService.fetchMediaByPublicId(publicId);
@@ -30,9 +28,6 @@ public class MediaCompatibilityFacade {
         return cloudinaryMediaService.fetchMediaList(publicIds, ownerId, ownerType);
     }
 
-    public Mono<MediaAudioUploadResult> uploadMusic(byte[] bytes, String publicId) {
-        return audioStorageService.uploadMusic(bytes, publicId);
-    }
 
     public Mono<Void> deleteAsset(String publicId) {
         return cleanupService.delete(publicId);
