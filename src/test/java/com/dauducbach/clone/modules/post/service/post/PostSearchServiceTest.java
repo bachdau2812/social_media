@@ -51,4 +51,3 @@ class PostSearchServiceTest {
         verify(postDetailsRepository).searchApprovedPostIds(eq("spring"), any(Pageable.class));
     }
 }
-

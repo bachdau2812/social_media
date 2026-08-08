@@ -44,4 +44,3 @@ class RichPostSearchControllerTest {
                 .jsonPath("$.result.content[0].authorAvatarUrl").isEqualTo("https://cdn/avatar.jpg");
     }
 }
-

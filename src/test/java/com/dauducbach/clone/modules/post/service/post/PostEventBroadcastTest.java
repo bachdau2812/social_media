@@ -29,4 +29,3 @@ class PostEventBroadcastTest {
         verify(vectorService).processPostEmbedding("post-1", "caption");
     }
 }
-

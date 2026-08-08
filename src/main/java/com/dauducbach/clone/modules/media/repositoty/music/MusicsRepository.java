@@ -73,4 +73,3 @@ public interface MusicsRepository extends ReactiveCrudRepository<Musics, String>
             """)
     Mono<Long> countSearchByCategory(String keyword, String category);
 }
-

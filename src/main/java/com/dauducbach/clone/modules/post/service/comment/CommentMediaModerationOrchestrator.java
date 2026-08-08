@@ -227,4 +227,3 @@ public class CommentMediaModerationOrchestrator {
         return COMMENT_SCAN_CLAIM_PREFIX + commentId;
     }
 }
-

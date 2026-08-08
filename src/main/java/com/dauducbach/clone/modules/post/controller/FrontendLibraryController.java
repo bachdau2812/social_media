@@ -87,4 +87,3 @@ public class FrontendLibraryController {
         return ActorIdentity.require(authentication.getName(), userId);
     }
 }
-

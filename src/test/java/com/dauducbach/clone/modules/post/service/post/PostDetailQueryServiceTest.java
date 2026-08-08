@@ -132,5 +132,3 @@ class PostDetailQueryServiceTest {
                 .verifyComplete();
     }
 }
-
-

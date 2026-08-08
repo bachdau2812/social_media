@@ -20,4 +20,3 @@ public record MusicCreateRequest(
         LocalDate releaseDate
 ) {
 }
-

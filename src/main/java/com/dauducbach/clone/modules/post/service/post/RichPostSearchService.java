@@ -83,4 +83,3 @@ public class RichPostSearchService {
         return media.getUrl() == null ? "" : media.getUrl().trim();
     }
 }
-

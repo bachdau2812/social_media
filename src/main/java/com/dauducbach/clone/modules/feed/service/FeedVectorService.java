@@ -202,4 +202,3 @@ public class FeedVectorService {
         return vector.get(index);
     }
 }
-

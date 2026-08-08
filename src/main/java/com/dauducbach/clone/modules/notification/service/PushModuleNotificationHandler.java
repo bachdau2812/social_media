@@ -506,4 +506,3 @@ public class PushModuleNotificationHandler {
         return null;
     }
 }
-

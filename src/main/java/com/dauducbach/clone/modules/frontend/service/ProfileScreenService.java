@@ -260,4 +260,3 @@ public class ProfileScreenService {
         return "Suggested connection";
     }
 }
-

@@ -108,4 +108,3 @@ public class PostSearchService {
         return Math.min(limit, MAX_PAGE_SIZE);
     }
 }
-

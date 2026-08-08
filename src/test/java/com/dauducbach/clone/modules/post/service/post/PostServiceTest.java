@@ -80,4 +80,3 @@ class PostServiceTest {
         );
     }
 }
-

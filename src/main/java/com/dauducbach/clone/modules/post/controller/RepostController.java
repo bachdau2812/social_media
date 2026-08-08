@@ -87,4 +87,3 @@ public class RepostController {
         return ActorIdentity.require(authentication.getName(), actorId);
     }
 }
-

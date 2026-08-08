@@ -298,4 +298,3 @@ public class FeedService {
         return Math.min(limit, MAX_LIMIT);
     }
 }
-

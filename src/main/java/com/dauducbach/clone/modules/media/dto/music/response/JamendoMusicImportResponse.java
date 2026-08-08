@@ -8,4 +8,3 @@ public record JamendoMusicImportResponse(
         String message
 ) {
 }
-

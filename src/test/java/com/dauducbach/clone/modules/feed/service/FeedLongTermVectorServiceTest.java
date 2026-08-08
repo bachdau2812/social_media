@@ -165,4 +165,3 @@ class FeedLongTermVectorServiceTest {
         return Math.sqrt(vector.stream().mapToDouble(value -> value * value).sum());
     }
 }
-

@@ -358,4 +358,3 @@ public class MediaForProfile {
         return dotIndex > 0 ? value.substring(0, dotIndex) : value;
     }
 }
-

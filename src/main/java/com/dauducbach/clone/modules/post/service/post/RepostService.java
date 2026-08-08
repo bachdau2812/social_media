@@ -254,4 +254,3 @@ public class RepostService {
         return Math.min(size, MAX_PAGE_SIZE);
     }
 }
-

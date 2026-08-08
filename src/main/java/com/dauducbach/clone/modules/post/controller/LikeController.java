@@ -88,4 +88,3 @@ public class LikeController {
         return ActorIdentity.require(authentication.getName(), actorId);
     }
 }
-

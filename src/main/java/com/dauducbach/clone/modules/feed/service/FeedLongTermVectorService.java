@@ -277,4 +277,3 @@ public class FeedLongTermVectorService {
     private record TimeRange(Instant from, Instant to) {
     }
 }
-

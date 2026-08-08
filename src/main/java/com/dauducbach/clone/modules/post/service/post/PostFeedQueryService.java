@@ -133,4 +133,3 @@ public class PostFeedQueryService {
         return excludedPostIds == null ? Set.of() : new HashSet<>(excludedPostIds);
     }
 }
-

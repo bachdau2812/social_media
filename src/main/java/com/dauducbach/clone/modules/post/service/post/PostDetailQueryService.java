@@ -194,5 +194,3 @@ public class PostDetailQueryService {
         return value != null && !value.isBlank();
     }
 }
-
-

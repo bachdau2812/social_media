@@ -9,4 +9,3 @@ public record JamendoMusicImportRequest(
         String category
 ) {
 }
-

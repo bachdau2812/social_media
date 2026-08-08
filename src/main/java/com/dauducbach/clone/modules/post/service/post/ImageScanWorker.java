@@ -121,4 +121,3 @@ public class ImageScanWorker {
         return mediaList;
     }
 }
-

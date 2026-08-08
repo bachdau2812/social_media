@@ -542,4 +542,3 @@ public class StoryMediaService {
     private record StorySubmission(UserStories story, boolean shouldScan) {
     }
 }
-

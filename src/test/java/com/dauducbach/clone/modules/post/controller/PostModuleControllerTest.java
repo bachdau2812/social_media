@@ -418,4 +418,3 @@ class PostModuleControllerTest {
                 .build();
     }
 }
-

@@ -29,4 +29,3 @@ public class Musics {
     String category;
     LocalDate releaseDate;
 }
-
