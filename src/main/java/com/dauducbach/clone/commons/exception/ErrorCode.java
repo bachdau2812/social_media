@@ -75,6 +75,7 @@ public enum ErrorCode {
     MUSIC_FETCH_FAILED(1060, "Fetch music failed", HttpStatus.INTERNAL_SERVER_ERROR),
     MUSIC_IMPORT_FAILED(1061, "Import music failed", HttpStatus.BAD_REQUEST),
     MUSIC_REQUEST_INVALID(1062, "Music request is invalid", HttpStatus.BAD_REQUEST),
+    MUSIC_FETCH_UNAVAILABLE(1067, "Music fetch service is unavailable", HttpStatus.SERVICE_UNAVAILABLE),
     USER_SEARCH_FAILED(1063, "Search users failed", HttpStatus.INTERNAL_SERVER_ERROR),
     SEARCH_REQUEST_INVALID(1064, "Search request is invalid", HttpStatus.BAD_REQUEST),
     SEARCH_SUGGESTION_FAILED(1065, "Fetch search suggestions failed", HttpStatus.INTERNAL_SERVER_ERROR),
