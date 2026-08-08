@@ -42,9 +42,12 @@ public class ProcessBuilderCliCommandRunner implements CliCommandRunner {
     }
 
     private CliCommandResult execute(List<String> command, Duration timeout) throws Exception {
-        Process process = new ProcessBuilder(command)
-                .redirectErrorStream(true)
-                .start();
+        ProcessBuilder processBuilder = new ProcessBuilder(command)
+                .redirectErrorStream(true);
+        processBuilder.environment().put("PYTHONUTF8", "1");
+        processBuilder.environment().put("PYTHONIOENCODING", "utf-8");
+        Process process = processBuilder.start();
+        process.getOutputStream().close();
         ExecutorService outputExecutor = Executors.newSingleThreadExecutor(
                 Thread.ofVirtual().name("spotify-cli-output-", 0).factory());
         Future<String> output = outputExecutor.submit(() -> readCapped(process.getInputStream()));

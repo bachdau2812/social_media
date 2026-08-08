@@ -55,13 +55,28 @@ class SpotiFlacCliClientTest {
 
     @Test
     void failsWhenNoFlacWasDownloaded() {
-        when(runner.run(anyList(), any())).thenReturn(Mono.just(new CliCommandResult(0, "done")));
+        when(runner.run(anyList(), any())).thenReturn(Mono.just(new CliCommandResult(
+                0,
+                "Timeout reached for track. Provider requires grant authentication.")));
 
         StepVerifier.create(client().download(TRACK_ID, tempDirectory))
-                .expectErrorMatches(error -> error.getMessage().contains("exactly one FLAC"))
+                .expectErrorMatches(error -> error.getMessage()
+                        .contains("provider timeout or authentication required"))
                 .verify();
     }
 
+    @Test
+    void nonZeroExitUsesSafeDiagnosticWithoutExposingCliOutput() {
+        when(runner.run(anyList(), any())).thenReturn(Mono.just(new CliCommandResult(
+                7,
+                "Access token acquired: very-secret-token. Timeout reached.")));
+
+        StepVerifier.create(client().download(TRACK_ID, tempDirectory))
+                .expectErrorMatches(error -> error.getMessage().contains("exit code 7")
+                        && error.getMessage().contains("provider timeout or authentication required")
+                        && !error.getMessage().contains("very-secret-token"))
+                .verify();
+    }
     @Test
     void failsWhenMultipleFlacsWereDownloaded() throws Exception {
         Files.writeString(tempDirectory.resolve("one.flac"), "one");
