@@ -3,7 +3,7 @@ package com.dauducbach.clone.modules.feed.service;
 import com.dauducbach.clone.modules.audit.dto.AuditActionType;
 import com.dauducbach.clone.modules.audit.entity.AuditLogs;
 import com.dauducbach.clone.modules.audit.service.AuditInteractionQueryService;
-import com.dauducbach.clone.modules.post.service.PostFeedQueryService;
+import com.dauducbach.clone.modules.post.service.post.PostFeedQueryService;
 import com.dauducbach.clone.modules.user.entity.UserDetails;
 import com.dauducbach.clone.modules.user.service.UserDetailsService;
 import com.dauducbach.clone.modules.user.service.UserVectorQueryService;
@@ -165,3 +165,4 @@ class FeedLongTermVectorServiceTest {
         return Math.sqrt(vector.stream().mapToDouble(value -> value * value).sum());
     }
 }
+

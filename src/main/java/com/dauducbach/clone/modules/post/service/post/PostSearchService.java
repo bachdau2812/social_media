@@ -1,4 +1,4 @@
-package com.dauducbach.clone.modules.post.service;
+package com.dauducbach.clone.modules.post.service.post;
 
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
@@ -108,3 +108,4 @@ public class PostSearchService {
         return Math.min(limit, MAX_PAGE_SIZE);
     }
 }
+

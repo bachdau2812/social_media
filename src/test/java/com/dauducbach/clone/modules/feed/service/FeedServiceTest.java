@@ -6,7 +6,7 @@ import com.dauducbach.clone.modules.feed.constant.FeedActivityType;
 import com.dauducbach.clone.modules.feed.dto.response.FeedItemResponse;
 import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import com.dauducbach.clone.modules.post.dto.response.FriendFeedActivityResponse;
-import com.dauducbach.clone.modules.post.service.PostFeedQueryService;
+import com.dauducbach.clone.modules.post.service.post.PostFeedQueryService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -125,3 +125,4 @@ class FeedServiceTest {
         );
     }
 }
+

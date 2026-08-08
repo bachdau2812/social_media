@@ -1,4 +1,4 @@
-package com.dauducbach.clone.modules.post.service;
+package com.dauducbach.clone.modules.post.service.post;
 
 import com.dauducbach.clone.infrastructure.SemanticVectorSearchService;
 import com.dauducbach.clone.modules.post.repositoty.PostDetailsRepository;
@@ -51,3 +51,4 @@ class PostSearchServiceTest {
         verify(postDetailsRepository).searchApprovedPostIds(eq("spring"), any(Pageable.class));
     }
 }
+

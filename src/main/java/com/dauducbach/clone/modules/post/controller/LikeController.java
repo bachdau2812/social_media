@@ -5,7 +5,7 @@ import com.dauducbach.clone.commons.response.PageResponse;
 import com.dauducbach.clone.commons.security.ActorIdentity;
 import com.dauducbach.clone.modules.post.dto.request.LikeRequest;
 import com.dauducbach.clone.modules.post.dto.response.LikeToggleResponse;
-import com.dauducbach.clone.modules.post.service.LikeService;
+import com.dauducbach.clone.modules.post.service.post.LikeService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -88,3 +88,4 @@ public class LikeController {
         return ActorIdentity.require(authentication.getName(), actorId);
     }
 }
+

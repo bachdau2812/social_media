@@ -1,4 +1,4 @@
-package com.dauducbach.clone.modules.post.service;
+package com.dauducbach.clone.modules.post.service.post;
 
 import com.dauducbach.clone.commons.constant.PostNotificationCacheKeys;
 import com.dauducbach.clone.commons.exception.AppException;
@@ -80,3 +80,4 @@ class PostServiceTest {
         );
     }
 }
+

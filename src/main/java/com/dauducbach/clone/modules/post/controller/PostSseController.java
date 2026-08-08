@@ -1,6 +1,6 @@
 package com.dauducbach.clone.modules.post.controller;
 
-import com.dauducbach.clone.modules.post.service.PostSseService;
+import com.dauducbach.clone.modules.post.service.post.PostSseService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
@@ -23,4 +23,5 @@ public class PostSseController {
 
 
 }
+
 

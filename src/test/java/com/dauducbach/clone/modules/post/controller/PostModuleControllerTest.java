@@ -19,13 +19,13 @@ import com.dauducbach.clone.modules.media.entity.Media;
 import com.dauducbach.clone.modules.post.entity.PostDetails;
 import com.dauducbach.clone.modules.media.controller.MediaUploadController;
 import com.dauducbach.clone.modules.media.service.CloudinarySignatureService;
-import com.dauducbach.clone.modules.post.service.CommentService;
-import com.dauducbach.clone.modules.post.service.LikeService;
+import com.dauducbach.clone.modules.post.service.comment.CommentService;
+import com.dauducbach.clone.modules.post.service.post.LikeService;
 import com.dauducbach.clone.modules.media.service.MediaService;
-import com.dauducbach.clone.modules.post.service.PostSearchService;
-import com.dauducbach.clone.modules.post.service.PostDetailQueryService;
-import com.dauducbach.clone.modules.post.service.PostService;
-import com.dauducbach.clone.modules.post.service.PostSseService;
+import com.dauducbach.clone.modules.post.service.post.PostSearchService;
+import com.dauducbach.clone.modules.post.service.post.PostDetailQueryService;
+import com.dauducbach.clone.modules.post.service.post.PostService;
+import com.dauducbach.clone.modules.post.service.post.PostSseService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.codec.ServerSentEvent;
@@ -418,3 +418,4 @@ class PostModuleControllerTest {
                 .build();
     }
 }
+

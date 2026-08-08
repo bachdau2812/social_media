@@ -6,7 +6,7 @@ import com.dauducbach.clone.modules.feed.constant.FeedCacheKeys;
 import com.dauducbach.clone.modules.feed.dto.response.FeedItemResponse;
 import com.dauducbach.clone.modules.feed.dto.response.FeedResponse;
 import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
-import com.dauducbach.clone.modules.post.service.PostFeedQueryService;
+import com.dauducbach.clone.modules.post.service.post.PostFeedQueryService;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
@@ -298,3 +298,4 @@ public class FeedService {
         return Math.min(limit, MAX_LIMIT);
     }
 }
+

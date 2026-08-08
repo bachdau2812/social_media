@@ -1,7 +1,7 @@
 package com.dauducbach.clone.modules.feed.service;
 
 import com.dauducbach.clone.modules.post.entity.PostDetails;
-import com.dauducbach.clone.modules.post.service.PostFeedQueryService;
+import com.dauducbach.clone.modules.post.service.post.PostFeedQueryService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

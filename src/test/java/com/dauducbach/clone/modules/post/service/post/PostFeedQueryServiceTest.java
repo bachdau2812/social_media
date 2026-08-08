@@ -1,4 +1,4 @@
-package com.dauducbach.clone.modules.post.service;
+package com.dauducbach.clone.modules.post.service.post;
 
 import com.dauducbach.clone.modules.post.entity.PostDetails;
 import com.dauducbach.clone.modules.post.repositoty.PostDetailsRepository;
@@ -72,3 +72,4 @@ class PostFeedQueryServiceTest {
         };
     }
 }
+

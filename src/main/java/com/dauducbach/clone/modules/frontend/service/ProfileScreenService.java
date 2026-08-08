@@ -4,7 +4,7 @@ import com.dauducbach.clone.modules.frontend.dto.ConnectionUserResponse;
 import com.dauducbach.clone.modules.frontend.dto.ConnectionsResponse;
 import com.dauducbach.clone.modules.frontend.dto.ProfilePostResponse;
 import com.dauducbach.clone.modules.frontend.dto.ProfileSummaryResponse;
-import com.dauducbach.clone.modules.post.service.PostProfileQueryService;
+import com.dauducbach.clone.modules.post.service.post.PostProfileQueryService;
 import com.dauducbach.clone.modules.user.service.UserIdentityQueryService;
 import com.dauducbach.clone.modules.user.service.UserProfileCompositionQueryService;
 import lombok.RequiredArgsConstructor;
@@ -260,3 +260,4 @@ public class ProfileScreenService {
         return "Suggested connection";
     }
 }
+

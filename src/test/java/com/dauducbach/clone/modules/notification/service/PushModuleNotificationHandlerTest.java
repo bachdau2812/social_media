@@ -8,9 +8,9 @@ import com.dauducbach.clone.modules.notification.entity.NotificationTemplates;
 import com.dauducbach.clone.modules.notification.repository.NotificationTemplatesRepository;
 import com.dauducbach.clone.modules.post.entity.Comment;
 import com.dauducbach.clone.modules.post.entity.PostDetails;
-import com.dauducbach.clone.modules.post.service.CommentService;
-import com.dauducbach.clone.modules.post.service.LikeService;
-import com.dauducbach.clone.modules.post.service.PostService;
+import com.dauducbach.clone.modules.post.service.comment.CommentService;
+import com.dauducbach.clone.modules.post.service.post.LikeService;
+import com.dauducbach.clone.modules.post.service.post.PostService;
 import com.dauducbach.clone.modules.user.dto.response.FollowerListResponse;
 import com.dauducbach.clone.modules.user.entity.UserDetails;
 import com.dauducbach.clone.modules.user.service.UserFollowerService;
@@ -332,3 +332,4 @@ class PushModuleNotificationHandlerTest {
                 .build();
     }
 }
+

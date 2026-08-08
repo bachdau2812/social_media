@@ -1,4 +1,4 @@
-package com.dauducbach.clone.modules.post.service;
+package com.dauducbach.clone.modules.post.service.post;
 
 import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
 import com.dauducbach.clone.modules.media.service.MediaAssetCleanupService;

@@ -1,4 +1,4 @@
-package com.dauducbach.clone.modules.post.service;
+package com.dauducbach.clone.modules.post.service.post;
 
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
@@ -254,3 +254,4 @@ public class RepostService {
         return Math.min(size, MAX_PAGE_SIZE);
     }
 }
+

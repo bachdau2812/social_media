@@ -1,7 +1,7 @@
 package com.dauducbach.clone.modules.feed.service;
 
 import com.dauducbach.clone.modules.feed.constant.FeedCacheKeys;
-import com.dauducbach.clone.modules.post.service.PostFeedQueryService;
+import com.dauducbach.clone.modules.post.service.post.PostFeedQueryService;
 import com.dauducbach.clone.modules.user.service.UserVectorQueryService;
 import com.dauducbach.clone.utils.GsonUtils;
 import com.google.gson.reflect.TypeToken;
@@ -202,3 +202,4 @@ public class FeedVectorService {
         return vector.get(index);
     }
 }
+

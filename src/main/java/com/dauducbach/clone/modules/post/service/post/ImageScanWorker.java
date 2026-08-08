@@ -1,5 +1,6 @@
-package com.dauducbach.clone.modules.post.service;
+package com.dauducbach.clone.modules.post.service.post;
 
+import com.dauducbach.clone.modules.post.service.comment.CommentMediaModerationOrchestrator;
 import com.dauducbach.clone.modules.post.dto.event.PostMediaScanItem;
 import com.dauducbach.clone.modules.post.dto.request.MediaUploadRequest;
 import com.dauducbach.clone.utils.GsonUtils;
@@ -120,3 +121,4 @@ public class ImageScanWorker {
         return mediaList;
     }
 }
+

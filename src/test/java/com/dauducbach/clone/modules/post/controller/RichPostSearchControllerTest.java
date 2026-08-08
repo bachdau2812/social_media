@@ -2,7 +2,7 @@ package com.dauducbach.clone.modules.post.controller;
 
 import com.dauducbach.clone.commons.response.PageResponse;
 import com.dauducbach.clone.modules.post.dto.response.RichPostSearchResponse;
-import com.dauducbach.clone.modules.post.service.RichPostSearchService;
+import com.dauducbach.clone.modules.post.service.post.RichPostSearchService;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Mono;
@@ -44,3 +44,4 @@ class RichPostSearchControllerTest {
                 .jsonPath("$.result.content[0].authorAvatarUrl").isEqualTo("https://cdn/avatar.jpg");
     }
 }
+

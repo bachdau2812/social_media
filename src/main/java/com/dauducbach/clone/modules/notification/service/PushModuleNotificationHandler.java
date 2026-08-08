@@ -7,9 +7,9 @@ import com.dauducbach.clone.modules.notification.constants.NotificationType;
 import com.dauducbach.clone.modules.notification.dto.request.NotificationRequest;
 import com.dauducbach.clone.modules.notification.entity.NotificationTemplates;
 import com.dauducbach.clone.modules.notification.repository.NotificationTemplatesRepository;
-import com.dauducbach.clone.modules.post.service.CommentService;
-import com.dauducbach.clone.modules.post.service.LikeService;
-import com.dauducbach.clone.modules.post.service.PostService;
+import com.dauducbach.clone.modules.post.service.comment.CommentService;
+import com.dauducbach.clone.modules.post.service.post.LikeService;
+import com.dauducbach.clone.modules.post.service.post.PostService;
 import com.dauducbach.clone.modules.user.dto.response.FollowerListResponse;
 import com.dauducbach.clone.modules.user.service.UserFollowerService;
 import com.dauducbach.clone.modules.user.service.UserIdentityQueryService;
@@ -506,3 +506,4 @@ public class PushModuleNotificationHandler {
         return null;
     }
 }
+

@@ -1,6 +1,6 @@
 package com.dauducbach.clone.modules.feed.service;
 
-import com.dauducbach.clone.modules.post.service.PostFeedQueryService;
+import com.dauducbach.clone.modules.post.service.post.PostFeedQueryService;
 import com.dauducbach.clone.modules.user.service.UserVectorQueryService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -79,3 +79,4 @@ class FeedVectorServiceTest {
         return Math.sqrt(vector.stream().mapToDouble(value -> value * value).sum());
     }
 }
+

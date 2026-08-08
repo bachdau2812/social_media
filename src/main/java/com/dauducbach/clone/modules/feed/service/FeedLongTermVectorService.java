@@ -7,7 +7,7 @@ import com.dauducbach.clone.modules.audit.entity.AuditLogs;
 import com.dauducbach.clone.modules.audit.service.AuditInteractionQueryService;
 import com.dauducbach.clone.modules.feed.constant.FeedCacheKeys;
 import com.dauducbach.clone.modules.feed.dto.response.FeedLongTermVectorRefreshResponse;
-import com.dauducbach.clone.modules.post.service.PostFeedQueryService;
+import com.dauducbach.clone.modules.post.service.post.PostFeedQueryService;
 import com.dauducbach.clone.modules.user.service.UserDetailsService;
 import com.dauducbach.clone.modules.user.service.UserVectorQueryService;
 import com.dauducbach.clone.utils.GsonUtils;
@@ -277,3 +277,4 @@ public class FeedLongTermVectorService {
     private record TimeRange(Instant from, Instant to) {
     }
 }
+

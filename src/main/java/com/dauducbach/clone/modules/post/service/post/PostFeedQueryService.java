@@ -1,4 +1,4 @@
-package com.dauducbach.clone.modules.post.service;
+package com.dauducbach.clone.modules.post.service.post;
 
 import co.elastic.clients.json.JsonData;
 import com.dauducbach.clone.modules.post.elastic.PostVector;
@@ -133,3 +133,4 @@ public class PostFeedQueryService {
         return excludedPostIds == null ? Set.of() : new HashSet<>(excludedPostIds);
     }
 }
+

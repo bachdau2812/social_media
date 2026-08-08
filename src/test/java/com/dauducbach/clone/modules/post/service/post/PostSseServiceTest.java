@@ -1,5 +1,6 @@
-package com.dauducbach.clone.modules.post.service;
+package com.dauducbach.clone.modules.post.service.post;
 
+import com.dauducbach.clone.modules.post.service.SseRealtimeFanoutPublisher;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Sinks;
 

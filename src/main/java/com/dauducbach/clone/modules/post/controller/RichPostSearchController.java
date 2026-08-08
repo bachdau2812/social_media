@@ -3,7 +3,7 @@ package com.dauducbach.clone.modules.post.controller;
 import com.dauducbach.clone.commons.response.ApiResponse;
 import com.dauducbach.clone.commons.response.PageResponse;
 import com.dauducbach.clone.modules.post.dto.response.RichPostSearchResponse;
-import com.dauducbach.clone.modules.post.service.RichPostSearchService;
+import com.dauducbach.clone.modules.post.service.post.RichPostSearchService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -30,3 +30,4 @@ public class RichPostSearchController {
                         .build());
     }
 }
+

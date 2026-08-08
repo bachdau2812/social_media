@@ -2,7 +2,7 @@ package com.dauducbach.clone.modules.frontend.service;
 
 import com.dauducbach.clone.commons.response.PageResponse;
 import com.dauducbach.clone.modules.frontend.dto.CommentViewResponse;
-import com.dauducbach.clone.modules.post.service.CommentCompositionQueryService;
+import com.dauducbach.clone.modules.post.service.comment.CommentCompositionQueryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -50,3 +50,4 @@ public class CommentScreenService {
         );
     }
 }
+

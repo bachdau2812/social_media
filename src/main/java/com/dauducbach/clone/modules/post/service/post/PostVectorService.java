@@ -1,4 +1,4 @@
-package com.dauducbach.clone.modules.post.service;
+package com.dauducbach.clone.modules.post.service.post;
 
 import com.dauducbach.clone.modules.post.elastic.PostVector;
 import com.dauducbach.clone.utils.GetVectorEmbedding;

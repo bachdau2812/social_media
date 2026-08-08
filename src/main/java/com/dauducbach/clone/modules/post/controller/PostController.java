@@ -10,9 +10,9 @@ import com.dauducbach.clone.modules.post.dto.response.PostCreateResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostDetailResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostNotificationMuteResponse;
 import com.dauducbach.clone.modules.post.entity.PostDetails;
-import com.dauducbach.clone.modules.post.service.PostSearchService;
-import com.dauducbach.clone.modules.post.service.PostDetailQueryService;
-import com.dauducbach.clone.modules.post.service.PostService;
+import com.dauducbach.clone.modules.post.service.post.PostSearchService;
+import com.dauducbach.clone.modules.post.service.post.PostDetailQueryService;
+import com.dauducbach.clone.modules.post.service.post.PostService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -110,3 +110,4 @@ public class PostController {
                         .build()));
     }
 }
+

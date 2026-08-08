@@ -9,7 +9,7 @@ import com.dauducbach.clone.modules.post.dto.request.UpsertDraftRequest;
 import com.dauducbach.clone.modules.post.entity.SavedItem;
 import com.dauducbach.clone.modules.post.entity.UserArchiveItem;
 import com.dauducbach.clone.modules.post.entity.UserDraft;
-import com.dauducbach.clone.modules.post.service.LibraryService;
+import com.dauducbach.clone.modules.post.service.post.LibraryService;
 import jakarta.validation.Valid;
 import org.springframework.security.core.Authentication;
 import lombok.RequiredArgsConstructor;
@@ -87,3 +87,4 @@ public class FrontendLibraryController {
         return ActorIdentity.require(authentication.getName(), userId);
     }
 }
+

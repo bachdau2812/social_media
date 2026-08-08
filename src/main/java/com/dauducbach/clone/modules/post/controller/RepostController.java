@@ -4,7 +4,7 @@ import com.dauducbach.clone.commons.response.ApiResponse;
 import com.dauducbach.clone.commons.response.PageResponse;
 import com.dauducbach.clone.commons.security.ActorIdentity;
 import com.dauducbach.clone.modules.post.dto.response.RepostToggleResponse;
-import com.dauducbach.clone.modules.post.service.RepostService;
+import com.dauducbach.clone.modules.post.service.post.RepostService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -87,3 +87,4 @@ public class RepostController {
         return ActorIdentity.require(authentication.getName(), actorId);
     }
 }
+

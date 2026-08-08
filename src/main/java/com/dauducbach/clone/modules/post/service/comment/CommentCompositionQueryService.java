@@ -1,4 +1,4 @@
-package com.dauducbach.clone.modules.post.service;
+package com.dauducbach.clone.modules.post.service.comment;
 
 import com.dauducbach.clone.commons.response.PageResponse;
 import com.dauducbach.clone.modules.post.entity.Comment;
@@ -91,3 +91,4 @@ public class CommentCompositionQueryService {
     ) {
     }
 }
+

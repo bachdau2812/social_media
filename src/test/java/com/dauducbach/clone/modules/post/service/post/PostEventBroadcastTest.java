@@ -1,4 +1,4 @@
-package com.dauducbach.clone.modules.post.service;
+package com.dauducbach.clone.modules.post.service.post;
 
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Sinks;
@@ -29,3 +29,4 @@ class PostEventBroadcastTest {
         verify(vectorService).processPostEmbedding("post-1", "caption");
     }
 }
+

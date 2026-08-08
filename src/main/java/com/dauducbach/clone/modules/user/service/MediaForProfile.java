@@ -13,7 +13,7 @@ import com.dauducbach.clone.modules.media.entity.music.Musics;
 import com.dauducbach.clone.modules.media.repositoty.music.MusicsRepository;
 import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
 import com.dauducbach.clone.modules.media.service.MediaService;
-import com.dauducbach.clone.modules.post.service.PostSseService;
+import com.dauducbach.clone.modules.post.service.post.PostSseService;
 import com.dauducbach.clone.modules.user.dto.request.AvatarUploadRequest;
 import com.dauducbach.clone.modules.user.dto.request.MusicSelectRequest;
 import com.dauducbach.clone.modules.user.dto.response.ProfileMediaUploadResponse;
@@ -358,3 +358,4 @@ public class MediaForProfile {
         return dotIndex > 0 ? value.substring(0, dotIndex) : value;
     }
 }
+

@@ -1,4 +1,4 @@
-package com.dauducbach.clone.modules.post.service;
+package com.dauducbach.clone.modules.post.service.post;
 
 import com.dauducbach.clone.utils.GsonUtils;
 import com.dauducbach.clone.utils.KafkaUtils;

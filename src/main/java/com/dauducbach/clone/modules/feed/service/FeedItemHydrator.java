@@ -19,11 +19,11 @@ import com.dauducbach.clone.modules.post.dto.response.PostItemResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostMediaResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostMusicResponse;
 import com.dauducbach.clone.modules.post.entity.PostDetails;
-import com.dauducbach.clone.modules.post.service.CommentService;
-import com.dauducbach.clone.modules.post.service.LikeService;
-import com.dauducbach.clone.modules.post.service.PostDetailQueryService;
-import com.dauducbach.clone.modules.post.service.PostFeedQueryService;
-import com.dauducbach.clone.modules.post.service.RepostService;
+import com.dauducbach.clone.modules.post.service.comment.CommentService;
+import com.dauducbach.clone.modules.post.service.post.LikeService;
+import com.dauducbach.clone.modules.post.service.post.PostDetailQueryService;
+import com.dauducbach.clone.modules.post.service.post.PostFeedQueryService;
+import com.dauducbach.clone.modules.post.service.post.RepostService;
 import com.dauducbach.clone.modules.user.entity.UserDetails;
 import com.dauducbach.clone.modules.user.service.MediaForProfile;
 import com.dauducbach.clone.modules.user.service.UserDetailsService;
@@ -356,3 +356,4 @@ public class FeedItemHydrator {
         return "";
     }
 }
+

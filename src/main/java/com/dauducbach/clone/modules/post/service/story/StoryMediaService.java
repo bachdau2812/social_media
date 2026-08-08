@@ -11,7 +11,7 @@ import com.dauducbach.clone.modules.media.constant.OwnerType;
 import com.dauducbach.clone.modules.media.entity.Media;
 import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
 import com.dauducbach.clone.modules.media.service.MediaService;
-import com.dauducbach.clone.modules.post.service.PostSseService;
+import com.dauducbach.clone.modules.post.service.post.PostSseService;
 import com.dauducbach.clone.modules.post.dto.story.request.StoryCreateRequest;
 import com.dauducbach.clone.modules.user.dto.response.ProfileMediaUploadResponse;
 import com.dauducbach.clone.modules.post.entity.story.StoryView;
@@ -542,3 +542,4 @@ public class StoryMediaService {
     private record StorySubmission(UserStories story, boolean shouldScan) {
     }
 }
+
