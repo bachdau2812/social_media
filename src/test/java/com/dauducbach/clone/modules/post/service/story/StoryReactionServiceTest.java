@@ -23,6 +23,7 @@ import reactor.test.StepVerifier;
 import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -65,6 +66,26 @@ class StoryReactionServiceTest {
         when(sender.send(any())).thenReturn(Flux.error(failure));
         StepVerifier.create(service().like("story-1", "actor-1"))
                 .expectErrorMatches(failure::equals).verify();
+    }
+
+    @Test void senderResultFailurePropagatesTheOriginalError() {
+        IllegalStateException failure = new IllegalStateException("broker rejected record");
+        stubPersistence(1);
+        when(sender.send(any(Publisher.class))).thenReturn(Flux.just(result));
+        when(result.exception()).thenReturn(failure);
+
+        StepVerifier.create(service().like("story-1", "actor-1"))
+                .expectErrorMatches(failure::equals).verify();
+    }
+
+    @Test void missingBrokerMetadataFailsTheLikeRequest() {
+        stubPersistence(1);
+        when(sender.send(any(Publisher.class))).thenReturn(Flux.just(result));
+        when(result.exception()).thenReturn(null);
+        when(result.recordMetadata()).thenReturn(null);
+
+        StepVerifier.create(service().like("story-1", "actor-1"))
+                .expectErrorMessage("Kafka acknowledgement metadata is missing").verify();
     }
 
     @Test void createsTheViewAndPublishesWhenTheViewerHasNotOpenedTheStory() {
@@ -129,6 +150,9 @@ class StoryReactionServiceTest {
         assertThat(json.get("targetType").getAsString()).isEqualTo("STORY");
         assertThat(json.get("targetOwnerId").getAsString()).isEqualTo("owner-1");
         assertThat(json.get("interactionId").getAsString()).isEqualTo(record.correlationMetadata());
+        assertThat(json.has("timestamp")).isTrue();
+        assertThatCode(() -> Instant.parse(json.get("timestamp").getAsString()))
+                .doesNotThrowAnyException();
         if (expectedInteractionId != null) {
             assertThat(record.correlationMetadata()).isEqualTo(expectedInteractionId);
         }
