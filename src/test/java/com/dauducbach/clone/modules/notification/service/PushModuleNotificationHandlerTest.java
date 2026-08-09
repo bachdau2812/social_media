@@ -28,6 +28,7 @@ import reactor.core.publisher.Mono;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.timeout;
@@ -296,6 +297,24 @@ class PushModuleNotificationHandlerTest {
         assertThat(request.getDedupKey()).isEqualTo("LIKE_STORY:interaction-1");
     }
 
+    @Test
+    void handleStoryLikePropagatesNotificationPersistenceFailureForKafkaRetry() {
+        PushModuleNotificationHandler handler = newHandler();
+        when(userIdentityQueryService.resolveUsername("actor-1")).thenReturn(Mono.just("Nam"));
+        when(notificationTemplatesRepository.findByActionType(UserActionType.LIKE_STORY))
+                .thenReturn(Mono.just(NotificationTemplates.builder()
+                        .id(8)
+                        .actionType(UserActionType.LIKE_STORY)
+                        .template("{{USERNAME}} liked your story")
+                        .build()));
+        when(notificationService.sendNotification(any(NotificationRequest.class)))
+                .thenReturn(Mono.error(new IllegalStateException("notification database unavailable")));
+
+        assertThatThrownBy(() -> handler.handleLikeEvent("""
+                {"actorId":"actor-1","targetId":"story-1","targetType":"STORY","targetOwnerId":"owner-1","interactionId":"interaction-1"}
+                """).join())
+                .hasRootCauseMessage("notification database unavailable");
+    }
     private PushModuleNotificationHandler newHandler() {
         return new PushModuleNotificationHandler(
                 notificationService,

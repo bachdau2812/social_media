@@ -116,6 +116,9 @@ public class PushModuleNotificationHandler {
         String interactionId = firstString(payloadJson, "interactionId", "interaction_id");
         Long likeCount = firstLong(payloadJson, "likeCount", "like_count");
 
+        log.info("|PushModuleNotificationHandler|handleLikeEvent|received|actorId={}|targetId={}|targetType={}|ownerId={}|interactionId={}",
+                actorId, targetId, targetType, targetOwnerId, interactionId);
+
         if (actorId.isBlank() || targetId.isBlank() || targetType.isBlank()) {
             log.warn("|PushModuleNotificationHandler|handleLikeEvent|missing data|actorId={}|targetId={}|targetType={}",
                     actorId, targetId, targetType);
@@ -228,7 +231,7 @@ public class PushModuleNotificationHandler {
         metadata.put("INTERACTION_ID", interactionId);
         metadata.put("DEDUP_KEY", "LIKE_STORY:" + interactionId);
         return enrichActorUsername(actorId, metadata)
-                .then(sendPush(
+                .then(sendPushDurably(
                         UserActionType.LIKE_STORY,
                         actorId,
                         storyId,
@@ -239,6 +242,23 @@ public class PushModuleNotificationHandler {
     }
 
     private Mono<Void> sendPush(
+            UserActionType actionType,
+            String actorId,
+            String entityId,
+            String entityType,
+            List<String> recipientIds,
+            Map<String, String> metadata,
+            boolean excludeActor
+    ) {
+        return sendPushDurably(actionType, actorId, entityId, entityType, recipientIds, metadata, excludeActor)
+                .onErrorResume(error -> {
+                    log.error("|PushModuleNotificationHandler|sendPush|failed|actionType={}|entityId={}|errorType={}",
+                            actionType, entityId, error.getClass().getSimpleName());
+                    return Mono.empty();
+                });
+    }
+
+    private Mono<Void> sendPushDurably(
             UserActionType actionType,
             String actorId,
             String entityId,
@@ -286,11 +306,6 @@ public class PushModuleNotificationHandler {
                                 .notificationType(NotificationType.PUSH)
                                 .build()))
                             .then();
-                })
-                .onErrorResume(error -> {
-                    log.error("|PushModuleNotificationHandler|sendPush|failed|actionType={}|entityId={}|error={}",
-                            actionType, entityId, error.getMessage());
-                    return Mono.empty();
                 });
     }
 
