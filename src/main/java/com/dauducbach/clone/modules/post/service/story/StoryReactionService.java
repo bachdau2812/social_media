@@ -40,12 +40,20 @@ public class StoryReactionService {
         return activeStoryForReaction(normalizedStoryId, normalizedActorId)
                 .flatMap(story -> transactionalOperator.transactional(
                         persistLike(story.getId(), normalizedActorId, candidateInteractionId)
-                                .flatMap(result -> outboxRepository.enqueue(
+                                .doOnNext(result -> log.info(
+                                        "|StoryReactionService|like|likePersisted|storyId={}|actorId={}|interactionId={}|changed={}",
+                                        story.getId(), normalizedActorId,
+                                        result.view().getReactionInteractionId(), result.changed()))
+                                .flatMap(result -> outboxRepository.enqueueRequired(
                                                 result.view().getReactionInteractionId(),
                                                 story.getId(),
                                                 normalizedActorId,
                                                 story.getUserId(),
                                                 Instant.now())
+                                        .doOnNext(entry -> log.info(
+                                                "|StoryReactionService|like|outboxVerified|storyId={}|actorId={}|ownerId={}|interactionId={}",
+                                                entry.getStoryId(), entry.getActorId(), entry.getOwnerId(),
+                                                entry.getInteractionId()))
                                         .thenReturn(result))))
                 .doOnNext(result -> log.info(
                         "|StoryReactionService|like|transactionCommitted|storyId={}|actorId={}|interactionId={}|changed={}",

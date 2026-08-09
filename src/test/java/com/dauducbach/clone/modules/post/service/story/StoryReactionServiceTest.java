@@ -1,6 +1,7 @@
 package com.dauducbach.clone.modules.post.service.story;
 
 import com.dauducbach.clone.modules.post.entity.story.StoryView;
+import com.dauducbach.clone.modules.post.entity.story.StoryLikeOutboxEntry;
 import com.dauducbach.clone.modules.post.entity.story.UserStories;
 import com.dauducbach.clone.modules.post.repositoty.story.StoryLikeOutboxRepository;
 import com.dauducbach.clone.modules.post.repositoty.story.StoryViewRepository;
@@ -48,8 +49,8 @@ class StoryReactionServiceTest {
                 .thenReturn(Mono.just(1), Mono.just(0));
         when(viewRepository.findByStoryIdAndViewerId("story-1", "actor-1"))
                 .thenReturn(Mono.just(view("LIKE")));
-        when(outboxRepository.enqueue(eq("interaction-1"), eq("story-1"), eq("actor-1"),
-                eq("owner-1"), any(Instant.class))).thenReturn(Mono.just(1));
+        when(outboxRepository.enqueueRequired(eq("interaction-1"), eq("story-1"), eq("actor-1"),
+                eq("owner-1"), any(Instant.class))).thenReturn(Mono.just(outboxEntry()));
         StoryReactionService service = newService();
 
         StepVerifier.create(service.like("story-1", "actor-1"))
@@ -59,7 +60,7 @@ class StoryReactionServiceTest {
                 .expectNext(false)
                 .verifyComplete();
 
-        verify(outboxRepository, times(2)).enqueue(eq("interaction-1"), eq("story-1"),
+        verify(outboxRepository, times(2)).enqueueRequired(eq("interaction-1"), eq("story-1"),
                 eq("actor-1"), eq("owner-1"), any(Instant.class));
         verify(transactionalOperator, times(2)).transactional(any(Mono.class));
     }
@@ -70,12 +71,12 @@ class StoryReactionServiceTest {
         when(viewRepository.markLiked(eq("story-1"), eq("actor-1"), anyString())).thenReturn(Mono.just(1));
         when(viewRepository.findByStoryIdAndViewerId("story-1", "actor-1"))
                 .thenReturn(Mono.just(view("LIKE")));
-        when(outboxRepository.enqueue(anyString(), eq("story-1"), eq("actor-1"),
+        when(outboxRepository.enqueueRequired(anyString(), eq("story-1"), eq("actor-1"),
                 eq("owner-1"), any(Instant.class)))
-                .thenReturn(Mono.error(new IllegalStateException("outbox unavailable")));
+                .thenReturn(Mono.error(new IllegalStateException("outbox intent was not verified")));
 
         StepVerifier.create(newService().like("story-1", "actor-1"))
-                .expectErrorMessage("outbox unavailable")
+                .expectErrorMessage("outbox intent was not verified")
                 .verify();
 
         verify(transactionalOperator).transactional(any(Mono.class));
@@ -88,15 +89,15 @@ class StoryReactionServiceTest {
         when(viewRepository.findByStoryIdAndViewerId("story-1", "actor-1")).thenReturn(Mono.empty());
         when(entityTemplate.insert(StoryView.class)).thenReturn(insertSpec);
         when(insertSpec.using(any(StoryView.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
-        when(outboxRepository.enqueue(anyString(), eq("story-1"), eq("actor-1"),
-                eq("owner-1"), any(Instant.class))).thenReturn(Mono.just(1));
+        when(outboxRepository.enqueueRequired(anyString(), eq("story-1"), eq("actor-1"),
+                eq("owner-1"), any(Instant.class))).thenReturn(Mono.just(outboxEntry()));
 
         StepVerifier.create(newService().like("story-1", "actor-1"))
                 .expectNext(true)
                 .verifyComplete();
 
         verify(insertSpec).using(any(StoryView.class));
-        verify(outboxRepository).enqueue(anyString(), eq("story-1"), eq("actor-1"),
+        verify(outboxRepository).enqueueRequired(anyString(), eq("story-1"), eq("actor-1"),
                 eq("owner-1"), any(Instant.class));
     }
 
@@ -140,6 +141,16 @@ class StoryReactionServiceTest {
                 .reaction(reaction)
                 .reactionInteractionId("interaction-1")
                 .viewedAt(Instant.now())
+                .build();
+    }
+
+    private StoryLikeOutboxEntry outboxEntry() {
+        return StoryLikeOutboxEntry.builder()
+                .interactionId("interaction-1")
+                .storyId("story-1")
+                .actorId("actor-1")
+                .ownerId("owner-1")
+                .createdAt(Instant.now())
                 .build();
     }
 }
