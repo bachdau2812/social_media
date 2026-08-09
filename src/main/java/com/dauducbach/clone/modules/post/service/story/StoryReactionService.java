@@ -2,19 +2,23 @@ package com.dauducbach.clone.modules.post.service.story;
 
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
+import com.dauducbach.clone.modules.post.dto.story.event.StoryLikeEventPayload;
 import com.dauducbach.clone.modules.post.entity.story.StoryView;
 import com.dauducbach.clone.modules.post.entity.story.UserStories;
-import com.dauducbach.clone.modules.post.repositoty.story.StoryLikeOutboxRepository;
 import com.dauducbach.clone.modules.post.repositoty.story.StoryViewRepository;
 import com.dauducbach.clone.modules.post.repositoty.story.UserStoriesRepository;
+import com.google.gson.JsonObject;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.SignalType;
+import reactor.kafka.sender.KafkaSender;
+import reactor.kafka.sender.SenderRecord;
+import reactor.kafka.sender.SenderResult;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -24,12 +28,12 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class StoryReactionService {
     private static final String LIKE_REACTION = "LIKE";
+    private static final String LIKE_EVENT_TOPIC = "like_event";
 
     private final UserStoriesRepository storiesRepository;
     private final StoryViewRepository viewRepository;
     private final R2dbcEntityTemplate entityTemplate;
-    private final StoryLikeOutboxRepository outboxRepository;
-    private final TransactionalOperator transactionalOperator;
+    private final KafkaSender<String, String> kafkaSender;
 
     public Mono<Boolean> like(String storyId, String actorId) {
         String normalizedStoryId = requireText(storyId, "storyId");
@@ -38,25 +42,21 @@ public class StoryReactionService {
         log.info("|StoryReactionService|like|requested|storyId={}|actorId={}", normalizedStoryId, normalizedActorId);
 
         return activeStoryForReaction(normalizedStoryId, normalizedActorId)
-                .flatMap(story -> transactionalOperator.transactional(
-                        persistLike(story.getId(), normalizedActorId, candidateInteractionId)
-                                .doOnNext(result -> log.info(
-                                        "|StoryReactionService|like|likePersisted|storyId={}|actorId={}|interactionId={}|changed={}",
-                                        story.getId(), normalizedActorId,
-                                        result.view().getReactionInteractionId(), result.changed()))
-                                .flatMap(result -> outboxRepository.enqueueRequired(
-                                                result.view().getReactionInteractionId(),
-                                                story.getId(),
-                                                normalizedActorId,
-                                                story.getUserId(),
-                                                Instant.now())
-                                        .doOnNext(entry -> log.info(
-                                                "|StoryReactionService|like|outboxVerified|storyId={}|actorId={}|ownerId={}|interactionId={}",
-                                                entry.getStoryId(), entry.getActorId(), entry.getOwnerId(),
-                                                entry.getInteractionId()))
-                                        .thenReturn(result))))
+                .flatMap(story -> persistLike(story.getId(), normalizedActorId, candidateInteractionId)
+                        .doOnNext(result -> log.info(
+                                "|StoryReactionService|like|likePersisted|storyId={}|actorId={}|interactionId={}|changed={}",
+                                story.getId(), normalizedActorId,
+                                result.view().getReactionInteractionId(), result.changed()))
+                        .flatMap(result -> publishLikeEvent(new StoryLikeEventPayload(
+                                        normalizedActorId,
+                                        story.getId(),
+                                        "STORY",
+                                        story.getUserId(),
+                                        result.view().getReactionInteractionId(),
+                                        Instant.now()))
+                                .thenReturn(result)))
                 .doOnNext(result -> log.info(
-                        "|StoryReactionService|like|transactionCommitted|storyId={}|actorId={}|interactionId={}|changed={}",
+                        "|StoryReactionService|like|completed|storyId={}|actorId={}|interactionId={}|changed={}",
                         normalizedStoryId,
                         normalizedActorId,
                         result.view().getReactionInteractionId(),
@@ -79,6 +79,47 @@ public class StoryReactionService {
         return activeStoryForReaction(normalizedStoryId, normalizedActorId)
                 .flatMap(story -> viewRepository.clearLike(story.getId(), normalizedActorId))
                 .map(updated -> updated != null && updated > 0);
+    }
+
+    private Mono<Void> publishLikeEvent(StoryLikeEventPayload payload) {
+        JsonObject event = new JsonObject();
+        event.addProperty("actorId", payload.actorId());
+        event.addProperty("targetId", payload.targetId());
+        event.addProperty("targetType", payload.targetType());
+        event.addProperty("targetOwnerId", payload.targetOwnerId());
+        event.addProperty("interactionId", payload.interactionId());
+        event.addProperty("timestamp", payload.timestamp().toString());
+        SenderRecord<String, String, String> record = SenderRecord.create(
+                new ProducerRecord<>(LIKE_EVENT_TOPIC, payload.targetId(), event.toString()),
+                payload.interactionId());
+
+        log.info(
+                "|StoryReactionService|publishLikeEvent|sending|storyId={}|actorId={}|ownerId={}|interactionId={}",
+                payload.targetId(), payload.actorId(), payload.targetOwnerId(), payload.interactionId());
+        return kafkaSender.send(Mono.just(record))
+                .single()
+                .flatMap(result -> requireBrokerAcknowledgement(payload, result))
+                .doOnError(error -> log.error(
+                        "|StoryReactionService|publishLikeEvent|failed|storyId={}|actorId={}|interactionId={}|errorType={}",
+                        payload.targetId(), payload.actorId(), payload.interactionId(),
+                        error.getClass().getSimpleName()));
+    }
+
+    private Mono<Void> requireBrokerAcknowledgement(
+            StoryLikeEventPayload payload,
+            SenderResult<String> result
+    ) {
+        if (result.exception() != null) {
+            return Mono.error(result.exception());
+        }
+        var metadata = result.recordMetadata();
+        if (metadata == null) {
+            return Mono.error(new IllegalStateException("Kafka acknowledgement metadata is missing"));
+        }
+        log.info(
+                "|StoryReactionService|publishLikeEvent|brokerAcknowledged|interactionId={}|topic={}|partition={}|offset={}",
+                payload.interactionId(), metadata.topic(), metadata.partition(), metadata.offset());
+        return Mono.empty();
     }
 
     private Mono<LikePersistence> persistLike(String storyId, String actorId, String candidateInteractionId) {
