@@ -11,6 +11,7 @@ import jakarta.validation.Valid;
 import com.dauducbach.clone.modules.post.service.story.StoryLibraryService;
 import com.dauducbach.clone.modules.post.service.story.StoryReactionService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,6 +26,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 @RestController
+@Slf4j
 @RequiredArgsConstructor
 @RequestMapping("/profile-media")
 public class StoryLibraryController {
@@ -44,11 +46,19 @@ public class StoryLibraryController {
 
     @PutMapping("/stories/{storyId}/like")
     public Mono<ApiResponse<Boolean>> likeStory(@PathVariable String storyId, Authentication authentication) {
-        return reactionService.like(storyId, authentication.getName())
+        String actorId = authentication.getName();
+        log.info("|StoryLibraryController|likeStory|requested|storyId={}|actorId={}", storyId, actorId);
+        return reactionService.like(storyId, actorId)
+                .doOnNext(changed -> log.info(
+                        "|StoryLibraryController|likeStory|completed|storyId={}|actorId={}|changed={}",
+                        storyId, actorId, changed))
                 .map(changed -> ApiResponse.<Boolean>builder()
                         .message(changed ? "Story liked" : "Story already liked")
                         .result(changed)
-                        .build());
+                        .build())
+                .doOnError(error -> log.error(
+                        "|StoryLibraryController|likeStory|failed|storyId={}|actorId={}|errorType={}",
+                        storyId, actorId, error.getClass().getSimpleName()));
     }
 
     @DeleteMapping("/stories/{storyId}/like")
