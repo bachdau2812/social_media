@@ -27,6 +27,16 @@ class DirectStoryLikeContractTest {
     }
 
     @Test
+    void publishLifecycleLogsCarryTheCompleteStoryLikeContext() throws Exception {
+        String service = Files.readString(SERVICE).replaceAll("\\s+", " ");
+
+        assertThat(service).contains(
+                "|publishLikeEvent|sending|storyId={}|actorId={}|ownerId={}|interactionId={}",
+                "|publishLikeEvent|brokerAcknowledged|storyId={}|actorId={}|ownerId={}|interactionId={}|topic={}|partition={}|offset={}",
+                "|publishLikeEvent|failed|storyId={}|actorId={}|ownerId={}|interactionId={}|errorType={}");
+    }
+
+    @Test
     void storySchemaKeepsDeduplicationWithoutCreatingOrSeedingOutbox() throws Exception {
         String schema = Files.readString(STORY_SCHEMA);
 

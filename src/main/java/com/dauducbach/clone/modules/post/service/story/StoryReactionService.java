@@ -100,8 +100,8 @@ public class StoryReactionService {
                 .single()
                 .flatMap(result -> requireBrokerAcknowledgement(payload, result))
                 .doOnError(error -> log.error(
-                        "|StoryReactionService|publishLikeEvent|failed|storyId={}|actorId={}|interactionId={}|errorType={}",
-                        payload.targetId(), payload.actorId(), payload.interactionId(),
+                        "|StoryReactionService|publishLikeEvent|failed|storyId={}|actorId={}|ownerId={}|interactionId={}|errorType={}",
+                        payload.targetId(), payload.actorId(), payload.targetOwnerId(), payload.interactionId(),
                         error.getClass().getSimpleName()));
     }
 
@@ -117,8 +117,9 @@ public class StoryReactionService {
             return Mono.error(new IllegalStateException("Kafka acknowledgement metadata is missing"));
         }
         log.info(
-                "|StoryReactionService|publishLikeEvent|brokerAcknowledged|interactionId={}|topic={}|partition={}|offset={}",
-                payload.interactionId(), metadata.topic(), metadata.partition(), metadata.offset());
+                "|StoryReactionService|publishLikeEvent|brokerAcknowledged|storyId={}|actorId={}|ownerId={}|interactionId={}|topic={}|partition={}|offset={}",
+                payload.targetId(), payload.actorId(), payload.targetOwnerId(), payload.interactionId(),
+                metadata.topic(), metadata.partition(), metadata.offset());
         return Mono.empty();
     }
 
