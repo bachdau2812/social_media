@@ -22,5 +22,6 @@ public class StoryView {
     String storyId;
     String viewerId;
     String reaction;
+    String reactionInteractionId;
     Instant viewedAt;
 }
