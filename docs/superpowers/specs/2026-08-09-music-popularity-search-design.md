@@ -2,7 +2,7 @@
 
 ## Goal
 
-Expose the existing `musics.popularity DECIMAL(6,5) UNSIGNED NULL` column through the music API and rank keyword search results by popularity descending.
+Expose the existing `musics.popularity DECIMAL(6,5) UNSIGNED NULL` column through the music API and rank every music-list result by popularity descending.
 
 ## Data mapping
 
@@ -12,17 +12,14 @@ Expose the existing `musics.popularity DECIMAL(6,5) UNSIGNED NULL` column throug
 
 ## Query behavior
 
-Apply `ORDER BY popularity DESC` to exactly these repository queries:
+Apply `ORDER BY popularity DESC` to all four repository list queries:
 
+- unfiltered catalog;
+- category-only catalog;
 - keyword-only music search;
 - keyword-and-category music search.
 
 Popularity is the only ordering expression. Do not add `display_name`, `id`, or another secondary ordering column. MySQL places null popularity values after non-null values for descending order.
-
-Queries without a keyword retain their current ordering:
-
-- unfiltered catalog: `display_name ASC`;
-- category-only catalog: `display_name ASC`.
 
 Count queries remain unchanged because ordering does not affect counts.
 
@@ -34,6 +31,6 @@ Count queries remain unchanged because ordering does not affect counts.
 
 ## Verification
 
-- A source-level repository contract test must fail before the SQL change and then verify both keyword queries use only `popularity DESC`.
+- A source-level repository contract test must fail before the SQL change and then verify all four list queries use only `popularity DESC`.
 - An entity mapping test must verify that popularity uses `BigDecimal`.
 - Run focused media tests and a Maven package build after implementation.
