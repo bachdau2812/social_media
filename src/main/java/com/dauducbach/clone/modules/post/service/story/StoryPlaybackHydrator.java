@@ -1,7 +1,7 @@
 package com.dauducbach.clone.modules.post.service.story;
 
 import com.dauducbach.clone.modules.media.entity.music.Musics;
-import com.dauducbach.clone.modules.media.repositoty.music.MusicsRepository;
+import com.dauducbach.clone.modules.media.service.music.MusicPlaybackCatalog;
 import com.dauducbach.clone.modules.post.dto.story.response.StoryArchiveResponse;
 import com.dauducbach.clone.modules.post.entity.story.UserStories;
 import lombok.RequiredArgsConstructor;
@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
 @Component
 @RequiredArgsConstructor
 public class StoryPlaybackHydrator {
-    private final MusicsRepository musicsRepository;
+    private final MusicPlaybackCatalog musicPlaybackCatalog;
     private final StoryMusicSegmentPolicy segmentPolicy;
 
     public Mono<StoryArchiveResponse> hydrate(
@@ -42,7 +42,7 @@ public class StoryPlaybackHydrator {
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         Flux<Musics> catalog = musicIds.isEmpty()
                 ? Flux.empty()
-                : musicsRepository.findAllById(musicIds);
+                : musicPlaybackCatalog.findAllByIds(musicIds);
         return catalog.collectMap(Musics::getId, Function.identity())
                 .map(musicById -> stories.stream()
                         .map(story -> toResponse(story, musicById, mediaUrlResolver))

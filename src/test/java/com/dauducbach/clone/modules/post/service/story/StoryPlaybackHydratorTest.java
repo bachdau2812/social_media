@@ -1,7 +1,7 @@
 package com.dauducbach.clone.modules.post.service.story;
 
 import com.dauducbach.clone.modules.media.entity.music.Musics;
-import com.dauducbach.clone.modules.media.repositoty.music.MusicsRepository;
+import com.dauducbach.clone.modules.media.service.music.MusicPlaybackCatalog;
 import com.dauducbach.clone.modules.post.dto.story.response.StoryArchiveResponse;
 import com.dauducbach.clone.modules.post.entity.story.UserStories;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,18 +21,18 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class StoryPlaybackHydratorTest {
-    @Mock MusicsRepository musicsRepository;
+    @Mock MusicPlaybackCatalog musicPlaybackCatalog;
 
     private StoryPlaybackHydrator hydrator;
 
     @BeforeEach
     void setUp() {
-        hydrator = new StoryPlaybackHydrator(musicsRepository, new StoryMusicSegmentPolicy());
+        hydrator = new StoryPlaybackHydrator(musicPlaybackCatalog, new StoryMusicSegmentPolicy());
     }
 
     @Test
     void resolvesCatalogMusicAndPreservesStoryOrder() {
-        when(musicsRepository.findAllById(any(Iterable.class))).thenReturn(Flux.just(
+        when(musicPlaybackCatalog.findAllByIds(any(Iterable.class))).thenReturn(Flux.just(
                 music("music-2", "Second", "/two.mp3", true),
                 music("music-1", "First", "/one.mp3", true)));
 
@@ -52,7 +52,7 @@ class StoryPlaybackHydratorTest {
 
     @Test
     void prefersPersistedStoryMusicUrl() {
-        when(musicsRepository.findAllById(any(Iterable.class)))
+        when(musicPlaybackCatalog.findAllByIds(any(Iterable.class)))
                 .thenReturn(Flux.just(music("music-1", "First", "/catalog.mp3", true)));
 
         StepVerifier.create(hydrator.hydrate(story("story-1", "music-1", "/persisted.mp3"), UserStories::getMediaUrl))
@@ -62,7 +62,7 @@ class StoryPlaybackHydratorTest {
 
     @Test
     void missingOrUnfetchedMusicFallsBackToSilentStory() {
-        when(musicsRepository.findAllById(any(Iterable.class))).thenReturn(Flux.just(
+        when(musicPlaybackCatalog.findAllByIds(any(Iterable.class))).thenReturn(Flux.just(
                 music("music-unfetched", "Pending", null, false)));
 
         StepVerifier.create(hydrator.hydrateAll(

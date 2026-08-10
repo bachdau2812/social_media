@@ -6,7 +6,7 @@ import com.dauducbach.clone.modules.user.dto.response.UserDiscoveryResponse;
 import com.dauducbach.clone.modules.media.entity.music.Musics;
 import com.dauducbach.clone.modules.post.entity.story.StoryView;
 import com.dauducbach.clone.modules.post.entity.story.UserStories;
-import com.dauducbach.clone.modules.media.repositoty.music.MusicsRepository;
+import com.dauducbach.clone.modules.media.service.music.MusicPlaybackCatalog;
 import com.dauducbach.clone.modules.post.repositoty.story.StoryViewRepository;
 import com.dauducbach.clone.modules.post.repositoty.story.UserStoriesRepository;
 import com.dauducbach.clone.modules.user.service.UserDiscoveryHydrator;
@@ -28,7 +28,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class StoryTrayQueryServiceTest {
     @Mock UserStoriesRepository userStoriesRepository;
-    @Mock MusicsRepository musicsRepository;
+    @Mock MusicPlaybackCatalog musicPlaybackCatalog;
     @Mock StoryViewRepository storyViewRepository;
     @Mock UserDiscoveryHydrator userDiscoveryHydrator;
     @Mock MediaCompatibilityFacade mediaFacade;
@@ -52,7 +52,7 @@ class StoryTrayQueryServiceTest {
                 storyViewRepository,
                 userDiscoveryHydrator,
                 mediaFacade,
-                new StoryPlaybackHydrator(musicsRepository, new StoryMusicSegmentPolicy())
+                new StoryPlaybackHydrator(musicPlaybackCatalog, new StoryMusicSegmentPolicy())
         );
 
         StepVerifier.create(service.getHomeStoryTray("viewer-1"))
@@ -89,7 +89,7 @@ class StoryTrayQueryServiceTest {
                         .reaction("LIKE")
                         .viewedAt(now)
                         .build()));
-        when(musicsRepository.findAllById(any(Iterable.class)))
+        when(musicPlaybackCatalog.findAllByIds(any(Iterable.class)))
                 .thenReturn(Flux.just(Musics.builder()
                         .id("music-1")
                         .songUrl("/music.mp3")
@@ -113,7 +113,7 @@ class StoryTrayQueryServiceTest {
                 storyViewRepository,
                 userDiscoveryHydrator,
                 mediaFacade,
-                new StoryPlaybackHydrator(musicsRepository, new StoryMusicSegmentPolicy())
+                new StoryPlaybackHydrator(musicPlaybackCatalog, new StoryMusicSegmentPolicy())
         );
 
         StepVerifier.create(service.getHomeStoryTray("viewer-1"))
