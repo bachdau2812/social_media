@@ -116,6 +116,11 @@ post:
       max-in-memory-size: 10MB
 
 app:
+  media:
+    limits:
+      image: ${MEDIA_IMAGE_MAX_SIZE:100MB}
+      video: ${MEDIA_VIDEO_MAX_SIZE:100MB}
+      audio: ${MEDIA_AUDIO_MAX_SIZE:50MB}
   frontend:
     oauth-success-url: ${FRONTEND_OAUTH_SUCCESS_URL:http://localhost:5173/oauth/callback}
 
