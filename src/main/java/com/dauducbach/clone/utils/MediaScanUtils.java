@@ -32,7 +32,7 @@ public class MediaScanUtils {
     String scanApiUrl;
 
     @NonFinal
-    @Value("${post.media.scan.max-in-memory-size:10MB}")
+    @Value("${app.media.limits.image:100MB}")
     DataSize maxScanMemorySize;
 
     public Mono<ScanResult> scanMedia(String mediaUrl) {

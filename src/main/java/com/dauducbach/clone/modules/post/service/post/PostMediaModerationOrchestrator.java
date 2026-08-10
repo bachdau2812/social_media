@@ -131,7 +131,7 @@ public class PostMediaModerationOrchestrator {
     }
 
     private Mono<PostScanOutcome> scanAndSavePostItem(String postId, PostMediaScanItem item) {
-        return moderationProvider.scan(item.getSecureUrl(), item.getPublicId())
+        return moderationProvider.scan(item.getSecureUrl(), item.getPublicId(), item.getResourceType())
                 .flatMap(decision -> {
                     if (decision == MediaModerationProvider.Decision.REJECTED) {
                         return cleanupService.delete(item.getPublicId())

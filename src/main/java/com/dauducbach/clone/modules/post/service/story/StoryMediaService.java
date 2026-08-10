@@ -11,6 +11,7 @@ import com.dauducbach.clone.modules.media.constant.OwnerType;
 import com.dauducbach.clone.modules.media.entity.Media;
 import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
 import com.dauducbach.clone.modules.media.service.MediaService;
+import com.dauducbach.clone.modules.post.service.post.MediaModerationProvider;
 import com.dauducbach.clone.modules.post.service.post.PostSseService;
 import com.dauducbach.clone.modules.post.dto.story.request.StoryCreateRequest;
 import com.dauducbach.clone.modules.post.dto.story.response.StoryArchiveResponse;
@@ -22,7 +23,6 @@ import com.dauducbach.clone.modules.post.repositoty.story.UserStoriesRepository;
 import com.dauducbach.clone.modules.post.service.story.StoryMusicSegmentPolicy;
 import com.dauducbach.clone.utils.GsonUtils;
 import com.dauducbach.clone.utils.KafkaUtils;
-import com.dauducbach.clone.utils.MediaScanUtils;
 import com.google.gson.JsonObject;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
@@ -70,7 +70,7 @@ public class StoryMediaService {
     PostSseService postSseService;
     KafkaSender<String, String> kafkaSender;
     R2dbcEntityTemplate r2dbcEntityTemplate;
-    MediaScanUtils mediaScanUtils;
+    MediaModerationProvider moderationProvider;
     UserAuditService userAuditService;
     StoryMusicSegmentPolicy storyMusicSegmentPolicy;
     StoryPlaybackHydrator storyPlaybackHydrator;
@@ -241,18 +241,19 @@ public class StoryMediaService {
         String userId = KafkaUtils.extractString(payloadJson, "userId");
         String mediaUrl = KafkaUtils.extractString(payloadJson, "mediaUrl");
         String publicId = KafkaUtils.extractString(payloadJson, "publicId");
-        log.info("|MediaForProfile|handleStoryScanEvent|received|storyId={}|userId={}|publicId={}",
-                storyId, userId, publicId);
+        String mediaType = KafkaUtils.extractString(payloadJson, "mediaType");
+        log.info("|MediaForProfile|handleStoryScanEvent|received|storyId={}|userId={}|publicId={}|mediaType={}",
+                storyId, userId, publicId, mediaType);
 
         if (storyId.isBlank() || userId.isBlank() || mediaUrl.isBlank()) {
             log.warn("|MediaForProfile|handleStoryScanEvent|missing data|storyId={}|userId={}", storyId, userId);
             return CompletableFuture.completedFuture(null);
         }
 
-        return mediaScanUtils.scanMedia(mediaUrl, publicId)
-                .doOnSuccess(result -> log.info("|MediaForProfile|handleStoryScanEvent|scan result|storyId={}|userId={}|nsfw={}",
-                        storyId, userId, result.nsfw()))
-                .flatMap(result -> result.nsfw()
+        return moderationProvider.scan(mediaUrl, publicId, mediaType)
+                .doOnSuccess(decision -> log.info("|MediaForProfile|handleStoryScanEvent|moderation result|storyId={}|userId={}|decision={}",
+                        storyId, userId, decision))
+                .flatMap(decision -> decision == MediaModerationProvider.Decision.REJECTED
                         ? handleStoryFailed(storyId, userId, mediaUrl, publicId)
                         : handleStorySuccess(storyId, userId, mediaUrl, publicId))
                 .doOnSuccess(v -> log.info("|MediaForProfile|handleStoryScanEvent|completed|storyId={}", storyId))
@@ -341,6 +342,7 @@ public class StoryMediaService {
         payload.addProperty("storyId", story.getId());
         payload.addProperty("userId", story.getUserId());
         payload.addProperty("mediaUrl", story.getMediaUrl());
+        payload.addProperty("mediaType", story.getMediaType());
         payload.addProperty("musicId", story.getMusicId());
         payload.addProperty("musicUrl", story.getMusicUrl());
         payload.addProperty("musicStart", story.getMusicStart());

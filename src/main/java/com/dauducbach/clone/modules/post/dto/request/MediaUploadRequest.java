@@ -14,5 +14,6 @@ import lombok.experimental.FieldDefaults;
 public class MediaUploadRequest {
     String secureUrl;
     String publicId;
+    String resourceType;
 }
 

@@ -6,6 +6,8 @@ import com.dauducbach.clone.modules.chat.constant.MessageType;
 import com.dauducbach.clone.modules.chat.dto.request.MediaMetadataRequest;
 import com.dauducbach.clone.modules.chat.dto.request.SendMessageRequest;
 import com.dauducbach.clone.modules.chat.dto.request.StoryContextRequest;
+import com.dauducbach.clone.modules.media.configuration.MediaPolicyProperties;
+import lombok.RequiredArgsConstructor;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.springframework.stereotype.Service;
@@ -16,12 +18,13 @@ import java.util.Locale;
 import java.util.UUID;
 
 @Service
+@RequiredArgsConstructor
 public class ChatMessageValidator {
 
-    static final long MAX_IMAGE_OR_AUDIO_BYTES = 50L * 1024 * 1024;
-    static final long MAX_VIDEO_BYTES = 500L * 1024 * 1024;
     static final long MAX_AUDIO_DURATION_MS = 5L * 60 * 1000;
     private static final String BLOCK_SELECTOR = "address, article, aside, blockquote, div, dl, fieldset, figcaption, figure, footer, form, h1, h2, h3, h4, h5, h6, header, hr, li, main, nav, ol, p, pre, section, table, tr, ul";
+
+    private final MediaPolicyProperties mediaPolicy;
 
     public ValidatedMessage validate(SendMessageRequest request) {
         if (request == null) {
@@ -138,7 +141,12 @@ public class ChatMessageValidator {
             throw new AppException(ErrorCode.CHAT_MESSAGE_CONTENT_INVALID, "Media MIME type does not match message type");
         }
 
-        long maximumBytes = messageType == MessageType.VIDEO ? MAX_VIDEO_BYTES : MAX_IMAGE_OR_AUDIO_BYTES;
+        long maximumBytes = switch (messageType) {
+            case IMAGE -> mediaPolicy.imageMaxBytes();
+            case VIDEO -> mediaPolicy.videoMaxBytes();
+            case AUDIO, FILE -> mediaPolicy.audioMaxBytes();
+            case TEXT, STORY_REPLY, SYSTEM -> 0;
+        };
         if (metadata.size() > maximumBytes) {
             throw new AppException(ErrorCode.CHAT_MESSAGE_CONTENT_INVALID, "Chat media exceeds the allowed size");
         }

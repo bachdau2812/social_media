@@ -13,6 +13,7 @@ import com.dauducbach.clone.modules.chat.repository.ConversationMemberRepository
 import com.dauducbach.clone.modules.chat.repository.ConversationRepository;
 import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
 import com.dauducbach.clone.modules.media.service.MediaService;
+import com.dauducbach.clone.modules.media.configuration.MediaPolicyProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -62,7 +63,7 @@ class SendMessageServiceTest {
                 conversationRepository,
                 memberRepository,
                 accessService,
-                new ChatMessageValidator(),
+                new ChatMessageValidator(new MediaPolicyProperties()),
                 new ChatResponseMapper(),
                 eventPublisher,
                 transactionalOperator,

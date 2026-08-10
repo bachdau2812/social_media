@@ -6,10 +6,12 @@ import com.dauducbach.clone.modules.chat.constant.MessageType;
 import com.dauducbach.clone.modules.chat.dto.request.MediaMetadataRequest;
 import com.dauducbach.clone.modules.chat.dto.request.SendMessageRequest;
 import com.dauducbach.clone.modules.chat.dto.request.StoryContextRequest;
+import com.dauducbach.clone.modules.media.configuration.MediaPolicyProperties;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.util.unit.DataSize;
 
 import java.util.UUID;
 import java.time.Instant;
@@ -19,7 +21,43 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ChatMessageValidatorTest {
 
-    private final ChatMessageValidator validator = new ChatMessageValidator();
+    private final ChatMessageValidator validator = new ChatMessageValidator(mediaPolicy());
+
+    @Test
+    void configuredImageAndVideoLimitsAcceptBoundaryAndRejectOneByteOver() {
+        long limit = 100L * 1024 * 1024;
+
+        assertThat(validator.validate(mediaRequest(
+                MessageType.IMAGE,
+                new MediaMetadataRequest("https://host/image.jpg", "image", "image/jpeg", limit, "image.jpg", 1, 1, null))))
+                .isNotNull();
+        assertThat(validator.validate(mediaRequest(
+                MessageType.VIDEO,
+                new MediaMetadataRequest("https://host/video.mp4", "video", "video/mp4", limit, "video.mp4", 1, 1, 1L))))
+                .isNotNull();
+        assertChatError(mediaRequest(
+                MessageType.IMAGE,
+                new MediaMetadataRequest("https://host/image.jpg", "image", "image/jpeg", limit + 1, "image.jpg", 1, 1, null)),
+                ErrorCode.CHAT_MESSAGE_CONTENT_INVALID);
+        assertChatError(mediaRequest(
+                MessageType.VIDEO,
+                new MediaMetadataRequest("https://host/video.mp4", "video", "video/mp4", limit + 1, "video.mp4", 1, 1, 1L)),
+                ErrorCode.CHAT_MESSAGE_CONTENT_INVALID);
+    }
+
+    @Test
+    void configuredAudioLimitRemainsFiftyMegabytes() {
+        long limit = 50L * 1024 * 1024;
+
+        assertThat(validator.validate(mediaRequest(
+                MessageType.AUDIO,
+                new MediaMetadataRequest("https://host/audio.mp3", "audio", "audio/mpeg", limit, "audio.mp3", null, null, 1L))))
+                .isNotNull();
+        assertChatError(mediaRequest(
+                MessageType.AUDIO,
+                new MediaMetadataRequest("https://host/audio.mp3", "audio", "audio/mpeg", limit + 1, "audio.mp3", null, null, 1L)),
+                ErrorCode.CHAT_MESSAGE_CONTENT_INVALID);
+    }
 
     @Test
     void textMessageDecodesHtmlEntitiesIntoPlainText() {
@@ -212,5 +250,13 @@ class ChatMessageValidatorTest {
         assertThatThrownBy(() -> validator.validate(request))
                 .isInstanceOfSatisfying(AppException.class,
                         error -> assertThat(error.getErrorCode()).isEqualTo(expected));
+    }
+
+    private static MediaPolicyProperties mediaPolicy() {
+        MediaPolicyProperties properties = new MediaPolicyProperties();
+        properties.setImage(DataSize.ofMegabytes(100));
+        properties.setVideo(DataSize.ofMegabytes(100));
+        properties.setAudio(DataSize.ofMegabytes(50));
+        return properties;
     }
 }

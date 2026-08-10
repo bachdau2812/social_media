@@ -7,6 +7,7 @@ import com.dauducbach.clone.modules.media.constant.OwnerType;
 import com.dauducbach.clone.modules.media.entity.Media;
 import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
 import com.dauducbach.clone.modules.media.service.MediaService;
+import com.dauducbach.clone.modules.post.service.post.MediaModerationProvider;
 import com.dauducbach.clone.modules.post.service.post.PostSseService;
 import com.dauducbach.clone.modules.post.dto.story.request.StoryCreateRequest;
 import com.dauducbach.clone.modules.post.dto.story.response.StoryArchiveResponse;
@@ -16,7 +17,6 @@ import com.dauducbach.clone.modules.user.repositoty.UserDetailsRepository;
 import com.dauducbach.clone.modules.post.repositoty.story.UserStoriesRepository;
 import com.dauducbach.clone.modules.post.service.story.StoryMusicSegmentPolicy;
 import com.dauducbach.clone.utils.GsonUtils;
-import com.dauducbach.clone.utils.MediaScanUtils;
 import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -65,7 +65,7 @@ class StoryMediaServiceTest {
     @Mock
     R2dbcEntityTemplate r2dbcEntityTemplate;
     @Mock
-    MediaScanUtils mediaScanUtils;
+    MediaModerationProvider moderationProvider;
     @Mock
     UserAuditService userAuditService;
     @Mock
@@ -84,6 +84,7 @@ class StoryMediaServiceTest {
                         JsonObject payload = GsonUtils.fromString(record.value());
                         assertThat(payload.get("userId").getAsString()).isEqualTo("user-1");
                         assertThat(payload.get("publicId").getAsString()).isEqualTo("stories/story_1");
+                        assertThat(payload.get("mediaType").getAsString()).isEqualTo("IMAGE");
                         assertThat(payload.get("musicUrl").getAsString()).isEqualTo("https://res.cloudinary.com/demo/video/upload/v1234567890/musics/song.mp3");
                         assertThat(payload.get("musicStart").getAsLong()).isEqualTo(30L);
                         assertThat(payload.get("musicEnd").getAsLong()).isEqualTo(45L);
@@ -204,8 +205,8 @@ class StoryMediaServiceTest {
                 .build();
 
         stubStoryClaim(pendingStory);
-        when(mediaScanUtils.scanMedia("https://cdn.example/story.jpg", "stories/story_1"))
-                .thenReturn(Mono.just(MediaScanUtils.ScanResult.approved()));
+        when(moderationProvider.scan("https://cdn.example/story.jpg", "stories/story_1", "IMAGE"))
+                .thenReturn(Mono.just(MediaModerationProvider.Decision.APPROVED));
         when(mediaService.saveCloudinaryMedia("stories/story_1", "owner-1", OwnerType.STORY))
                 .thenReturn(Mono.just(savedMedia));
         when(userStoriesRepository.save(any(UserStories.class)))
@@ -266,8 +267,8 @@ class StoryMediaServiceTest {
         UserStories pendingStory = story("story-1", "owner-1", "https://cdn.example/story.jpg", "PENDING_SCAN");
         stubStoryClaim(pendingStory);
 
-        when(mediaScanUtils.scanMedia("https://cdn.example/story.jpg", "stories/story_1"))
-                .thenReturn(Mono.just(MediaScanUtils.ScanResult.rejected()));
+        when(moderationProvider.scan("https://cdn.example/story.jpg", "stories/story_1", "IMAGE"))
+                .thenReturn(Mono.just(MediaModerationProvider.Decision.REJECTED));
         when(userStoriesRepository.save(any(UserStories.class)))
                 .thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
         when(cloudinaryMediaService.deleteAsset("stories/story_1")).thenReturn(Mono.empty());
@@ -291,6 +292,41 @@ class StoryMediaServiceTest {
         verify(kafkaSender, never()).send(any(Publisher.class));
     }
 
+    @Test
+    void handleStoryScanEventDelegatesVideoToBypassAwareModeration() {
+        StoryMediaService service = newService();
+        UserStories pendingStory = story(
+                "story-1",
+                "owner-1",
+                "https://res.cloudinary.com/demo/video/upload/v1/story.mp4",
+                "PENDING_SCAN");
+        pendingStory.setMediaType("VIDEO");
+        Media savedMedia = Media.builder()
+                .assetId("media-video")
+                .resourceType("video")
+                .secureUrl(pendingStory.getMediaUrl())
+                .build();
+
+        stubStoryClaim(pendingStory);
+        when(moderationProvider.scan(pendingStory.getMediaUrl(), "stories/story_1", "VIDEO"))
+                .thenReturn(Mono.just(MediaModerationProvider.Decision.APPROVED));
+        when(mediaService.saveCloudinaryMedia("stories/story_1", "owner-1", OwnerType.STORY))
+                .thenReturn(Mono.just(savedMedia));
+        when(userStoriesRepository.save(any(UserStories.class)))
+                .thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+        when(postSseService.sendToUser(eq("owner-1"), eq("story_upload_event"), anyString()))
+                .thenReturn(Mono.empty());
+        when(kafkaSender.send(any(Publisher.class))).thenReturn(Flux.empty());
+
+        JsonObject payload = GsonUtils.fromString(storyScanPayload());
+        payload.addProperty("mediaUrl", pendingStory.getMediaUrl());
+        payload.addProperty("mediaType", "VIDEO");
+        service.handleStoryScanEvent(payload.toString()).join();
+
+        verify(moderationProvider).scan(pendingStory.getMediaUrl(), "stories/story_1", "VIDEO");
+        verify(userStoriesRepository).save(any(UserStories.class));
+    }
+
     private StoryMediaService newService() {
         return new StoryMediaService(
                 userDetailsRepository,
@@ -300,7 +336,7 @@ class StoryMediaServiceTest {
                 postSseService,
                 kafkaSender,
                 r2dbcEntityTemplate,
-                mediaScanUtils,
+                moderationProvider,
                 userAuditService,
                 new StoryMusicSegmentPolicy(),
                 storyPlaybackHydrator
@@ -338,6 +374,7 @@ class StoryMediaServiceTest {
         payload.addProperty("storyId", "story-1");
         payload.addProperty("userId", "owner-1");
         payload.addProperty("mediaUrl", "https://cdn.example/story.jpg");
+        payload.addProperty("mediaType", "IMAGE");
         payload.addProperty("publicId", "stories/story_1");
         return payload.toString();
     }

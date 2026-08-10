@@ -89,7 +89,10 @@ public class CommentMediaModerationOrchestrator {
 
     private Mono<Boolean> scanMediaList(List<MediaUploadRequest> mediaList) {
         return Flux.fromIterable(mediaList)
-                .concatMap(item -> moderationProvider.scan(item.getSecureUrl(), item.getPublicId()))
+                .concatMap(item -> moderationProvider.scan(
+                        item.getSecureUrl(),
+                        item.getPublicId(),
+                        item.getResourceType()))
                 .any(decision -> decision == MediaModerationProvider.Decision.REJECTED);
     }
 

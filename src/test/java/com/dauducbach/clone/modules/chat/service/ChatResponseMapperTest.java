@@ -14,6 +14,7 @@ import com.dauducbach.clone.modules.chat.dto.response.ReplyMessageResponse;
 import com.dauducbach.clone.modules.chat.dto.response.StoryContextResponse;
 import com.dauducbach.clone.modules.chat.entity.ChatMessage;
 import com.dauducbach.clone.modules.chat.repository.ChatReadRepository;
+import com.dauducbach.clone.modules.media.configuration.MediaPolicyProperties;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -25,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ChatResponseMapperTest {
 
     private final ChatResponseMapper mapper = new ChatResponseMapper();
-    private final ChatMessageValidator validator = new ChatMessageValidator();
+    private final ChatMessageValidator validator = new ChatMessageValidator(new MediaPolicyProperties());
 
     @Test
     void mapsConversationListRowAndCalculatesUnreadCountFromJoinedSequence() {

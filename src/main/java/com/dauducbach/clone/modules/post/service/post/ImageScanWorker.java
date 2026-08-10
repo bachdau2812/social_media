@@ -115,6 +115,7 @@ public class ImageScanWorker {
                 mediaList.add(MediaUploadRequest.builder()
                         .secureUrl(KafkaUtils.extractString(item, "secureUrl"))
                         .publicId(KafkaUtils.extractString(item, "publicId"))
+                        .resourceType(KafkaUtils.extractString(item, "resourceType"))
                         .build());
             }
         }
