@@ -5,8 +5,8 @@ import com.dauducbach.clone.commons.response.PageResponse;
 import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import com.dauducbach.clone.modules.post.service.story.StoryMediaService;
 import com.dauducbach.clone.modules.post.dto.story.request.StoryCreateRequest;
+import com.dauducbach.clone.modules.post.dto.story.response.StoryArchiveResponse;
 import com.dauducbach.clone.modules.user.dto.response.ProfileMediaUploadResponse;
-import com.dauducbach.clone.modules.post.entity.story.UserStories;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
@@ -39,7 +39,7 @@ public class StoryMediaController {
     }
 
     @GetMapping("/{userId}/stories")
-    public Mono<ApiResponse<PageResponse<UserStories>>> getStories(
+    public Mono<ApiResponse<PageResponse<StoryArchiveResponse>>> getStories(
             @PathVariable String userId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
@@ -47,7 +47,7 @@ public class StoryMediaController {
             Authentication authentication
     ) {
         return storyMediaService.getStories(userId, authentication.getName(), page, size, mediaType)
-                .map(response -> ApiResponse.<PageResponse<UserStories>>builder()
+                .map(response -> ApiResponse.<PageResponse<StoryArchiveResponse>>builder()
                         .message("Stories fetched")
                         .result(response)
                         .build());

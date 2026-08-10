@@ -3,10 +3,9 @@ package com.dauducbach.clone.modules.post.service.story;
 import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
 import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import com.dauducbach.clone.modules.post.dto.story.response.StoryTrayResponse;
-import com.dauducbach.clone.modules.media.entity.music.Musics;
+import com.dauducbach.clone.modules.post.dto.story.response.StoryArchiveResponse;
 import com.dauducbach.clone.modules.post.entity.story.StoryView;
 import com.dauducbach.clone.modules.post.entity.story.UserStories;
-import com.dauducbach.clone.modules.media.repositoty.music.MusicsRepository;
 import com.dauducbach.clone.modules.post.repositoty.story.StoryViewRepository;
 import com.dauducbach.clone.modules.post.repositoty.story.UserStoriesRepository;
 import com.dauducbach.clone.modules.user.service.UserDiscoveryHydrator;
@@ -25,11 +24,10 @@ public class StoryTrayQueryService {
     private static final int HOME_STORY_LIMIT = 20;
 
     private final UserStoriesRepository userStoriesRepository;
-    private final MusicsRepository musicsRepository;
     private final StoryViewRepository storyViewRepository;
     private final UserDiscoveryHydrator userDiscoveryHydrator;
     private final MediaCompatibilityFacade mediaFacade;
-    private final StoryMusicSegmentPolicy storyMusicSegmentPolicy;
+    private final StoryPlaybackHydrator storyPlaybackHydrator;
 
     public Mono<List<StoryTrayResponse>> getHomeStoryTray(String viewerId) {
         Instant now = Instant.now();
@@ -57,53 +55,45 @@ public class StoryTrayQueryService {
                         StoryView::getStoryId,
                         Function.identity(),
                         (first, ignored) -> first)))
-                .flatMapMany(views -> Flux.fromIterable(stories)
-                        .concatMap(story -> {
-                            StoryView view = views.get(story.getId());
-                            boolean viewerSeen = viewerId.equals(story.getUserId()) || view != null;
+                .flatMapMany(views -> storyPlaybackHydrator.hydrateAll(
+                                stories,
+                                story -> mediaFacade.transformDeliveryUrl(story.getMediaUrl(), MediaDisplayType.STORY))
+                        .flatMapMany(playbackItems -> Flux.fromIterable(playbackItems)
+                        .concatMap(playback -> {
+                            StoryView view = views.get(playback.id());
+                            boolean viewerSeen = viewerId.equals(playback.userId()) || view != null;
                             String viewerReaction = view == null ? null : normalizeOptional(view.getReaction());
-                            return toResponse(story, viewerSeen, viewerReaction);
-                        }))
+                            return toResponse(playback, viewerSeen, viewerReaction);
+                        })))
                 .collectList();
     }
 
     private Mono<StoryTrayResponse> toResponse(
-            UserStories story,
+            StoryArchiveResponse story,
             boolean viewerSeen,
             String viewerReaction
     ) {
-        String musicId = normalizeOptional(story.getMusicId());
-        Mono<Musics> music = musicId == null
-                ? Mono.just(Musics.builder().build())
-                : musicsRepository.findById(musicId).defaultIfEmpty(Musics.builder().build());
-
-        return Mono.zip(music, userDiscoveryHydrator.hydrate(story.getUserId(), story.getUserId()))
-                .map(tuple -> new StoryTrayResponse(
-                        story.getId(),
-                        story.getUserId(),
-                        tuple.getT2().username(),
-                        tuple.getT2().fullName(),
-                        tuple.getT2().avatarUrl(),
-                        mediaFacade.transformDeliveryUrl(story.getMediaUrl(), MediaDisplayType.STORY),
-                        story.getMediaType(),
-                        musicId,
-                        firstNonBlank(story.getMusicUrl(), tuple.getT1().getSongUrl()),
-                        normalizeOptional(firstNonBlank(
-                                tuple.getT1().getDisplayName(),
-                                tuple.getT1().getSingleName(),
-                                tuple.getT1().getSlugName())),
-                        story.getMusicStart(),
-                        story.getMusicEnd(),
-                        storyMusicSegmentPolicy.durationSeconds(
-                                story.getMediaType(),
-                                story.getMusicStart(),
-                                story.getMusicEnd()),
-                        story.getStatus(),
-                        story.getCreatedAt(),
-                        story.getExpiredAt(),
-                        story.getPublicationId(),
-                        story.getPublicationOrder(),
-                        story.getPublicationItemCount(),
+        return userDiscoveryHydrator.hydrate(story.userId(), story.userId())
+                .map(identity -> new StoryTrayResponse(
+                        story.id(),
+                        story.userId(),
+                        identity.username(),
+                        identity.fullName(),
+                        identity.avatarUrl(),
+                        story.mediaUrl(),
+                        story.mediaType(),
+                        story.musicId(),
+                        story.musicUrl(),
+                        story.musicName(),
+                        story.musicStart(),
+                        story.musicEnd(),
+                        story.durationSeconds(),
+                        story.status(),
+                        story.createdAt(),
+                        story.expiredAt(),
+                        story.publicationId(),
+                        story.publicationOrder(),
+                        story.publicationItemCount(),
                         viewerSeen,
                         viewerReaction
                 ));
@@ -113,15 +103,4 @@ public class StoryTrayQueryService {
         return value == null || value.isBlank() ? null : value.trim();
     }
 
-    private String firstNonBlank(String... values) {
-        if (values == null) {
-            return "";
-        }
-        for (String value : values) {
-            if (value != null && !value.isBlank()) {
-                return value.trim();
-            }
-        }
-        return "";
-    }
 }

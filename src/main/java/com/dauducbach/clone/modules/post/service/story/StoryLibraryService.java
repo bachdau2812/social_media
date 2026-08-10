@@ -6,6 +6,7 @@ import com.dauducbach.clone.commons.response.PageResponse;
 import com.dauducbach.clone.modules.post.dto.story.request.StoryHighlightRequest;
 import com.dauducbach.clone.modules.post.dto.story.request.StoryReplyRequest;
 import com.dauducbach.clone.modules.post.dto.story.response.StoryHighlightResponse;
+import com.dauducbach.clone.modules.post.dto.story.response.StoryArchiveResponse;
 import com.dauducbach.clone.modules.post.dto.story.response.StoryViewerResponse;
 import com.dauducbach.clone.modules.post.dto.story.response.StoryReplyResponse;
 import com.dauducbach.clone.modules.chat.service.StoryReplyMessaging;
@@ -37,6 +38,7 @@ public class StoryLibraryService {
     private final R2dbcEntityTemplate entityTemplate;
     private final DatabaseClient databaseClient;
     private final StoryReplyMessaging storyReplyMessaging;
+    private final StoryPlaybackHydrator storyPlaybackHydrator;
 
     public Mono<StoryReplyResponse> reply(
             String storyId,
@@ -227,9 +229,10 @@ public class StoryLibraryService {
     }
 
     private Mono<StoryHighlightResponse> hydrateHighlight(StoryHighlight highlight) {
-        Mono<List<UserStories>> stories = highlightItemRepository.findByHighlightIdOrderByOrderNumberAsc(highlight.getId())
+        Mono<List<StoryArchiveResponse>> stories = highlightItemRepository.findByHighlightIdOrderByOrderNumberAsc(highlight.getId())
                 .concatMap(item -> storiesRepository.findById(item.getStoryId()))
-                .collectList();
+                .collectList()
+                .flatMap(items -> storyPlaybackHydrator.hydrateAll(items, UserStories::getMediaUrl));
         Mono<String> cover = normalize(highlight.getCoverStoryId()) == null
                 ? Mono.just("")
                 : storiesRepository.findById(highlight.getCoverStoryId()).map(UserStories::getMediaUrl).defaultIfEmpty("");

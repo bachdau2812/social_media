@@ -9,6 +9,7 @@ import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
 import com.dauducbach.clone.modules.media.service.MediaService;
 import com.dauducbach.clone.modules.post.service.post.PostSseService;
 import com.dauducbach.clone.modules.post.dto.story.request.StoryCreateRequest;
+import com.dauducbach.clone.modules.post.dto.story.response.StoryArchiveResponse;
 import com.dauducbach.clone.modules.post.entity.story.StoryView;
 import com.dauducbach.clone.modules.post.entity.story.UserStories;
 import com.dauducbach.clone.modules.user.repositoty.UserDetailsRepository;
@@ -67,6 +68,8 @@ class StoryMediaServiceTest {
     MediaScanUtils mediaScanUtils;
     @Mock
     UserAuditService userAuditService;
+    @Mock
+    StoryPlaybackHydrator storyPlaybackHydrator;
 
     @Test
     void createStoryStoresMusicSegmentAndPublishesScanEvent() {
@@ -161,15 +164,22 @@ class StoryMediaServiceTest {
                 .thenReturn(Mono.just(1L));
         when(userStoriesRepository.findActiveApprovedByUserId(eq("owner-1"), any(Instant.class), eq(20), eq(0L)))
                 .thenReturn(Flux.just(story));
-        when(cloudinaryMediaService.transformDeliveryUrl("https://cdn.example/story.jpg", MediaDisplayType.STORY))
-                .thenReturn("https://cdn.example/story-transformed.jpg");
+        when(storyPlaybackHydrator.hydrateAll(any(), any())).thenReturn(Mono.just(java.util.List.of(
+                new StoryArchiveResponse(
+                        "story-1", "owner-1", "https://cdn.example/story-transformed.jpg", "IMAGE",
+                        "music-1", "https://cdn.example/music.mp3", "Story song",
+                        10L, 40L, 30L, null, null, null,
+                        "APPROVED", story.getCreatedAt(), story.getExpiredAt(), true))));
 
         StepVerifier.create(service.getStories("owner-1", "viewer-1", 0, 20, MediaDisplayType.STORY))
                 .assertNext(response -> {
                     assertThat(response.content()).hasSize(1);
-                    assertThat(response.content().getFirst().getId()).isEqualTo("story-1");
-                    assertThat(response.content().getFirst().getViewerSeen()).isTrue();
-                    assertThat(response.content().getFirst().getMediaUrl()).isEqualTo("https://cdn.example/story-transformed.jpg");
+                    assertThat(response.content().getFirst().id()).isEqualTo("story-1");
+                    assertThat(response.content().getFirst().viewerSeen()).isTrue();
+                    assertThat(response.content().getFirst().mediaUrl()).isEqualTo("https://cdn.example/story-transformed.jpg");
+                    assertThat(response.content().getFirst().musicUrl()).isEqualTo("https://cdn.example/music.mp3");
+                    assertThat(response.content().getFirst().musicName()).isEqualTo("Story song");
+                    assertThat(response.content().getFirst().durationSeconds()).isEqualTo(30L);
                     assertThat(response.pageNumber()).isZero();
                     assertThat(response.totalElements()).isEqualTo(1L);
                 })
@@ -292,7 +302,8 @@ class StoryMediaServiceTest {
                 r2dbcEntityTemplate,
                 mediaScanUtils,
                 userAuditService,
-                new StoryMusicSegmentPolicy()
+                new StoryMusicSegmentPolicy(),
+                storyPlaybackHydrator
         );
     }
 

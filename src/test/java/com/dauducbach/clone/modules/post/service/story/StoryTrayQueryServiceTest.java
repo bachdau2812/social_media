@@ -49,11 +49,10 @@ class StoryTrayQueryServiceTest {
 
         StoryTrayQueryService service = new StoryTrayQueryService(
                 userStoriesRepository,
-                musicsRepository,
                 storyViewRepository,
                 userDiscoveryHydrator,
                 mediaFacade,
-                new StoryMusicSegmentPolicy()
+                new StoryPlaybackHydrator(musicsRepository, new StoryMusicSegmentPolicy())
         );
 
         StepVerifier.create(service.getHomeStoryTray("viewer-1"))
@@ -90,10 +89,11 @@ class StoryTrayQueryServiceTest {
                         .reaction("LIKE")
                         .viewedAt(now)
                         .build()));
-        when(musicsRepository.findById("music-1"))
-                .thenReturn(Mono.just(Musics.builder()
+        when(musicsRepository.findAllById(any(Iterable.class)))
+                .thenReturn(Flux.just(Musics.builder()
                         .id("music-1")
                         .songUrl("/music.mp3")
+                        .fetched(true)
                         .build()));
         when(userDiscoveryHydrator.hydrate("author-1", "author-1"))
                 .thenReturn(Mono.just(new UserDiscoveryResponse(
@@ -110,11 +110,10 @@ class StoryTrayQueryServiceTest {
 
         StoryTrayQueryService service = new StoryTrayQueryService(
                 userStoriesRepository,
-                musicsRepository,
                 storyViewRepository,
                 userDiscoveryHydrator,
                 mediaFacade,
-                new StoryMusicSegmentPolicy()
+                new StoryPlaybackHydrator(musicsRepository, new StoryMusicSegmentPolicy())
         );
 
         StepVerifier.create(service.getHomeStoryTray("viewer-1"))

@@ -13,6 +13,7 @@ import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
 import com.dauducbach.clone.modules.media.service.MediaService;
 import com.dauducbach.clone.modules.post.service.post.PostSseService;
 import com.dauducbach.clone.modules.post.dto.story.request.StoryCreateRequest;
+import com.dauducbach.clone.modules.post.dto.story.response.StoryArchiveResponse;
 import com.dauducbach.clone.modules.user.dto.response.ProfileMediaUploadResponse;
 import com.dauducbach.clone.modules.post.entity.story.StoryView;
 import com.dauducbach.clone.modules.post.entity.story.UserStories;
@@ -72,6 +73,7 @@ public class StoryMediaService {
     MediaScanUtils mediaScanUtils;
     UserAuditService userAuditService;
     StoryMusicSegmentPolicy storyMusicSegmentPolicy;
+    StoryPlaybackHydrator storyPlaybackHydrator;
 
     public Mono<ProfileMediaUploadResponse> createStory(StoryCreateRequest request) {
         String userId = normalizeRequired(request.userId(), "userId");
@@ -196,21 +198,22 @@ public class StoryMediaService {
                 ));
     }
 
-    public Mono<PageResponse<UserStories>> getStories(String userId, int page, int size, MediaDisplayType mediaType) {
+    public Mono<PageResponse<StoryArchiveResponse>> getStories(String userId, int page, int size, MediaDisplayType mediaType) {
         return getStories(userId, userId, page, size, mediaType);
     }
 
-    public Mono<PageResponse<UserStories>> getStories(String userId, String viewerId, int page, int size, MediaDisplayType mediaType) {
+    public Mono<PageResponse<StoryArchiveResponse>> getStories(String userId, String viewerId, int page, int size, MediaDisplayType mediaType) {
         MediaDisplayType displayType = mediaType == null ? MediaDisplayType.STORY : mediaType;
         return getStories(userId, viewerId, page, size)
-                .map(response -> new PageResponse<>(
-                        response.content().stream()
-                                .map(story -> transformStoryForDisplay(story, displayType))
-                                .toList(),
-                        response.pageNumber(),
-                        response.totalElements(),
-                        response.totalPages()
-                ));
+                .flatMap(response -> storyPlaybackHydrator.hydrateAll(
+                                response.content(),
+                                story -> cloudinaryMediaService.transformDeliveryUrl(story.getMediaUrl(), displayType))
+                        .map(content -> new PageResponse<>(
+                                content,
+                                response.pageNumber(),
+                                response.totalElements(),
+                                response.totalPages()
+                        )));
     }
 
     private Mono<List<UserStories>> hydrateViewerSeen(List<UserStories> stories, String viewerId, boolean owner) {
@@ -229,11 +232,6 @@ public class StoryMediaService {
                     stories.forEach(story -> story.setViewerSeen(viewedIds.contains(story.getId())));
                     return stories;
                 });
-    }
-
-    private UserStories transformStoryForDisplay(UserStories story, MediaDisplayType mediaType) {
-        story.setMediaUrl(cloudinaryMediaService.transformDeliveryUrl(story.getMediaUrl(), mediaType));
-        return story;
     }
 
     @KafkaListener(topics = CHECK_STORY_MEDIA_EVENT, groupId = "user-service")
