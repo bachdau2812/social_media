@@ -62,7 +62,7 @@ jobs:
             docker compose pull backend
           
             echo "Starting backend..."
-            docker compose --env-file .env.backend  up -d --force-recreate backend
+            docker compose --env-file ../environment_variable/.env.backend  up -d --force-recreate backend
           
             echo "Current containers:"
             docker compose ps
