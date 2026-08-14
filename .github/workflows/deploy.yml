@@ -29,7 +29,7 @@ jobs:
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/ins_clone_be:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/ins_clone_fe:${{ github.sha }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/ins_clone_be:${{ github.sha }}
 
       - name: Config SSH
         env:
