@@ -17,8 +17,8 @@ class BackendModuleBoundaryTest {
             "import\\s+(com\\.dauducbach\\.clone\\.modules\\.([^.]+)\\.(?:repository|repositoty)\\.[\\w.]+);");
     private static final Set<String> ALLOWED_CROSS_MODULE_REPOSITORY_IMPORTS = Set.of(
             "modules/post/service/story/StoryMediaService.java -> com.dauducbach.clone.modules.user.repositoty.UserDetailsRepository",
-            "modules/post/service/story/StoryTrayQueryService.java -> com.dauducbach.clone.modules.media.repositoty.music.MusicsRepository",
-            "modules/user/service/MediaForProfile.java -> com.dauducbach.clone.modules.media.repositoty.music.MusicsRepository");
+            "modules/post/service/story/StoryTrayQueryService.java -> com.dauducbach.clone.modules.media.repository.MusicsRepository",
+            "modules/user/service/MediaForProfile.java -> com.dauducbach.clone.modules.media.repository.MusicsRepository");
     private static final Pattern VOID_KAFKA_LISTENER = Pattern.compile(
             "@KafkaListener\\s*\\([^)]*\\)\\s*public\\s+void\\s+\\w+\\s*\\(");
 

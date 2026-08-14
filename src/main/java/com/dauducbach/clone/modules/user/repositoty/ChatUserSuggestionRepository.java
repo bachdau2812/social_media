@@ -11,8 +11,8 @@ import reactor.core.publisher.Flux;
 public class ChatUserSuggestionRepository {
     private final DatabaseClient databaseClient;
 
-    public Flux<ChatUserSuggestionResponse> findSuggestions(String viewerId, String query, int limit) {
-        boolean emptyQuery = query == null || query.isBlank();
+    public Flux<ChatUserSuggestionResponse> findSuggestions(String viewerId, String queryPattern, int limit) {
+        boolean emptyQuery = queryPattern == null || queryPattern.isBlank();
         return databaseClient.sql("""
                         SELECT candidate.user_id, candidate.username, candidate.full_name,
                                (SELECT COALESCE(NULLIF(avatar.secure_url, ''), avatar.url)
@@ -45,16 +45,15 @@ public class ChatUserSuggestionRepository {
                                   WHERE outgoing.follower_id = :viewerId
                                     AND outgoing.following_id = candidate.user_id
                               ))
-                              OR (:emptyQuery = 0 AND LOWER(COALESCE(candidate.username, ''))
-                                  LIKE CONCAT(LOWER(:query), '%')))
+                              OR (:emptyQuery = 0 AND candidate.username LIKE :queryPattern))
                         ORDER BY relationship_priority ASC,
-                                 LOWER(COALESCE(candidate.username, '')) ASC,
+                                 candidate.username ASC,
                                  candidate.user_id ASC
                         LIMIT :limit
                         """)
                 .bind("viewerId", viewerId)
                 .bind("emptyQuery", emptyQuery ? 1 : 0)
-                .bind("query", emptyQuery ? "" : query)
+                .bind("queryPattern", emptyQuery ? "" : queryPattern)
                 .bind("limit", limit)
                 .map((row, metadata) -> new ChatUserSuggestionResponse(
                         row.get("user_id", String.class),

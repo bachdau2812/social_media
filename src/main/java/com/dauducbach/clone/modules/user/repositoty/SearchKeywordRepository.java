@@ -12,12 +12,12 @@ import reactor.core.publisher.Mono;
 public interface SearchKeywordRepository extends ReactiveCrudRepository<SearchKeyword, Long> {
     @Query("""
             SELECT * FROM search_keywords
-            WHERE normalized_keyword LIKE CONCAT(:prefix, '%')
+            WHERE normalized_keyword LIKE :prefixPattern
               AND user_count >= :minUserCount
             ORDER BY search_count DESC, updated_at DESC
             LIMIT :limit
             """)
-    Flux<SearchKeyword> findPublicByPrefix(String prefix, long minUserCount, int limit);
+    Flux<SearchKeyword> findPublicByPrefix(String prefixPattern, long minUserCount, int limit);
 
     @Query("""
             SELECT * FROM search_keywords

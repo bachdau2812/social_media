@@ -52,13 +52,13 @@ public interface PostDetailsRepository extends ReactiveCrudRepository<PostDetail
                   AND UPPER(archived.content_type) = 'POST'
               )
               AND (
-                LOWER(COALESCE(p.content, '')) LIKE CONCAT('%', LOWER(:query), '%')
-                OR LOWER(COALESCE(p.hashtag, '')) LIKE CONCAT('%', LOWER(:query), '%')
+                p.content LIKE :queryPattern
+                OR p.hashtag LIKE :queryPattern
               )
             ORDER BY p.created_at DESC, p.post_id DESC
             LIMIT :#{#pageable.pageSize} OFFSET :#{#pageable.offset}
             """)
-    Flux<String> searchApprovedPostIds(String query, Pageable pageable);
+    Flux<String> searchApprovedPostIds(String queryPattern, Pageable pageable);
 
     @Query("""
             SELECT p.* FROM post_details p
@@ -159,11 +159,11 @@ public interface PostDetailsRepository extends ReactiveCrudRepository<PostDetail
                   AND UPPER(archived.content_type) = 'POST'
               )
               AND (
-                LOWER(COALESCE(p.content, '')) LIKE CONCAT('%', LOWER(:query), '%')
-                OR LOWER(COALESCE(p.hashtag, '')) LIKE CONCAT('%', LOWER(:query), '%')
+                p.content LIKE :queryPattern
+                OR p.hashtag LIKE :queryPattern
               )
             """)
-    Mono<Long> countSearchApprovedPostIds(String query);
+    Mono<Long> countSearchApprovedPostIds(String queryPattern);
 
     Mono<Void> deleteByUserId(String userId);
 }

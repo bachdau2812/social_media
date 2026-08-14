@@ -10,7 +10,7 @@ import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import com.dauducbach.clone.modules.media.constant.OwnerType;
 import com.dauducbach.clone.modules.media.entity.Media;
 import com.dauducbach.clone.modules.media.entity.music.Musics;
-import com.dauducbach.clone.modules.media.repositoty.music.MusicsRepository;
+import com.dauducbach.clone.modules.media.repository.MusicsRepository;
 import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
 import com.dauducbach.clone.modules.media.service.MediaService;
 import com.dauducbach.clone.modules.post.service.post.PostSseService;

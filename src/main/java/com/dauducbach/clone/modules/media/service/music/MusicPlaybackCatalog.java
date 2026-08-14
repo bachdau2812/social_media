@@ -1,7 +1,7 @@
 package com.dauducbach.clone.modules.media.service.music;
 
 import com.dauducbach.clone.modules.media.entity.music.Musics;
-import com.dauducbach.clone.modules.media.repositoty.music.MusicsRepository;
+import com.dauducbach.clone.modules.media.repository.MusicsRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;

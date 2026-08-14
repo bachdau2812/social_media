@@ -63,7 +63,8 @@ spring:
             client-name: GitHub
 
   kafka:
-    bootstrap-servers: 127.0.0.1:9092
+#    bootstrap-servers: 127.0.0.1:9092
+    bootstrap-servers: localhost:9092
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
@@ -134,7 +135,7 @@ auth:
 
 music:
   spotify:
-    spotiflac-command: spotiflac
+    python-command: "${SPOTIFLAC_PYTHON_COMMAND:D:/Python/python.exe}"
     ffprobe-command: ffprobe
     temp-root: ""
     process-timeout: 5m

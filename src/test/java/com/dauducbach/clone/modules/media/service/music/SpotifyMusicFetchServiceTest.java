@@ -8,10 +8,11 @@ import com.dauducbach.clone.modules.media.dto.music.response.MusicFetchAcceptedR
 import com.dauducbach.clone.modules.media.dto.response.MediaAudioUploadResult;
 import com.dauducbach.clone.modules.media.entity.Media;
 import com.dauducbach.clone.modules.media.entity.music.Musics;
-import com.dauducbach.clone.modules.media.repositoty.music.MusicsRepository;
+import com.dauducbach.clone.modules.media.repository.MusicsRepository;
 import com.dauducbach.clone.modules.media.service.CloudinaryAudioStorageService;
 import com.dauducbach.clone.modules.media.service.MediaAssetCleanupService;
 import com.dauducbach.clone.modules.media.service.MediaService;
+import com.dauducbach.clone.testsupport.TestLogCapture;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -87,7 +88,7 @@ class SpotifyMusicFetchServiceTest {
     void alreadyFetchedEmitsImmediateSuccessAndSkipsLock() {
         Musics music = catalogMusic();
         music.setFetched(true);
-        music.setSongUrl("https://cdn/song.flac");
+        music.setSongUrl("https://cdn/song.mp3");
         when(repository.findById(TRACK_ID)).thenReturn(Mono.just(music));
         when(ssePublisher.sendToUser(eq("user-1"), eq("music_fetch_success"), anyString()))
                 .thenReturn(Mono.empty());
@@ -123,10 +124,40 @@ class SpotifyMusicFetchServiceTest {
         runScheduledJobs();
 
         verify(spotiFlac, times(1)).download(eq(TRACK_ID), any(Path.class));
+        ArgumentCaptor<Musics> savedMusic = ArgumentCaptor.forClass(Musics.class);
+        verify(repository).save(savedMusic.capture());
+        assertThat(savedMusic.getValue().getSongUrl()).isEqualTo("https://cdn/song.mp3");
         verify(ssePublisher).sendToUser(
                 eq("user-1"), eq("music_fetch_success"), anyString());
         verify(ssePublisher).sendToUser(
                 eq("user-2"), eq("music_fetch_success"), anyString());
+    }
+
+    @Test
+    void successfulJobLogsEveryExternalStageAndFinalization() throws Exception {
+        Musics music = catalogMusic();
+        Path flac = Files.writeString(tempDirectory.resolve("source.flac"), "audio");
+        stubSuccessfulJob(music, flac);
+        when(lock.tryAcquire(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
+
+        try (TestLogCapture capture = TestLogCapture.start(SpotifyMusicFetchService.class)) {
+            service().requestFetch(TRACK_ID, "user-1").block();
+            runScheduledJobs();
+
+            assertThat(capture.messages()).anyMatch(message -> message.contains("lock acquired"));
+            assertThat(capture.messages()).anyMatch(message -> message.contains("queue accepted"));
+            assertThat(capture.messages()).anyMatch(message -> message.contains("job started")
+                    && message.contains("outputDirectory="));
+            assertThat(capture.messages()).anyMatch(message -> message.contains("download completed"));
+            assertThat(capture.messages()).anyMatch(message -> message.contains("ffprobe completed"));
+            assertThat(capture.messages()).anyMatch(message -> message.contains("upload completed"));
+            assertThat(capture.messages()).anyMatch(message -> message.contains("persistence completed"));
+            assertThat(capture.messages()).anyMatch(message -> message.contains("sse dispatched")
+                    && message.contains("music_fetch_success"));
+            assertThat(capture.messages()).anyMatch(message -> message.contains("temp cleanup completed"));
+            assertThat(capture.messages()).anyMatch(message -> message.contains("lock released"));
+            assertThat(capture.messages()).anyMatch(message -> message.contains("job finalized"));
+        }
     }
 
     @Test
@@ -172,6 +203,33 @@ class SpotifyMusicFetchServiceTest {
         assertThat(payload.getValue()).contains(TRACK_ID)
                 .contains("Kh\u00f4ng th\u1ec3 t\u1ea3i b\u00e0i h\u00e1t. Vui l\u00f2ng th\u1eed l\u1ea1i.")
                 .doesNotContain("raw secret");
+    }
+
+    @Test
+    void processFailureLogsReasonAndDispatchesFailureBeforeFinalization() {
+        Musics music = catalogMusic();
+        when(repository.findById(TRACK_ID)).thenReturn(Mono.just(music));
+        when(lock.tryAcquire(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
+        when(spotiFlac.download(eq(TRACK_ID), any(Path.class)))
+                .thenReturn(Mono.error(new java.util.concurrent.TimeoutException("process timeout")));
+        when(ssePublisher.sendToUser(anyString(), anyString(), anyString()))
+                .thenReturn(Mono.empty());
+        when(lock.release(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
+
+        try (TestLogCapture capture = TestLogCapture.start(SpotifyMusicFetchService.class)) {
+            service().requestFetch(TRACK_ID, "user-1").block();
+            runScheduledJobs();
+
+            assertThat(capture.messages()).anyMatch(message -> message.contains("failed reason=process timeout")
+                    && message.contains("jobId="));
+            assertThat(capture.messages()).anyMatch(message -> message.contains("sse dispatched")
+                    && message.contains("music_fetch_failed"));
+            assertThat(capture.messages()).anyMatch(message -> message.contains("job finalized"));
+        }
+
+        verify(ssePublisher).sendToUser(
+                eq("user-1"), eq("music_fetch_failed"), anyString());
+        verify(lock).release(eq(TRACK_ID), anyString());
     }
 
     @Test
@@ -263,6 +321,7 @@ class SpotifyMusicFetchServiceTest {
         verify(ssePublisher).sendToUser(
                 eq("user-2"), eq("music_fetch_failed"), anyString());
     }
+
     @Test
     void lateWaiterReceivesTerminalSuccessWithoutStartingAnotherJob() throws Exception {
         Musics requestView = catalogMusic();
@@ -388,6 +447,7 @@ class SpotifyMusicFetchServiceTest {
         verify(ssePublisher).sendToUser(
                 eq("user-1"), eq("music_fetch_failed"), anyString());
     }
+
     @Test
     void invalidTrackIdFailsBeforeRepositoryLookup() {
         StepVerifier.create(service().requestFetch("invalid", "user-1"))
@@ -480,8 +540,8 @@ class SpotifyMusicFetchServiceTest {
                 "flac",
                 "video",
                 1234,
-                "http://cdn/song.flac",
-                "https://cdn/song.flac",
+                "http://cdn/song.mp3",
+                "https://cdn/song.mp3",
                 "1",
                 "version-1");
     }

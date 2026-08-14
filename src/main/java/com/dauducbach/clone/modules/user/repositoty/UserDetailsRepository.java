@@ -15,15 +15,15 @@ public interface UserDetailsRepository extends ReactiveCrudRepository<UserDetail
 
     @Query("""
             SELECT user_id FROM user_details
-            WHERE LOWER(COALESCE(username, '')) LIKE CONCAT('%', LOWER(:query), '%')
-               OR (:includeHobby = 1 AND LOWER(COALESCE(hobby_list, '')) LIKE CONCAT('%', LOWER(:query), '%'))
-               OR (:includeLivingIn = 1 AND LOWER(COALESCE(living_in, '')) LIKE CONCAT('%', LOWER(:query), '%'))
-               OR (:includeHometown = 1 AND LOWER(COALESCE(hometown, '')) LIKE CONCAT('%', LOWER(:query), '%'))
-               OR (:includeSex = 1 AND LOWER(COALESCE(sex, '')) LIKE CONCAT('%', LOWER(:query), '%'))
+            WHERE username LIKE :queryPattern
+               OR (:includeHobby = 1 AND hobby_list LIKE :queryPattern)
+               OR (:includeLivingIn = 1 AND living_in LIKE :queryPattern)
+               OR (:includeHometown = 1 AND hometown LIKE :queryPattern)
+               OR (:includeSex = 1 AND sex LIKE :queryPattern)
             ORDER BY username ASC, user_id ASC
             LIMIT :#{#pageable.pageSize} OFFSET :#{#pageable.offset}
             """)
-    Flux<String> searchUserIds(String query,
+    Flux<String> searchUserIds(String queryPattern,
                                int includeHobby,
                                int includeLivingIn,
                                int includeHometown,
@@ -32,13 +32,13 @@ public interface UserDetailsRepository extends ReactiveCrudRepository<UserDetail
 
     @Query("""
             SELECT COUNT(*) FROM user_details
-            WHERE LOWER(COALESCE(username, '')) LIKE CONCAT('%', LOWER(:query), '%')
-               OR (:includeHobby = 1 AND LOWER(COALESCE(hobby_list, '')) LIKE CONCAT('%', LOWER(:query), '%'))
-               OR (:includeLivingIn = 1 AND LOWER(COALESCE(living_in, '')) LIKE CONCAT('%', LOWER(:query), '%'))
-               OR (:includeHometown = 1 AND LOWER(COALESCE(hometown, '')) LIKE CONCAT('%', LOWER(:query), '%'))
-               OR (:includeSex = 1 AND LOWER(COALESCE(sex, '')) LIKE CONCAT('%', LOWER(:query), '%'))
+            WHERE username LIKE :queryPattern
+               OR (:includeHobby = 1 AND hobby_list LIKE :queryPattern)
+               OR (:includeLivingIn = 1 AND living_in LIKE :queryPattern)
+               OR (:includeHometown = 1 AND hometown LIKE :queryPattern)
+               OR (:includeSex = 1 AND sex LIKE :queryPattern)
             """)
-    Mono<Long> countSearchUserIds(String query,
+    Mono<Long> countSearchUserIds(String queryPattern,
                                   int includeHobby,
                                   int includeLivingIn,
                                   int includeHometown,

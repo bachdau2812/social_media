@@ -2,7 +2,7 @@ package com.dauducbach.clone.modules.media.service.music;
 
 import com.dauducbach.clone.modules.media.dto.music.response.MusicFetchAcceptedResponse;
 import com.dauducbach.clone.modules.media.entity.music.Musics;
-import com.dauducbach.clone.modules.media.repositoty.music.MusicsRepository;
+import com.dauducbach.clone.modules.media.repository.MusicsRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -58,9 +58,9 @@ class MusicServiceTest {
                 .fetched(false)
                 .build();
 
-        when(musicsRepository.countSearchByCategory("song", "pop")).thenReturn(Mono.just(1L));
+        when(musicsRepository.countSearchByCategory("song%", "pop")).thenReturn(Mono.just(1L));
         when(musicsRepository.searchByCategory(
-                org.mockito.ArgumentMatchers.eq("song"),
+                org.mockito.ArgumentMatchers.eq("song%"),
                 org.mockito.ArgumentMatchers.eq("pop"),
                 any(Pageable.class))).thenReturn(Flux.just(music));
 

@@ -8,7 +8,7 @@ import com.dauducbach.clone.modules.media.dto.music.response.MusicFetchAcceptedR
 import com.dauducbach.clone.modules.media.dto.music.response.MusicFetchFailedEvent;
 import com.dauducbach.clone.modules.media.dto.response.MediaAudioUploadResult;
 import com.dauducbach.clone.modules.media.entity.music.Musics;
-import com.dauducbach.clone.modules.media.repositoty.music.MusicsRepository;
+import com.dauducbach.clone.modules.media.repository.MusicsRepository;
 import com.dauducbach.clone.modules.media.service.CloudinaryAudioStorageService;
 import com.dauducbach.clone.modules.media.service.MediaAssetCleanupService;
 import com.dauducbach.clone.modules.media.service.MediaService;
@@ -147,6 +147,12 @@ public class SpotifyMusicFetchService {
                     Path jobDirectory = properties.resolvedTempRoot()
                             .resolve(trackId + "-" + token)
                             .normalize();
+                    String jobId = jobDirectory.getFileName().toString();
+                    log.info(
+                            "[music-fetch] trackId={} jobId={} lock acquired outputDirectory={}",
+                            trackId,
+                            jobId,
+                            jobDirectory.toAbsolutePath());
                     LockHeartbeat heartbeat = startLockHeartbeat(trackId, token);
                     try {
                         jobScheduler.schedule(() -> executeJob(
@@ -155,6 +161,10 @@ public class SpotifyMusicFetchService {
                                 jobDirectory,
                                 notifications,
                                 heartbeat).block());
+                        log.info(
+                                "[music-fetch] trackId={} jobId={} queue accepted",
+                                trackId,
+                                jobId);
                     } catch (RuntimeException schedulingError) {
                         heartbeat.dispose();
                         AppException unavailable = new AppException(
@@ -182,6 +192,12 @@ public class SpotifyMusicFetchService {
             Path jobDirectory,
             FetchNotificationState notifications,
             LockHeartbeat heartbeat) {
+        String jobId = jobDirectory.getFileName().toString();
+        log.info(
+                "[music-fetch] trackId={} jobId={} job started outputDirectory={}",
+                trackId,
+                jobId,
+                jobDirectory.toAbsolutePath());
         Mono<Musics> fetch = Mono.fromCallable(() -> Files.createDirectories(jobDirectory))
                 .then(repository.findById(trackId)
                         .switchIfEmpty(Mono.error(new AppException(ErrorCode.MUSIC_NOT_FOUND))))
@@ -189,12 +205,41 @@ public class SpotifyMusicFetchService {
                         ? Mono.just(music)
                         : resolveThumbnail(music)
                                 .then(spotiFlacClient.download(trackId, jobDirectory))
+                                .doOnSubscribe(ignored -> log.info(
+                                        "[music-fetch] trackId={} jobId={} download started",
+                                        trackId,
+                                        jobId))
+                                .doOnNext(flacFile -> log.info(
+                                        "[music-fetch] trackId={} jobId={} download completed file={}",
+                                        trackId,
+                                        jobId,
+                                        flacFile.getFileName()))
                                 .flatMap(flacFile -> metadataReader.read(flacFile)
+                                        .doOnSubscribe(ignored -> log.info(
+                                                "[music-fetch] trackId={} jobId={} ffprobe started",
+                                                trackId,
+                                                jobId))
+                                        .doOnNext(metadata -> log.info(
+                                                "[music-fetch] trackId={} jobId={} ffprobe completed",
+                                                trackId,
+                                                jobId))
                                         .flatMap(metadata -> audioStorage.uploadMusic(flacFile, trackId)
+                                                .doOnSubscribe(ignored -> log.info(
+                                                        "[music-fetch] trackId={} jobId={} upload started",
+                                                        trackId,
+                                                        jobId))
+                                                .doOnNext(upload -> log.info(
+                                                        "[music-fetch] trackId={} jobId={} upload completed",
+                                                        trackId,
+                                                        jobId))
                                                 .flatMap(upload -> persistFetchedMusic(
                                                         music,
                                                         metadata,
                                                         upload)
+                                                        .doOnNext(saved -> log.info(
+                                                                "[music-fetch] trackId={} jobId={} persistence completed",
+                                                                trackId,
+                                                                jobId))
                                                         .onErrorResume(error -> cleanupUploadedAsset(
                                                                 upload,
                                                                 error))))));
@@ -208,8 +253,9 @@ public class SpotifyMusicFetchService {
                 .flatMap(music -> completeSuccess(trackId, notifications, music))
                 .onErrorResume(error -> {
                     log.error(
-                            "|SpotifyMusicFetchService|job|failed|trackId={}|error={}",
+                            "[music-fetch] trackId={} jobId={} failed reason={}",
                             trackId,
+                            jobId,
                             error.getMessage());
                     return completeFailure(trackId, notifications);
                 });
@@ -398,7 +444,12 @@ public class SpotifyMusicFetchService {
                                     error.getMessage());
                             return Mono.empty();
                         }))
-                .then();
+                .then()
+                .doOnSuccess(ignored -> log.info(
+                        "[music-fetch] trackId={} sse dispatched event={} waiterCount={}",
+                        trackId,
+                        terminal.event(),
+                        waiters.size()));
     }
 
     private Mono<Void> sendTerminal(String userId, FetchTerminal terminal) {
@@ -417,6 +468,9 @@ public class SpotifyMusicFetchService {
             Mono<Void> tempCleanup = Mono.<Void>fromRunnable(
                             () -> deleteJobDirectory(jobDirectory))
                     .subscribeOn(processScheduler)
+                    .doOnSuccess(ignored -> log.info(
+                            "[music-fetch] trackId={} temp cleanup completed",
+                            trackId))
                     .onErrorResume(error -> {
                         log.warn(
                                 "|SpotifyMusicFetchService|temp cleanup failed|trackId={}|error={}",
@@ -426,7 +480,11 @@ public class SpotifyMusicFetchService {
                     });
             Mono<Void> lockRelease = lock.release(trackId, token)
                     .doOnNext(released -> {
-                        if (!released) {
+                        if (released) {
+                            log.info(
+                                    "[music-fetch] trackId={} lock released",
+                                    trackId);
+                        } else {
                             log.warn(
                                     "|SpotifyMusicFetchService|lock token no longer owns key|trackId={}",
                                     trackId);
@@ -442,7 +500,13 @@ public class SpotifyMusicFetchService {
                     .then();
             return tempCleanup
                     .then(lockRelease)
-                    .doFinally(signal -> retireNotificationState(trackId, notifications));
+                    .doFinally(signal -> {
+                        retireNotificationState(trackId, notifications);
+                        log.info(
+                                "[music-fetch] trackId={} job finalized signal={}",
+                                trackId,
+                                signal);
+                    });
         });
     }
 

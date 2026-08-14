@@ -35,12 +35,13 @@ public class PostSearchService {
         int pageNumber = Math.max(page, 0);
         int pageSize = normalizeLimit(limit);
         Pageable pageable = PageRequest.of(pageNumber, pageSize);
+        String queryPattern = normalizedQuery + "%";
 
         log.info("|PostSearchService|searchPosts|queryLength={}|page={}|limit={}",
                 normalizedQuery.length(), pageNumber, pageSize);
 
-        return postDetailsRepository.countSearchApprovedPostIds(normalizedQuery)
-                .flatMap(total -> postDetailsRepository.searchApprovedPostIds(normalizedQuery, pageable)
+        return postDetailsRepository.countSearchApprovedPostIds(queryPattern)
+                .flatMap(total -> postDetailsRepository.searchApprovedPostIds(queryPattern, pageable)
                         .collectList()
                         .doOnSuccess(dbPostIds -> log.info("|PostSearchService|searchPosts|dbResult|page={}|dbCount={}|dbTotal={}",
                                 pageNumber, dbPostIds.size(), total))

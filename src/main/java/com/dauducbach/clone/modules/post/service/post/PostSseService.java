@@ -1,8 +1,7 @@
 package com.dauducbach.clone.modules.post.service.post;
 
 import com.dauducbach.clone.commons.realtime.UserSsePublisher;
-import com.dauducbach.clone.modules.post.service.SseRealtimeFanoutPublisher;
-import lombok.RequiredArgsConstructor;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
@@ -17,11 +16,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class PostSseService implements UserSsePublisher {
     private static final Duration KEEP_ALIVE = Duration.ofSeconds(15);
 
-    private final SseRealtimeFanoutPublisher fanoutPublisher;
     private final Map<String, UserChannel> userChannels = new ConcurrentHashMap<>();
 
     public Flux<ServerSentEvent<String>> subscribe(String userId) {
@@ -40,14 +37,8 @@ public class PostSseService implements UserSsePublisher {
         if (userId == null || userId.isBlank()) {
             return Mono.empty();
         }
-        return fanoutPublisher.publish(userId, event, data)
-                .onErrorResume(error -> {
-                    log.warn(
-                            "|PostSseService|sendToUser|redis fallback|userId={}|event={}|error={}",
-                            userId, event, error.getMessage());
-                    sendToLocalUser(userId, event, data);
-                    return Mono.empty();
-                });
+        sendToLocalUser(userId, event, data);
+        return Mono.empty();
     }
 
     void sendToLocalUser(String userId, String event, String data) {

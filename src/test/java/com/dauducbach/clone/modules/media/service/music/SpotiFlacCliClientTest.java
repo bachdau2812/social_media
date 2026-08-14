@@ -17,7 +17,6 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -34,28 +33,39 @@ class SpotiFlacCliClientTest {
     void invokesExactCommandAndReturnsTheOnlyRecursiveFlac() throws Exception {
         Path nested = Files.createDirectories(tempDirectory.resolve("deezer"));
         Path flac = Files.writeString(nested.resolve("song.flac"), "audio");
-        when(runner.run(anyList(), any())).thenReturn(Mono.just(new CliCommandResult(0, "done")));
+        when(runner.run(any(CliCommandRequest.class))).thenReturn(Mono.just(new CliCommandResult(0, "done")));
 
         StepVerifier.create(client().download(TRACK_ID, tempDirectory))
                 .expectNext(flac)
                 .verifyComplete();
 
-        ArgumentCaptor<List<String>> command = ArgumentCaptor.forClass(List.class);
-        org.mockito.Mockito.verify(runner).run(command.capture(), any(Duration.class));
-        assertThat(command.getValue()).containsExactly(
-                "spotiflac",
+        ArgumentCaptor<CliCommandRequest> request = ArgumentCaptor.forClass(CliCommandRequest.class);
+        org.mockito.Mockito.verify(runner).run(request.capture());
+        assertThat(request.getValue().label()).isEqualTo("SpotiFLAC");
+        assertThat(request.getValue().trackId()).isEqualTo(TRACK_ID);
+        assertThat(request.getValue().jobId()).isEqualTo(tempDirectory.getFileName().toString());
+        assertThat(request.getValue().logOutput()).isTrue();
+        assertThat(request.getValue().command()).containsExactly(
+                "python",
+                tempDirectory.resolve("spotiflac-native-no-browser.py").toString(),
                 "https://open.spotify.com/track/" + TRACK_ID,
                 tempDirectory.toString(),
                 "--service", "deezer", "qobuz", "tidal",
+                "--no-extensions-fallback",
                 "--quality", "LOSSLESS",
                 "--retries", "2",
                 "--timeout", "180",
                 "--verbose");
+        assertThat(Files.readString(tempDirectory.resolve("spotiflac-native-no-browser.py")))
+                .contains("SUPPORTED_SPOTIFLAC_VERSION = \"1.6.0\"")
+                .contains("_COMMUNITY_APIS.clear()")
+                .contains("Browser verification is disabled")
+                .contains("main()");
     }
 
     @Test
     void failsWhenNoFlacWasDownloaded() {
-        when(runner.run(anyList(), any())).thenReturn(Mono.just(new CliCommandResult(
+        when(runner.run(any(CliCommandRequest.class))).thenReturn(Mono.just(new CliCommandResult(
                 0,
                 "Timeout reached for track. Provider requires grant authentication.")));
 
@@ -67,7 +77,7 @@ class SpotiFlacCliClientTest {
 
     @Test
     void nonZeroExitUsesSafeDiagnosticWithoutExposingCliOutput() {
-        when(runner.run(anyList(), any())).thenReturn(Mono.just(new CliCommandResult(
+        when(runner.run(any(CliCommandRequest.class))).thenReturn(Mono.just(new CliCommandResult(
                 7,
                 "Access token acquired: very-secret-token. Timeout reached.")));
 
@@ -77,11 +87,22 @@ class SpotiFlacCliClientTest {
                         && !error.getMessage().contains("very-secret-token"))
                 .verify();
     }
+
+    @Test
+    void rejectsAnEmptyFlacFile() throws Exception {
+        Files.createFile(tempDirectory.resolve("empty.flac"));
+        when(runner.run(any(CliCommandRequest.class))).thenReturn(Mono.just(new CliCommandResult(0, "done")));
+
+        StepVerifier.create(client().download(TRACK_ID, tempDirectory))
+                .expectErrorMatches(error -> error.getMessage().contains("empty FLAC"))
+                .verify();
+    }
+
     @Test
     void failsWhenMultipleFlacsWereDownloaded() throws Exception {
         Files.writeString(tempDirectory.resolve("one.flac"), "one");
         Files.writeString(tempDirectory.resolve("two.FLAC"), "two");
-        when(runner.run(anyList(), any())).thenReturn(Mono.just(new CliCommandResult(0, "done")));
+        when(runner.run(any(CliCommandRequest.class))).thenReturn(Mono.just(new CliCommandResult(0, "done")));
 
         StepVerifier.create(client().download(TRACK_ID, tempDirectory))
                 .expectErrorMatches(error -> error.getMessage().contains("exactly one FLAC"))
@@ -99,7 +120,7 @@ class SpotiFlacCliClientTest {
 
     private SpotiFlacCliClient client() {
         SpotifyMusicFetchProperties properties = new SpotifyMusicFetchProperties();
-        properties.setSpotiflacCommand("spotiflac");
+        properties.setPythonCommand("python");
         properties.setProcessTimeout(Duration.ofMinutes(5));
         return new SpotiFlacCliClient(runner, properties);
     }

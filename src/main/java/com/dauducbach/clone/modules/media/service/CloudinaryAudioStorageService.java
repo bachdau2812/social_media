@@ -51,19 +51,51 @@ public class CloudinaryAudioStorageService {
     }
 
     private MediaAudioUploadResult toResult(Map<String, Object> result) {
+        String publicId = requiredValue(result, "public_id");
+        String version = requiredValue(result, "version");
+        String resourceType = firstNonBlank(stringValue(result.get("resource_type")), "video");
+        String deliveryUrl = mp3DeliveryUrl(publicId, version, resourceType, false);
+        String secureDeliveryUrl = mp3DeliveryUrl(publicId, version, resourceType, true);
+
         return new MediaAudioUploadResult(
                 stringValue(result.get("asset_id")),
-                stringValue(result.get("public_id")),
+                publicId,
                 intValue(result.get("width")),
                 intValue(result.get("height")),
                 stringValue(result.get("format")),
-                stringValue(result.get("resource_type")),
+                resourceType,
                 intValue(result.get("bytes")),
-                stringValue(result.get("url")),
-                stringValue(result.get("secure_url")),
-                stringValue(result.get("version")),
+                deliveryUrl,
+                secureDeliveryUrl,
+                version,
                 stringValue(result.get("version_id"))
         );
+    }
+
+    private String mp3DeliveryUrl(
+            String publicId,
+            String version,
+            String resourceType,
+            boolean secure) {
+        return cloudinary.url()
+                .resourceType(resourceType)
+                .type("upload")
+                .version(version)
+                .format("mp3")
+                .secure(secure)
+                .generate(publicId);
+    }
+
+    private String requiredValue(Map<String, Object> result, String key) {
+        String value = stringValue(result.get(key));
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException("Cloudinary upload result is missing " + key);
+        }
+        return value;
+    }
+
+    private String firstNonBlank(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
     }
 
     private String stringValue(Object value) {

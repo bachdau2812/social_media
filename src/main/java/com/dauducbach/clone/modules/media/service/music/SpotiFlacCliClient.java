@@ -5,8 +5,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
@@ -17,6 +19,8 @@ import java.util.stream.Stream;
 public class SpotiFlacCliClient {
     private static final Pattern SPOTIFY_TRACK_ID = Pattern.compile("[A-Za-z0-9]{22}");
     private static final String SPOTIFY_TRACK_PREFIX = "https://open.spotify.com/track/";
+    private static final String NO_BROWSER_LAUNCHER_RESOURCE = "/spotiflac/native_no_browser.py";
+    private static final String NO_BROWSER_LAUNCHER_FILE = "spotiflac-native-no-browser.py";
 
     private final CliCommandRunner runner;
     private final SpotifyMusicFetchProperties properties;
@@ -30,18 +34,27 @@ public class SpotiFlacCliClient {
         }
 
         Path normalizedDirectory = jobDirectory.toAbsolutePath().normalize();
+        Path launcher = normalizedDirectory.resolve(NO_BROWSER_LAUNCHER_FILE);
         List<String> command = List.of(
-                properties.getSpotiflacCommand(),
+                properties.getPythonCommand(),
+                launcher.toString(),
                 SPOTIFY_TRACK_PREFIX + trackId,
                 normalizedDirectory.toString(),
                 "--service", "deezer", "qobuz", "tidal",
+                "--no-extensions-fallback",
                 "--quality", "LOSSLESS",
                 "--retries", "2",
                 "--timeout", "180",
                 "--verbose");
 
-        return Mono.fromCallable(() -> Files.createDirectories(normalizedDirectory))
-                .flatMap(ignored -> runner.run(command, properties.getProcessTimeout()))
+        return Mono.fromCallable(() -> prepareNoBrowserLauncher(normalizedDirectory, launcher))
+                .flatMap(ignored -> runner.run(new CliCommandRequest(
+                        "SpotiFLAC",
+                        trackId,
+                        normalizedDirectory.getFileName().toString(),
+                        command,
+                        properties.getProcessTimeout(),
+                        true)))
                 .flatMap(result -> result.exitCode() == 0
                         ? findOnlyFlac(normalizedDirectory, result.output())
                         : Mono.error(new IllegalStateException(
@@ -49,6 +62,18 @@ public class SpotiFlacCliClient {
                                         + result.exitCode()
                                         + ": "
                                         + failureReason(result.output()))));
+    }
+
+    private Path prepareNoBrowserLauncher(Path jobDirectory, Path launcher) throws Exception {
+        Files.createDirectories(jobDirectory);
+        try (InputStream resource = SpotiFlacCliClient.class.getResourceAsStream(
+                NO_BROWSER_LAUNCHER_RESOURCE)) {
+            if (resource == null) {
+                throw new IllegalStateException("SpotiFLAC no-browser launcher resource is missing");
+            }
+            Files.copy(resource, launcher, StandardCopyOption.REPLACE_EXISTING);
+        }
+        return launcher;
     }
 
     private Mono<Path> findOnlyFlac(Path jobDirectory, String cliOutput) {
@@ -70,7 +95,11 @@ public class SpotiFlacCliClient {
                 throw new IllegalStateException(
                         "SpotiFLAC must produce exactly one FLAC file, found " + flacFiles.size());
             }
-            return flacFiles.getFirst();
+            Path flacFile = flacFiles.getFirst();
+            if (Files.size(flacFile) <= 0L) {
+                throw new IllegalStateException("SpotiFLAC produced an empty FLAC file");
+            }
+            return flacFile;
         });
     }
 

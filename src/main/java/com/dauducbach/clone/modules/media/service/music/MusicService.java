@@ -5,7 +5,7 @@ import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.commons.response.PageResponse;
 import com.dauducbach.clone.modules.media.dto.music.response.MusicFetchAcceptedResponse;
 import com.dauducbach.clone.modules.media.entity.music.Musics;
-import com.dauducbach.clone.modules.media.repositoty.music.MusicsRepository;
+import com.dauducbach.clone.modules.media.repository.MusicsRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
@@ -29,7 +29,16 @@ public class MusicService {
     public Mono<MusicFetchAcceptedResponse> fetchSpotifyMusic(
             String trackId,
             String userId) {
-        return spotifyMusicFetchService.requestFetch(trackId, userId);
+        log.info("|MusicService|fetchSpotifyMusic|received|trackId={}", trackId);
+        return spotifyMusicFetchService.requestFetch(trackId, userId)
+                .doOnNext(result -> log.info(
+                        "|MusicService|fetchSpotifyMusic|completed|trackId={}|status={}",
+                        trackId,
+                        result.status()))
+                .doOnError(error -> log.error(
+                        "|MusicService|fetchSpotifyMusic|failed|trackId={}|errorType={}",
+                        trackId,
+                        error.getClass().getSimpleName()));
     }
     public Mono<PageResponse<Musics>> getMusics(int page, int size, String keyword, String category) {
         int pageNumber = Math.max(page, 0);
@@ -37,15 +46,16 @@ public class MusicService {
         Pageable pageable = PageRequest.of(pageNumber, pageSize);
         String normalizedKeyword = normalizeOptional(keyword);
         String normalizedCategory = normalizeOptional(category);
+        String keywordPattern = normalizedKeyword == null ? null : normalizedKeyword + "%";
 
         Mono<Long> countMono;
         Flux<Musics> musicFlux;
         if (normalizedKeyword != null && normalizedCategory != null) {
-            countMono = musicsRepository.countSearchByCategory(normalizedKeyword, normalizedCategory);
-            musicFlux = musicsRepository.searchByCategory(normalizedKeyword, normalizedCategory, pageable);
+            countMono = musicsRepository.countSearchByCategory(keywordPattern, normalizedCategory);
+            musicFlux = musicsRepository.searchByCategory(keywordPattern, normalizedCategory, pageable);
         } else if (normalizedKeyword != null) {
-            countMono = musicsRepository.countSearch(normalizedKeyword);
-            musicFlux = musicsRepository.search(normalizedKeyword, pageable);
+            countMono = musicsRepository.countSearch(keywordPattern);
+            musicFlux = musicsRepository.search(keywordPattern, pageable);
         } else if (normalizedCategory != null) {
             countMono = musicsRepository.countByCategory(normalizedCategory);
             musicFlux = musicsRepository.findByCategory(normalizedCategory, pageable);

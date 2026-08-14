@@ -1,40 +1,39 @@
 package com.dauducbach.clone.modules.post.service.post;
 
 import com.dauducbach.clone.commons.realtime.UserSsePublisher;
-import com.dauducbach.clone.modules.post.service.SseRealtimeFanoutPublisher;
 import org.junit.jupiter.api.Test;
-import reactor.core.publisher.Sinks;
+import reactor.test.StepVerifier;
 
-import java.util.concurrent.CompletableFuture;
+import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 class PostSseServiceTest {
 
     @Test
-    void sendCompletionWaitsForRedisFanout() {
-        SseRealtimeFanoutPublisher publisher = mock(SseRealtimeFanoutPublisher.class);
-        PostSseService service = new PostSseService(publisher);
-        Sinks.Empty<Void> completion = Sinks.empty();
-        when(publisher.publish("user-1", "post_upload", "payload"))
-                .thenReturn(completion.asMono());
+    void sendToUserEmitsToLocalSubscriber() {
+        PostSseService service = new PostSseService();
 
-        CompletableFuture<Void> result = service
-                .sendToUser("user-1", "post_upload", "payload")
-                .toFuture();
+        StepVerifier.create(service.subscribe("user-1"))
+                .then(() -> service.sendToUser("user-1", "post_upload", "payload").block())
+                .assertNext(event -> {
+                    assertThat(event.event()).isEqualTo("post_upload");
+                    assertThat(event.data()).isEqualTo("payload");
+                })
+                .thenCancel()
+                .verify(Duration.ofSeconds(1));
+    }
 
-        assertThat(result).isNotDone();
-        completion.tryEmitEmpty();
-        result.join();
-        verify(publisher).publish("user-1", "post_upload", "payload");
+    @Test
+    void sendToUserIgnoresBlankUserId() {
+        PostSseService service = new PostSseService();
+
+        StepVerifier.create(service.sendToUser(" ", "post_upload", "payload"))
+                .verifyComplete();
     }
 
     @Test
     void postSseImplementsNeutralPublisher() {
         assertThat(UserSsePublisher.class).isAssignableFrom(PostSseService.class);
     }
-
 }

@@ -21,8 +21,9 @@ public class ChatUserSuggestionService {
             return Flux.error(new AppException(ErrorCode.SEARCH_REQUEST_INVALID, "viewerId is required"));
         }
         String normalizedQuery = query == null ? "" : query.trim();
+        String queryPattern = normalizedQuery.isEmpty() ? "" : normalizedQuery + "%";
         int normalizedLimit = limit <= 0 ? DEFAULT_LIMIT : Math.min(limit, MAX_LIMIT);
-        return repository.findSuggestions(viewerId.trim(), normalizedQuery, normalizedLimit)
+        return repository.findSuggestions(viewerId.trim(), queryPattern, normalizedLimit)
                 .onErrorMap(error -> error instanceof AppException
                         ? error
                         : new AppException(ErrorCode.USER_SEARCH_FAILED, "Fetch chat user suggestions failed", error));

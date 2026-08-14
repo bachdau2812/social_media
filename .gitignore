@@ -45,3 +45,5 @@ build/
 /visibility-red.log
 
 logs/
+
+.superpowers/

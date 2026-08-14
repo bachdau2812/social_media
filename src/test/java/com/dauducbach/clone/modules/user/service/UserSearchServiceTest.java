@@ -31,8 +31,8 @@ class UserSearchServiceTest {
     void searchUsersParsesWhitelistedFiltersAndFillsBySemanticSearch() {
         UserSearchService service = new UserSearchService(userDetailsRepository, semanticVectorSearchService);
 
-        when(userDetailsRepository.countSearchUserIds("bach", 1, 1, 1, 0)).thenReturn(Mono.just(1L));
-        when(userDetailsRepository.searchUserIds(eq("bach"), eq(1), eq(1), eq(1), eq(0), any(Pageable.class)))
+        when(userDetailsRepository.countSearchUserIds("bach%", 1, 1, 1, 0)).thenReturn(Mono.just(1L));
+        when(userDetailsRepository.searchUserIds(eq("bach%"), eq(1), eq(1), eq(1), eq(0), any(Pageable.class)))
                 .thenReturn(Flux.just("user-db-1"));
         when(semanticVectorSearchService.searchUserIds(
                 "bach",
@@ -48,6 +48,6 @@ class UserSearchServiceTest {
                 })
                 .verifyComplete();
 
-        verify(userDetailsRepository).searchUserIds(eq("bach"), eq(1), eq(1), eq(1), eq(0), any(Pageable.class));
+        verify(userDetailsRepository).searchUserIds(eq("bach%"), eq(1), eq(1), eq(1), eq(0), any(Pageable.class));
     }
 }

@@ -31,8 +31,8 @@ class PostSearchServiceTest {
     void searchPostsFillsSparseDbPageBySemanticSearch() {
         PostSearchService service = new PostSearchService(postDetailsRepository, semanticVectorSearchService);
 
-        when(postDetailsRepository.countSearchApprovedPostIds("spring")).thenReturn(Mono.just(1L));
-        when(postDetailsRepository.searchApprovedPostIds(eq("spring"), any(Pageable.class)))
+        when(postDetailsRepository.countSearchApprovedPostIds("spring%")).thenReturn(Mono.just(1L));
+        when(postDetailsRepository.searchApprovedPostIds(eq("spring%"), any(Pageable.class)))
                 .thenReturn(Flux.just("post-db-1"));
         when(semanticVectorSearchService.searchPostIds(
                 "spring",
@@ -48,6 +48,6 @@ class PostSearchServiceTest {
                 })
                 .verifyComplete();
 
-        verify(postDetailsRepository).searchApprovedPostIds(eq("spring"), any(Pageable.class));
+        verify(postDetailsRepository).searchApprovedPostIds(eq("spring%"), any(Pageable.class));
     }
 }

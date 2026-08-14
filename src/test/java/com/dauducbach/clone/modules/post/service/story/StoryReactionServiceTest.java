@@ -60,6 +60,20 @@ class StoryReactionServiceTest {
         StepVerifier.create(service.like("story-1", "actor-1")).expectNext(false).verifyComplete();
         verify(sender, times(2)).send(any(Publisher.class));
     }
+
+    @Test void emptyUpdateCountStillVerifiesTheLikeAndPublishesItsEvent() {
+        stubStory();
+        when(views.markLiked(eq("story-1"), eq("actor-1"), anyString())).thenReturn(Mono.empty());
+        when(views.findByStoryIdAndViewerId("story-1", "actor-1")).thenReturn(Mono.just(view()));
+        stubSuccess();
+
+        StepVerifier.create(service().like("story-1", "actor-1"))
+                .expectNext(false)
+                .verifyComplete();
+
+        verify(sender).send(any(Publisher.class));
+    }
+
     @Test void publisherFailurePropagatesTheOriginalError() {
         stubPersistence(1);
         IllegalStateException failure = new IllegalStateException();

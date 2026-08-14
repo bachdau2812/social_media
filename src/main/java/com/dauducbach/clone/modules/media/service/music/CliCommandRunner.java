@@ -6,5 +6,9 @@ import java.time.Duration;
 import java.util.List;
 
 public interface CliCommandRunner {
-    Mono<CliCommandResult> run(List<String> command, Duration timeout);
+    Mono<CliCommandResult> run(CliCommandRequest request);
+
+    default Mono<CliCommandResult> run(List<String> command, Duration timeout) {
+        return run(CliCommandRequest.quiet(command, timeout));
+    }
 }

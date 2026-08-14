@@ -265,7 +265,7 @@ public class SearchSuggestionService {
     }
 
     private Mono<List<SearchSuggestionResponse>> loadGlobalPrefixFromDatabase(String prefix, int limit) {
-        return searchKeywordRepository.findPublicByPrefix(prefix, GLOBAL_MIN_USER_COUNT, limit)
+        return searchKeywordRepository.findPublicByPrefix(prefix + "%", GLOBAL_MIN_USER_COUNT, limit)
                 .map(keyword -> toSuggestion(keyword.getNormalizedKeyword(), GLOBAL_SOURCE, false))
                 .collectList()
                 .onErrorResume(error -> {

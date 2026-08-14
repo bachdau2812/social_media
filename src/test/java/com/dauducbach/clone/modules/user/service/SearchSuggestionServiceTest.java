@@ -68,7 +68,7 @@ class SearchSuggestionServiceTest {
         when(redisTemplate.expire(eq("search:history:user-1"), any(Duration.class))).thenReturn(Mono.just(true));
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.get("search:suggest:global:spr:19")).thenReturn(Mono.empty());
-        when(searchKeywordRepository.findPublicByPrefix("spr", 3L, 19)).thenReturn(Flux.just(SearchKeyword.builder()
+        when(searchKeywordRepository.findPublicByPrefix("spr%", 3L, 19)).thenReturn(Flux.just(SearchKeyword.builder()
                 .id(1L)
                 .keyword("Spring Boot")
                 .normalizedKeyword("spring boot")

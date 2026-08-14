@@ -38,19 +38,20 @@ public class UserSearchService {
         int pageNumber = Math.max(page, 0);
         int pageSize = normalizeLimit(limit);
         Pageable pageable = PageRequest.of(pageNumber, pageSize);
+        String queryPattern = normalizedQuery + "%";
 
         log.info("|UserSearchService|searchUsers|queryLength={}|filter={}|page={}|limit={}",
                 normalizedQuery.length(), filter, pageNumber, pageSize);
 
         return userDetailsRepository.countSearchUserIds(
-                        normalizedQuery,
+                        queryPattern,
                         searchFilter.includeHobby(),
                         searchFilter.includeLivingIn(),
                         searchFilter.includeHometown(),
                         searchFilter.includeSex()
                 )
                 .flatMap(total -> userDetailsRepository.searchUserIds(
-                                normalizedQuery,
+                                queryPattern,
                                 searchFilter.includeHobby(),
                                 searchFilter.includeLivingIn(),
                                 searchFilter.includeHometown(),

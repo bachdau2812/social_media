@@ -11,7 +11,7 @@ import java.time.Duration;
 @Setter
 @ConfigurationProperties(prefix = "music.spotify")
 public class SpotifyMusicFetchProperties {
-    private String spotiflacCommand = "spotiflac";
+    private String pythonCommand = "python";
     private String ffprobeCommand = "ffprobe";
     private String tempRoot = "";
     private Duration processTimeout = Duration.ofMinutes(5);

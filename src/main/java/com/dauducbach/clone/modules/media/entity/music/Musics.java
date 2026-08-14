@@ -8,6 +8,8 @@ import lombok.experimental.FieldDefaults;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.relational.core.mapping.Table;
 
+import java.math.BigDecimal;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -28,4 +30,5 @@ public class Musics {
     Short releaseYear;
     String albumName;
     Boolean fetched;
+    BigDecimal popularity;
 }
