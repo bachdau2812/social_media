@@ -135,10 +135,10 @@ auth:
 
 music:
   spotify:
-    python-command: "${SPOTIFLAC_PYTHON_COMMAND:D:/Python/python.exe}"
-    ffprobe-command: ffprobe
-    temp-root: ""
-    process-timeout: 5m
-    lock-ttl: 10m
-    max-concurrent-fetches: 2
-    max-queued-fetches: 50
+    service-base-url: ${MUSIC_FETCH_SERVICE_BASE_URL:http://127.0.0.1:8000}
+    service-timeout: ${MUSIC_FETCH_SERVICE_TIMEOUT:6m}
+    artifact-max-size: ${MUSIC_ARTIFACT_MAX_SIZE:100MB}
+    temp-root: ${SPOTIFY_MUSIC_TEMP_ROOT:}
+    lock-ttl: ${SPOTIFY_MUSIC_LOCK_TTL:10m}
+    max-concurrent-fetches: ${SPOTIFY_MUSIC_MAX_CONCURRENT_FETCHES:2}
+    max-queued-fetches: ${SPOTIFY_MUSIC_MAX_QUEUED_FETCHES:50}
