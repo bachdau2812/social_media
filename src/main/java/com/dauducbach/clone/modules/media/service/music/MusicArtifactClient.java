@@ -281,9 +281,14 @@ public class MusicArtifactClient {
     }
 
     private String safeArtifactId(MusicArtifactDescriptor descriptor) {
-        return descriptor == null || descriptor.artifactId() == null
-                ? "unknown"
-                : descriptor.artifactId();
+        if (descriptor == null || descriptor.artifactId() == null) {
+            return "unknown";
+        }
+        try {
+            return UUID.fromString(descriptor.artifactId()).toString();
+        } catch (IllegalArgumentException ignored) {
+            return "invalid";
+        }
     }
 
     private byte[] sha256(Path file) throws Exception {
