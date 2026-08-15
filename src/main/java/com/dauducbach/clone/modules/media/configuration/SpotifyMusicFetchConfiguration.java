@@ -27,15 +27,6 @@ public class SpotifyMusicFetchConfiguration {
         return Schedulers.fromExecutorService(executor);
     }
 
-    @Bean(name = "spotifyMusicProcessScheduler", destroyMethod = "dispose")
-    public Scheduler spotifyMusicProcessScheduler(SpotifyMusicFetchProperties properties) {
-        validateLimits(properties);
-        return Schedulers.newBoundedElastic(
-                properties.getMaxConcurrentFetches(),
-                properties.getMaxQueuedFetches(),
-                "spotify-music-process");
-    }
-
     private void validateLimits(SpotifyMusicFetchProperties properties) {
         if (properties.getMaxConcurrentFetches() < 1) {
             throw new IllegalArgumentException("music.spotify.max-concurrent-fetches must be greater than 0");

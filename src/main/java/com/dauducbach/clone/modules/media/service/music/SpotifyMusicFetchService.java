@@ -50,8 +50,7 @@ public class SpotifyMusicFetchService {
     private final MusicsRepository repository;
     private final SpotifyMusicFetchLock lock;
     private final SpotifyOEmbedClient oEmbedClient;
-    private final SpotiFlacCliClient spotiFlacClient;
-    private final FfprobeMetadataReader metadataReader;
+    private final MusicArtifactClient artifactClient;
     private final CloudinaryAudioStorageService audioStorage;
     private final MediaService mediaService;
     private final MediaAssetCleanupService cleanupService;
@@ -60,7 +59,6 @@ public class SpotifyMusicFetchService {
     private final TransactionalOperator transactionalOperator;
     private final SpotifyMusicFetchProperties properties;
     private final Scheduler jobScheduler;
-    private final Scheduler processScheduler;
     private final ConcurrentHashMap<String, FetchNotificationState> notificationsByTrack =
             new ConcurrentHashMap<>();
 
@@ -68,8 +66,7 @@ public class SpotifyMusicFetchService {
             MusicsRepository repository,
             SpotifyMusicFetchLock lock,
             SpotifyOEmbedClient oEmbedClient,
-            SpotiFlacCliClient spotiFlacClient,
-            FfprobeMetadataReader metadataReader,
+            MusicArtifactClient artifactClient,
             CloudinaryAudioStorageService audioStorage,
             MediaService mediaService,
             MediaAssetCleanupService cleanupService,
@@ -77,13 +74,11 @@ public class SpotifyMusicFetchService {
             ObjectMapper objectMapper,
             TransactionalOperator transactionalOperator,
             SpotifyMusicFetchProperties properties,
-            @Qualifier("spotifyMusicFetchScheduler") Scheduler jobScheduler,
-            @Qualifier("spotifyMusicProcessScheduler") Scheduler processScheduler) {
+            @Qualifier("spotifyMusicFetchScheduler") Scheduler jobScheduler) {
         this.repository = repository;
         this.lock = lock;
         this.oEmbedClient = oEmbedClient;
-        this.spotiFlacClient = spotiFlacClient;
-        this.metadataReader = metadataReader;
+        this.artifactClient = artifactClient;
         this.audioStorage = audioStorage;
         this.mediaService = mediaService;
         this.cleanupService = cleanupService;
@@ -92,7 +87,6 @@ public class SpotifyMusicFetchService {
         this.transactionalOperator = transactionalOperator;
         this.properties = properties;
         this.jobScheduler = jobScheduler;
-        this.processScheduler = processScheduler;
     }
 
     public Mono<MusicFetchAcceptedResponse> requestFetch(String trackId, String userId) {
@@ -149,10 +143,9 @@ public class SpotifyMusicFetchService {
                             .normalize();
                     String jobId = jobDirectory.getFileName().toString();
                     log.info(
-                            "[music-fetch] trackId={} jobId={} lock acquired outputDirectory={}",
+                            "[music-fetch] trackId={} jobId={} lock acquired",
                             trackId,
-                            jobId,
-                            jobDirectory.toAbsolutePath());
+                            jobId);
                     LockHeartbeat heartbeat = startLockHeartbeat(trackId, token);
                     try {
                         jobScheduler.schedule(() -> executeJob(
@@ -194,55 +187,20 @@ public class SpotifyMusicFetchService {
             LockHeartbeat heartbeat) {
         String jobId = jobDirectory.getFileName().toString();
         log.info(
-                "[music-fetch] trackId={} jobId={} job started outputDirectory={}",
+                "[music-fetch] trackId={} jobId={} job started",
                 trackId,
-                jobId,
-                jobDirectory.toAbsolutePath());
+                jobId);
         Mono<Musics> fetch = Mono.fromCallable(() -> Files.createDirectories(jobDirectory))
                 .then(repository.findById(trackId)
                         .switchIfEmpty(Mono.error(new AppException(ErrorCode.MUSIC_NOT_FOUND))))
                 .flatMap(music -> Boolean.TRUE.equals(music.getFetched())
                         ? Mono.just(music)
                         : resolveThumbnail(music)
-                                .then(spotiFlacClient.download(trackId, jobDirectory))
-                                .doOnSubscribe(ignored -> log.info(
-                                        "[music-fetch] trackId={} jobId={} download started",
+                                .then(fetchRemoteMusic(
+                                        music,
                                         trackId,
-                                        jobId))
-                                .doOnNext(flacFile -> log.info(
-                                        "[music-fetch] trackId={} jobId={} download completed file={}",
-                                        trackId,
-                                        jobId,
-                                        flacFile.getFileName()))
-                                .flatMap(flacFile -> metadataReader.read(flacFile)
-                                        .doOnSubscribe(ignored -> log.info(
-                                                "[music-fetch] trackId={} jobId={} ffprobe started",
-                                                trackId,
-                                                jobId))
-                                        .doOnNext(metadata -> log.info(
-                                                "[music-fetch] trackId={} jobId={} ffprobe completed",
-                                                trackId,
-                                                jobId))
-                                        .flatMap(metadata -> audioStorage.uploadMusic(flacFile, trackId)
-                                                .doOnSubscribe(ignored -> log.info(
-                                                        "[music-fetch] trackId={} jobId={} upload started",
-                                                        trackId,
-                                                        jobId))
-                                                .doOnNext(upload -> log.info(
-                                                        "[music-fetch] trackId={} jobId={} upload completed",
-                                                        trackId,
-                                                        jobId))
-                                                .flatMap(upload -> persistFetchedMusic(
-                                                        music,
-                                                        metadata,
-                                                        upload)
-                                                        .doOnNext(saved -> log.info(
-                                                                "[music-fetch] trackId={} jobId={} persistence completed",
-                                                                trackId,
-                                                                jobId))
-                                                        .onErrorResume(error -> cleanupUploadedAsset(
-                                                                upload,
-                                                                error))))));
+                                        jobDirectory,
+                                        jobId)));
         Mono<Musics> guardedFetch = heartbeat.isOwnershipLost()
                 ? Mono.error(lockOwnershipLost())
                 : Mono.firstWithSignal(
@@ -271,6 +229,45 @@ public class SpotifyMusicFetchService {
                     return Mono.empty();
                 })
                 .doFinally(signal -> heartbeat.dispose());
+    }
+
+    private Mono<Musics> fetchRemoteMusic(
+            Musics music,
+            String trackId,
+            Path jobDirectory,
+            String jobId) {
+        return Mono.usingWhen(
+                artifactClient.create(trackId)
+                        .doOnNext(artifact -> log.info(
+                                "[music-fetch] trackId={} jobId={} artifact created",
+                                trackId,
+                                jobId)),
+                artifact -> artifactClient.download(artifact, jobDirectory)
+                        .doOnNext(downloaded -> log.info(
+                                "[music-fetch] trackId={} jobId={} artifact downloaded file={}",
+                                trackId,
+                                jobId,
+                                downloaded.file().getFileName()))
+                        .flatMap(downloaded -> audioStorage
+                                .uploadMusic(downloaded.file(), trackId)
+                                .doOnNext(upload -> log.info(
+                                        "[music-fetch] trackId={} jobId={} upload completed",
+                                        trackId,
+                                        jobId))
+                                .flatMap(upload -> persistFetchedMusic(
+                                        music,
+                                        downloaded.descriptor().metadata().toSpotifyMetadata(),
+                                        upload)
+                                        .doOnNext(saved -> log.info(
+                                                "[music-fetch] trackId={} jobId={} persistence completed",
+                                                trackId,
+                                                jobId))
+                                        .onErrorResume(error -> cleanupUploadedAsset(
+                                                upload,
+                                                error)))),
+                artifactClient::cleanup,
+                (artifact, error) -> artifactClient.cleanup(artifact),
+                artifactClient::cleanup);
     }
 
     private LockHeartbeat startLockHeartbeat(String trackId, String token) {
@@ -467,7 +464,7 @@ public class SpotifyMusicFetchService {
         return Mono.defer(() -> {
             Mono<Void> tempCleanup = Mono.<Void>fromRunnable(
                             () -> deleteJobDirectory(jobDirectory))
-                    .subscribeOn(processScheduler)
+                    .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
                     .doOnSuccess(ignored -> log.info(
                             "[music-fetch] trackId={} temp cleanup completed",
                             trackId))

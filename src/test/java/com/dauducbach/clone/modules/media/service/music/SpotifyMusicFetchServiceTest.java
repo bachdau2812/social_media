@@ -4,6 +4,8 @@ import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.commons.realtime.UserSsePublisher;
 import com.dauducbach.clone.modules.media.configuration.SpotifyMusicFetchProperties;
+import com.dauducbach.clone.modules.media.dto.music.internal.MusicArtifactDescriptor;
+import com.dauducbach.clone.modules.media.dto.music.internal.MusicArtifactMetadata;
 import com.dauducbach.clone.modules.media.dto.music.response.MusicFetchAcceptedResponse;
 import com.dauducbach.clone.modules.media.dto.response.MediaAudioUploadResult;
 import com.dauducbach.clone.modules.media.entity.Media;
@@ -20,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.reactive.TransactionalOperator;
@@ -31,6 +34,7 @@ import reactor.core.scheduler.Schedulers;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.Queue;
 import java.util.concurrent.RejectedExecutionException;
@@ -42,6 +46,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -54,8 +59,7 @@ class SpotifyMusicFetchServiceTest {
     @Mock MusicsRepository repository;
     @Mock SpotifyMusicFetchLock lock;
     @Mock SpotifyOEmbedClient oEmbed;
-    @Mock SpotiFlacCliClient spotiFlac;
-    @Mock FfprobeMetadataReader metadataReader;
+    @Mock MusicArtifactClient artifactClient;
     @Mock CloudinaryAudioStorageService audioStorage;
     @Mock MediaService mediaService;
     @Mock MediaAssetCleanupService cleanupService;
@@ -66,7 +70,6 @@ class SpotifyMusicFetchServiceTest {
     Path tempDirectory;
 
     private Scheduler scheduler;
-    private Scheduler processScheduler;
     private Queue<Runnable> scheduledTasks;
     private SpotifyMusicFetchProperties properties;
 
@@ -74,7 +77,6 @@ class SpotifyMusicFetchServiceTest {
     void setUp() {
         scheduledTasks = new ArrayDeque<>();
         scheduler = Schedulers.fromExecutor(scheduledTasks::add);
-        processScheduler = Schedulers.immediate();
         properties = new SpotifyMusicFetchProperties();
         properties.setTempRoot(tempDirectory.toString());
     }
@@ -123,7 +125,8 @@ class SpotifyMusicFetchServiceTest {
 
         runScheduledJobs();
 
-        verify(spotiFlac, times(1)).download(eq(TRACK_ID), any(Path.class));
+        verify(artifactClient, times(1)).create(TRACK_ID);
+        verify(artifactClient, times(1)).download(eq(descriptor()), any(Path.class));
         ArgumentCaptor<Musics> savedMusic = ArgumentCaptor.forClass(Musics.class);
         verify(repository).save(savedMusic.capture());
         assertThat(savedMusic.getValue().getSongUrl()).isEqualTo("https://cdn/song.mp3");
@@ -146,10 +149,9 @@ class SpotifyMusicFetchServiceTest {
 
             assertThat(capture.messages()).anyMatch(message -> message.contains("lock acquired"));
             assertThat(capture.messages()).anyMatch(message -> message.contains("queue accepted"));
-            assertThat(capture.messages()).anyMatch(message -> message.contains("job started")
-                    && message.contains("outputDirectory="));
-            assertThat(capture.messages()).anyMatch(message -> message.contains("download completed"));
-            assertThat(capture.messages()).anyMatch(message -> message.contains("ffprobe completed"));
+            assertThat(capture.messages()).anyMatch(message -> message.contains("job started"));
+            assertThat(capture.messages()).anyMatch(message -> message.contains("artifact created"));
+            assertThat(capture.messages()).anyMatch(message -> message.contains("artifact downloaded"));
             assertThat(capture.messages()).anyMatch(message -> message.contains("upload completed"));
             assertThat(capture.messages()).anyMatch(message -> message.contains("persistence completed"));
             assertThat(capture.messages()).anyMatch(message -> message.contains("sse dispatched")
@@ -158,6 +160,21 @@ class SpotifyMusicFetchServiceTest {
             assertThat(capture.messages()).anyMatch(message -> message.contains("lock released"));
             assertThat(capture.messages()).anyMatch(message -> message.contains("job finalized"));
         }
+    }
+
+    @Test
+    void successfulJobCleansRemoteArtifactAfterPersistence() throws Exception {
+        Musics music = catalogMusic();
+        Path flac = Files.writeString(tempDirectory.resolve("success-cleanup.flac"), "audio");
+        stubSuccessfulJob(music, flac);
+        when(lock.tryAcquire(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
+
+        service().requestFetch(TRACK_ID, "user-1").block();
+        runScheduledJobs();
+
+        InOrder lifecycle = inOrder(repository, artifactClient);
+        lifecycle.verify(repository).save(any(Musics.class));
+        lifecycle.verify(artifactClient).cleanup(descriptor());
     }
 
     @Test
@@ -173,19 +190,21 @@ class SpotifyMusicFetchServiceTest {
         service().requestFetch(TRACK_ID, "user-1").block();
         runScheduledJobs();
 
-        verify(spotiFlac).download(eq(TRACK_ID), any(Path.class));
+        verify(artifactClient).create(TRACK_ID);
+        verify(artifactClient).download(eq(descriptor()), any(Path.class));
         verify(repository).save(any(Musics.class));
     }
 
     @Test
     void failureNotifiesEveryWaiterWithSafePayload() throws Exception {
         Musics music = catalogMusic();
-        Path flac = Files.writeString(tempDirectory.resolve("source.flac"), "audio");
         when(repository.findById(TRACK_ID)).thenReturn(Mono.just(music));
         when(lock.tryAcquire(eq(TRACK_ID), anyString()))
                 .thenReturn(Mono.just(true), Mono.just(false));
-        when(spotiFlac.download(eq(TRACK_ID), any(Path.class))).thenReturn(Mono.just(flac));
-        when(metadataReader.read(flac)).thenReturn(Mono.error(new IllegalStateException("raw secret")));
+        when(artifactClient.create(TRACK_ID)).thenReturn(Mono.just(descriptor()));
+        when(artifactClient.download(eq(descriptor()), any(Path.class)))
+                .thenReturn(Mono.error(new IllegalStateException("raw secret")));
+        when(artifactClient.cleanup(descriptor())).thenReturn(Mono.empty());
         when(ssePublisher.sendToUser(anyString(), anyString(), anyString()))
                 .thenReturn(Mono.empty());
         when(lock.release(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
@@ -203,15 +222,16 @@ class SpotifyMusicFetchServiceTest {
         assertThat(payload.getValue()).contains(TRACK_ID)
                 .contains("Kh\u00f4ng th\u1ec3 t\u1ea3i b\u00e0i h\u00e1t. Vui l\u00f2ng th\u1eed l\u1ea1i.")
                 .doesNotContain("raw secret");
+        verify(artifactClient).cleanup(descriptor());
     }
 
     @Test
-    void processFailureLogsReasonAndDispatchesFailureBeforeFinalization() {
+    void artifactCreationFailureDoesNotCleanupAndDispatchesFailureBeforeFinalization() {
         Musics music = catalogMusic();
         when(repository.findById(TRACK_ID)).thenReturn(Mono.just(music));
         when(lock.tryAcquire(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
-        when(spotiFlac.download(eq(TRACK_ID), any(Path.class)))
-                .thenReturn(Mono.error(new java.util.concurrent.TimeoutException("process timeout")));
+        when(artifactClient.create(TRACK_ID))
+                .thenReturn(Mono.error(new java.util.concurrent.TimeoutException("service timeout")));
         when(ssePublisher.sendToUser(anyString(), anyString(), anyString()))
                 .thenReturn(Mono.empty());
         when(lock.release(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
@@ -220,7 +240,7 @@ class SpotifyMusicFetchServiceTest {
             service().requestFetch(TRACK_ID, "user-1").block();
             runScheduledJobs();
 
-            assertThat(capture.messages()).anyMatch(message -> message.contains("failed reason=process timeout")
+            assertThat(capture.messages()).anyMatch(message -> message.contains("failed reason=service timeout")
                     && message.contains("jobId="));
             assertThat(capture.messages()).anyMatch(message -> message.contains("sse dispatched")
                     && message.contains("music_fetch_failed"));
@@ -230,6 +250,30 @@ class SpotifyMusicFetchServiceTest {
         verify(ssePublisher).sendToUser(
                 eq("user-1"), eq("music_fetch_failed"), anyString());
         verify(lock).release(eq(TRACK_ID), anyString());
+        verify(artifactClient, never()).cleanup(any());
+    }
+
+    @Test
+    void cloudinaryFailureCleansRemoteArtifact() throws Exception {
+        Musics music = catalogMusic();
+        Path flac = Files.writeString(tempDirectory.resolve("cloudinary-failure.flac"), "audio");
+        when(repository.findById(TRACK_ID)).thenReturn(Mono.just(music));
+        when(lock.tryAcquire(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
+        when(artifactClient.create(TRACK_ID)).thenReturn(Mono.just(descriptor()));
+        when(artifactClient.download(eq(descriptor()), any(Path.class)))
+                .thenReturn(Mono.just(new DownloadedMusicArtifact(descriptor(), flac)));
+        when(artifactClient.cleanup(descriptor())).thenReturn(Mono.empty());
+        when(audioStorage.uploadMusic(flac, TRACK_ID))
+                .thenReturn(Mono.error(new IllegalStateException("cloudinary down")));
+        when(ssePublisher.sendToUser(anyString(), anyString(), anyString()))
+                .thenReturn(Mono.empty());
+        when(lock.release(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
+
+        service().requestFetch(TRACK_ID, "user-1").block();
+        runScheduledJobs();
+
+        verify(artifactClient).cleanup(descriptor());
+        verify(repository, never()).save(any(Musics.class));
     }
 
     @Test
@@ -247,6 +291,28 @@ class SpotifyMusicFetchServiceTest {
         runScheduledJobs();
 
         verify(cleanupService).delete("social_network_musics/" + TRACK_ID);
+        InOrder cleanupOrder = inOrder(cleanupService, artifactClient);
+        cleanupOrder.verify(cleanupService).delete("social_network_musics/" + TRACK_ID);
+        cleanupOrder.verify(artifactClient).cleanup(descriptor());
+    }
+
+    @Test
+    void sseFailureDoesNotChangeCommittedSuccess() throws Exception {
+        Musics music = catalogMusic();
+        Path flac = Files.writeString(tempDirectory.resolve("sse-failure.flac"), "audio");
+        stubSuccessfulJob(music, flac);
+        when(lock.tryAcquire(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
+        when(ssePublisher.sendToUser(eq("user-1"), eq("music_fetch_success"), anyString()))
+                .thenReturn(Mono.error(new IllegalStateException("sse unavailable")));
+
+        service().requestFetch(TRACK_ID, "user-1").block();
+        runScheduledJobs();
+
+        verify(repository).save(any(Musics.class));
+        verify(artifactClient).cleanup(descriptor());
+        verify(lock).release(eq(TRACK_ID), anyString());
+        verify(ssePublisher, never()).sendToUser(
+                eq("user-1"), eq("music_fetch_failed"), anyString());
     }
 
     @Test
@@ -260,7 +326,7 @@ class SpotifyMusicFetchServiceTest {
         runScheduledJobs();
 
         ArgumentCaptor<Path> jobDirectory = ArgumentCaptor.forClass(Path.class);
-        verify(spotiFlac).download(eq(TRACK_ID), jobDirectory.capture());
+        verify(artifactClient).download(eq(descriptor()), jobDirectory.capture());
         assertThat(jobDirectory.getValue().normalize().startsWith(tempDirectory.normalize())).isTrue();
         assertThat(jobDirectory.getValue()).doesNotExist();
         verify(lock, atLeastOnce()).release(eq(TRACK_ID), anyString());
@@ -287,7 +353,7 @@ class SpotifyMusicFetchServiceTest {
                 .verify();
 
         verify(lock).release(eq(TRACK_ID), anyString());
-        verify(spotiFlac, never()).download(eq(TRACK_ID), any(Path.class));
+        verify(artifactClient, never()).create(anyString());
     }
 
     @Test
@@ -357,7 +423,7 @@ class SpotifyMusicFetchServiceTest {
         verify(ssePublisher).sendToUser(
                 eq("user-2"), eq("music_fetch_success"), anyString());
         verify(lock, times(1)).tryAcquire(eq(TRACK_ID), anyString());
-        verify(spotiFlac, times(1)).download(eq(TRACK_ID), any(Path.class));
+        verify(artifactClient, times(1)).create(TRACK_ID);
     }
 
     @Test
@@ -375,7 +441,7 @@ class SpotifyMusicFetchServiceTest {
         service().requestFetch(TRACK_ID, "user-1").block();
         runScheduledJobs();
 
-        verify(spotiFlac, never()).download(eq(TRACK_ID), any(Path.class));
+        verify(artifactClient, never()).create(anyString());
         verify(ssePublisher).sendToUser(
                 eq("user-1"), eq("music_fetch_success"), anyString());
     }
@@ -420,7 +486,7 @@ class SpotifyMusicFetchServiceTest {
         runScheduledJobs();
 
         verify(lock, atLeastOnce()).extend(eq(TRACK_ID), anyString());
-        verify(spotiFlac, never()).download(eq(TRACK_ID), any(Path.class));
+        verify(artifactClient, never()).create(anyString());
         verify(ssePublisher).sendToUser(
                 eq("user-1"), eq("music_fetch_failed"), anyString());
     }
@@ -443,7 +509,7 @@ class SpotifyMusicFetchServiceTest {
         runScheduledJobs();
 
         verify(lock, atLeastOnce()).extend(eq(TRACK_ID), anyString());
-        verify(spotiFlac, never()).download(eq(TRACK_ID), any(Path.class));
+        verify(artifactClient, never()).create(anyString());
         verify(ssePublisher).sendToUser(
                 eq("user-1"), eq("music_fetch_failed"), anyString());
     }
@@ -477,8 +543,7 @@ class SpotifyMusicFetchServiceTest {
                 repository,
                 lock,
                 oEmbed,
-                spotiFlac,
-                metadataReader,
+                artifactClient,
                 audioStorage,
                 mediaService,
                 cleanupService,
@@ -486,8 +551,7 @@ class SpotifyMusicFetchServiceTest {
                 new ObjectMapper(),
                 transactionalOperator,
                 properties,
-                selectedJobScheduler,
-                processScheduler);
+                selectedJobScheduler);
     }
 
     private Musics catalogMusic() {
@@ -512,15 +576,10 @@ class SpotifyMusicFetchServiceTest {
 
     private void stubUntilPersistence(Musics music, Path flac) {
         when(repository.findById(TRACK_ID)).thenReturn(Mono.just(music));
-        when(spotiFlac.download(eq(TRACK_ID), any(Path.class))).thenReturn(Mono.just(flac));
-        when(metadataReader.read(flac)).thenReturn(Mono.just(new SpotifyMusicMetadata(
-                "Downloaded title",
-                "Downloaded artist",
-                "Downloaded album",
-                "Album Artist",
-                "Composer",
-                "Rap/Hip Hop",
-                "Lyrics")));
+        when(artifactClient.create(TRACK_ID)).thenReturn(Mono.just(descriptor()));
+        when(artifactClient.download(eq(descriptor()), any(Path.class)))
+                .thenReturn(Mono.just(new DownloadedMusicArtifact(descriptor(), flac)));
+        when(artifactClient.cleanup(descriptor())).thenReturn(Mono.empty());
         when(audioStorage.uploadMusic(flac, TRACK_ID)).thenReturn(Mono.just(uploadResult()));
         when(mediaService.saveFetchedMusicMedia(eq(TRACK_ID), anyString(), any(MediaAudioUploadResult.class)))
                 .thenReturn(Mono.just(Media.builder().assetId("asset-1").build()));
@@ -529,6 +588,25 @@ class SpotifyMusicFetchServiceTest {
         when(ssePublisher.sendToUser(anyString(), anyString(), anyString()))
                 .thenReturn(Mono.empty());
         when(lock.release(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
+    }
+
+    private MusicArtifactDescriptor descriptor() {
+        return new MusicArtifactDescriptor(
+                "5f8a0df0-695d-48ef-98fc-24883ba8b61b",
+                TRACK_ID,
+                TRACK_ID + ".flac",
+                "audio/flac",
+                5,
+                "6ed8919ce20490a5e3ad8630a4fab69475297abd07db73918dd5f36fcfaeb11b",
+                Instant.parse("2026-08-15T10:30:00Z"),
+                new MusicArtifactMetadata(
+                        "Downloaded title",
+                        "Downloaded artist",
+                        "Downloaded album",
+                        "Album Artist",
+                        "Composer",
+                        "Rap/Hip Hop",
+                        "Lyrics"));
     }
 
     private MediaAudioUploadResult uploadResult() {

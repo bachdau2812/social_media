@@ -55,42 +55,4 @@ public class SpotifyMusicFetchProperties {
         return Path.of(tempRoot).toAbsolutePath().normalize();
     }
 
-    /**
-     * Temporary compatibility for the local CLI classes removed by the service migration task.
-     */
-    @Deprecated(forRemoval = true)
-    public String getPythonCommand() {
-        return "python";
-    }
-
-    @Deprecated(forRemoval = true)
-    public void setPythonCommand(String ignored) {
-        // Removed configuration key; retained until the local CLI classes are deleted.
-    }
-
-    /**
-     * Temporary compatibility for the local CLI classes removed by the service migration task.
-     */
-    @Deprecated(forRemoval = true)
-    public String getFfprobeCommand() {
-        return "ffprobe";
-    }
-
-    @Deprecated(forRemoval = true)
-    public void setFfprobeCommand(String ignored) {
-        // Removed configuration key; retained until the local CLI classes are deleted.
-    }
-
-    /**
-     * Temporary compatibility for the local CLI classes removed by the service migration task.
-     */
-    @Deprecated(forRemoval = true)
-    public Duration getProcessTimeout() {
-        return serviceTimeout;
-    }
-
-    @Deprecated(forRemoval = true)
-    public void setProcessTimeout(Duration processTimeout) {
-        this.serviceTimeout = processTimeout;
-    }
 }
