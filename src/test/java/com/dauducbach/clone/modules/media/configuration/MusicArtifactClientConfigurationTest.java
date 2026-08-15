@@ -4,6 +4,8 @@ import com.dauducbach.clone.modules.media.dto.music.internal.MusicArtifactDescri
 import com.dauducbach.clone.modules.media.service.music.SpotifyMusicMetadata;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import jakarta.validation.Validation;
+import jakarta.validation.Validator;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.util.unit.DataSize;
@@ -22,6 +24,24 @@ class MusicArtifactClientConfigurationTest {
         assertThat(properties.getServiceBaseUrl()).isEqualTo("http://127.0.0.1:8000");
         assertThat(properties.getServiceTimeout()).isEqualTo(Duration.ofMinutes(6));
         assertThat(properties.getArtifactMaxSize()).isEqualTo(DataSize.ofMegabytes(100));
+    }
+
+    @Test
+    void rejectsDurationsShorterThanOneSecond() {
+        SpotifyMusicFetchProperties properties = new SpotifyMusicFetchProperties();
+        properties.setServiceTimeout(Duration.ZERO);
+        properties.setLockTtl(Duration.ofMillis(999));
+
+        try (var validatorFactory = Validation.buildDefaultValidatorFactory()) {
+            Validator validator = validatorFactory.getValidator();
+
+            assertThat(validator.validate(properties))
+                    .extracting(violation -> violation.getMessage())
+                    .contains(
+                            "music.spotify.service-timeout must be at least 1 second",
+                            "music.spotify.lock-ttl must be at least 1 second"
+                    );
+        }
     }
 
     @Test

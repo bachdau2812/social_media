@@ -7,7 +7,6 @@ import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.boot.convert.DurationMin;
 import org.springframework.util.unit.DataSize;
 import org.springframework.validation.annotation.Validated;
 
@@ -23,7 +22,6 @@ public class SpotifyMusicFetchProperties {
     private String serviceBaseUrl = "http://127.0.0.1:8000";
 
     @NotNull
-    @DurationMin(seconds = 1)
     private Duration serviceTimeout = Duration.ofMinutes(6);
 
     @NotNull
@@ -32,7 +30,6 @@ public class SpotifyMusicFetchProperties {
     private String tempRoot = "";
 
     @NotNull
-    @DurationMin(seconds = 1)
     private Duration lockTtl = Duration.ofMinutes(10);
 
     @Min(1)
@@ -46,6 +43,16 @@ public class SpotifyMusicFetchProperties {
         return artifactMaxSize != null && artifactMaxSize.toBytes() > 0;
     }
 
+    @AssertTrue(message = "music.spotify.service-timeout must be at least 1 second")
+    public boolean isServiceTimeoutAtLeastOneSecond() {
+        return isAtLeastOneSecond(serviceTimeout);
+    }
+
+    @AssertTrue(message = "music.spotify.lock-ttl must be at least 1 second")
+    public boolean isLockTtlAtLeastOneSecond() {
+        return isAtLeastOneSecond(lockTtl);
+    }
+
     public Path resolvedTempRoot() {
         if (tempRoot == null || tempRoot.isBlank()) {
             return Path.of(System.getProperty("java.io.tmpdir"), "social-media-music-fetch")
@@ -53,6 +60,10 @@ public class SpotifyMusicFetchProperties {
                     .normalize();
         }
         return Path.of(tempRoot).toAbsolutePath().normalize();
+    }
+
+    private static boolean isAtLeastOneSecond(Duration duration) {
+        return duration != null && duration.compareTo(Duration.ofSeconds(1)) >= 0;
     }
 
 }
