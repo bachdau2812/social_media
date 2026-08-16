@@ -57,7 +57,8 @@ public class SecurityConfig {
             "/auth/user-credentials/**",
             "/auth/introspect",
             "/auth/refresh-token",
-            "/auth/logout"
+            "/auth/logout",
+            "/musics/fetch"
     };
     private static final Logger log = LoggerFactory.getLogger(SecurityConfig.class);
 
