@@ -90,11 +90,7 @@ public class SpotifyMusicFetchService {
     }
 
     public Mono<MusicFetchAcceptedResponse> requestFetch(String trackId, String userId) {
-        if (trackId == null || !SPOTIFY_TRACK_ID.matcher(trackId).matches()) {
-            return Mono.error(new AppException(
-                    ErrorCode.MUSIC_REQUEST_INVALID,
-                    "Spotify trackId must contain 22 base-62 characters"));
-        }
+        if (!isValidTrackId(trackId)) return invalidTrackId();
         if (userId == null || userId.isBlank()) {
             return Mono.error(new AppException(
                     ErrorCode.AUTHENTICATION_FAILED,
@@ -112,12 +108,33 @@ public class SpotifyMusicFetchService {
                         : requestUnfetched(trackId, cleanUserId));
     }
 
+    public Mono<MusicFetchAcceptedResponse> requestFetchSilently(String trackId) {
+        if (!isValidTrackId(trackId)) return invalidTrackId();
+
+        return repository.findById(trackId)
+                .switchIfEmpty(Mono.error(new AppException(ErrorCode.MUSIC_NOT_FOUND)))
+                .flatMap(music -> Boolean.TRUE.equals(music.getFetched())
+                        ? Mono.just(new MusicFetchAcceptedResponse(
+                                trackId,
+                                MusicFetchAcceptedResponse.Status.ALREADY_FETCHED))
+                        : requestUnfetched(trackId, null));
+    }
+
+    private boolean isValidTrackId(String trackId) {
+        return trackId != null && SPOTIFY_TRACK_ID.matcher(trackId).matches();
+    }
+
+    private Mono<MusicFetchAcceptedResponse> invalidTrackId() {
+        return Mono.error(new AppException(
+                ErrorCode.MUSIC_REQUEST_INVALID,
+                "Spotify trackId must contain 22 base-62 characters"));
+    }
+
     private Mono<MusicFetchAcceptedResponse> requestUnfetched(
             String trackId,
             String userId) {
-        FetchRegistration registration = registerWaiter(trackId, userId);
-        FetchNotificationState notifications = registration.state();
-        if (registration.terminal() != null) {
+        FetchRegistration registration = userId == null ? null : registerWaiter(trackId, userId);
+        if (registration != null && registration.terminal() != null) {
             return sendTerminal(userId, registration.terminal())
                     .thenReturn(new MusicFetchAcceptedResponse(
                             trackId,
@@ -130,14 +147,17 @@ public class SpotifyMusicFetchService {
                     if (!Boolean.TRUE.equals(acquired)) {
                         return repository.findById(trackId)
                                 .flatMap(latest -> Boolean.TRUE.equals(latest.getFetched())
-                                        ? completeSuccess(trackId, notifications, latest)
-                                                .thenReturn(new MusicFetchAcceptedResponse(
-                                                        trackId,
-                                                        MusicFetchAcceptedResponse.Status.ALREADY_FETCHED))
+                                        ? completeAlreadyFetchedRequest(
+                                                trackId,
+                                                registration,
+                                                latest)
                                         : Mono.just(new MusicFetchAcceptedResponse(
                                                 trackId,
                                                 MusicFetchAcceptedResponse.Status.PROCESSING)));
                     }
+                    FetchNotificationState notifications = registration == null
+                            ? notificationState(trackId)
+                            : registration.state();
                     Path jobDirectory = properties.resolvedTempRoot()
                             .resolve(trackId + "-" + token)
                             .normalize();
@@ -176,7 +196,21 @@ public class SpotifyMusicFetchService {
                             trackId,
                             MusicFetchAcceptedResponse.Status.STARTED));
                 })
-                .doOnError(error -> unregisterWaiter(trackId, registration));
+                .doOnError(error -> {
+                    if (registration != null) unregisterWaiter(trackId, registration);
+                });
+    }
+
+    private Mono<MusicFetchAcceptedResponse> completeAlreadyFetchedRequest(
+            String trackId,
+            FetchRegistration registration,
+            Musics music) {
+        MusicFetchAcceptedResponse response = new MusicFetchAcceptedResponse(
+                trackId,
+                MusicFetchAcceptedResponse.Status.ALREADY_FETCHED);
+        return registration == null
+                ? Mono.just(response)
+                : completeSuccess(trackId, registration.state(), music).thenReturn(response);
     }
 
     private Mono<Void> executeJob(
@@ -548,6 +582,12 @@ public class SpotifyMusicFetchService {
             return state;
         });
         return registration.get();
+    }
+
+    private FetchNotificationState notificationState(String trackId) {
+        return notificationsByTrack.computeIfAbsent(
+                trackId,
+                ignored -> new FetchNotificationState());
     }
 
     private void unregisterWaiter(String trackId, FetchRegistration registration) {

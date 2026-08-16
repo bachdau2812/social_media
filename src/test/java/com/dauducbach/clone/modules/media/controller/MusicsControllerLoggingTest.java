@@ -1,6 +1,7 @@
 package com.dauducbach.clone.modules.media.controller;
 
 import com.dauducbach.clone.modules.media.dto.music.response.MusicFetchAcceptedResponse;
+import com.dauducbach.clone.modules.media.service.music.BulkMusicFetchService;
 import com.dauducbach.clone.modules.media.service.music.MusicService;
 import com.dauducbach.clone.testsupport.TestLogCapture;
 import org.junit.jupiter.api.Test;
@@ -18,7 +19,7 @@ class MusicsControllerLoggingTest {
     @Test
     void logsRejectedAndAcceptedFetchBoundaries() {
         MusicService service = mock(MusicService.class);
-        MusicsController controller = new MusicsController(service);
+        MusicsController controller = new MusicsController(service, mock(BulkMusicFetchService.class));
 
         try (TestLogCapture logs = TestLogCapture.start(MusicsController.class)) {
             StepVerifier.create(controller.fetchSpotifyMusic(TRACK_ID, null))

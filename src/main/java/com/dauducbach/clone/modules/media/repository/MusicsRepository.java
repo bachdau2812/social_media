@@ -16,6 +16,23 @@ public interface MusicsRepository extends ReactiveCrudRepository<Musics, String>
 
     @Query("""
             SELECT * FROM musics
+            WHERE COALESCE(fetched, 0) = 0
+            ORDER BY popularity DESC
+            LIMIT :#{#pageable.pageSize} OFFSET :#{#pageable.offset}
+            """)
+    Flux<Musics> findTopUnfetched(Pageable pageable);
+
+    @Query("""
+            SELECT * FROM musics
+            WHERE COALESCE(fetched, 0) = 0
+              AND LOWER(TRIM(single_name)) = LOWER(TRIM(:artist))
+            ORDER BY popularity DESC
+            LIMIT :#{#pageable.pageSize} OFFSET :#{#pageable.offset}
+            """)
+    Flux<Musics> findUnfetchedByArtist(String artist, Pageable pageable);
+
+    @Query("""
+            SELECT * FROM musics
             ORDER BY popularity DESC
             LIMIT :#{#pageable.pageSize} OFFSET :#{#pageable.offset}
             """)

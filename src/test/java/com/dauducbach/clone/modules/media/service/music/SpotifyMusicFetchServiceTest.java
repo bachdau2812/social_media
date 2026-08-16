@@ -50,6 +50,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -442,6 +443,69 @@ class SpotifyMusicFetchServiceTest {
         runScheduledJobs();
 
         verify(artifactClient, never()).create(anyString());
+        verify(ssePublisher).sendToUser(
+                eq("user-1"), eq("music_fetch_success"), anyString());
+    }
+
+    @Test
+    void silentRequestReturnsAlreadyFetchedWithoutPublishingSse() {
+        Musics fetched = catalogMusic();
+        fetched.setFetched(true);
+        fetched.setSongUrl("https://cdn/already-fetched.flac");
+        when(repository.findById(TRACK_ID)).thenReturn(Mono.just(fetched));
+
+        StepVerifier.create(service().requestFetchSilently(TRACK_ID))
+                .assertNext(result -> assertThat(result.status())
+                        .isEqualTo(MusicFetchAcceptedResponse.Status.ALREADY_FETCHED))
+                .verifyComplete();
+
+        verifyNoInteractions(ssePublisher);
+        verifyNoInteractions(lock);
+    }
+
+    @Test
+    void silentRequestRunsExistingJobWithoutPublishingSse() throws Exception {
+        Musics music = catalogMusic();
+        Path flac = Files.writeString(tempDirectory.resolve("silent.flac"), "audio");
+        when(repository.findById(TRACK_ID)).thenReturn(Mono.just(music));
+        when(lock.tryAcquire(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
+        when(artifactClient.create(TRACK_ID)).thenReturn(Mono.just(descriptor()));
+        when(artifactClient.download(eq(descriptor()), any(Path.class)))
+                .thenReturn(Mono.just(new DownloadedMusicArtifact(descriptor(), flac)));
+        when(artifactClient.cleanup(descriptor())).thenReturn(Mono.empty());
+        when(audioStorage.uploadMusic(flac, TRACK_ID)).thenReturn(Mono.just(uploadResult()));
+        when(mediaService.saveFetchedMusicMedia(eq(TRACK_ID), anyString(), any(MediaAudioUploadResult.class)))
+                .thenReturn(Mono.just(Media.builder().assetId("asset-1").build()));
+        when(transactionalOperator.transactional(any(Mono.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(repository.save(any(Musics.class)))
+                .thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+        when(lock.release(eq(TRACK_ID), anyString())).thenReturn(Mono.just(true));
+
+        StepVerifier.create(service().requestFetchSilently(TRACK_ID))
+                .assertNext(result -> assertThat(result.status())
+                        .isEqualTo(MusicFetchAcceptedResponse.Status.STARTED))
+                .verifyComplete();
+        runScheduledJobs();
+
+        verify(repository).save(any(Musics.class));
+        verifyNoInteractions(ssePublisher);
+    }
+
+    @Test
+    void userJoiningSilentJobReceivesTerminalSse() throws Exception {
+        Musics music = catalogMusic();
+        Path flac = Files.writeString(tempDirectory.resolve("silent-with-waiter.flac"), "audio");
+        stubSuccessfulJob(music, flac);
+        when(lock.tryAcquire(eq(TRACK_ID), anyString()))
+                .thenReturn(Mono.just(true), Mono.just(false));
+
+        SpotifyMusicFetchService service = service();
+        service.requestFetchSilently(TRACK_ID).block();
+        MusicFetchAcceptedResponse joined = service.requestFetch(TRACK_ID, "user-1").block();
+        assertThat(joined.status()).isEqualTo(MusicFetchAcceptedResponse.Status.PROCESSING);
+        runScheduledJobs();
+
         verify(ssePublisher).sendToUser(
                 eq("user-1"), eq("music_fetch_success"), anyString());
     }

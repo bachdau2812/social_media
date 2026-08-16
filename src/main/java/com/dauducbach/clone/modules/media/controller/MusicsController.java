@@ -4,8 +4,11 @@ import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.commons.response.ApiResponse;
 import com.dauducbach.clone.commons.response.PageResponse;
+import com.dauducbach.clone.modules.media.dto.music.request.BulkMusicFetchRequest;
+import com.dauducbach.clone.modules.media.dto.music.response.BulkMusicFetchResponse;
 import com.dauducbach.clone.modules.media.dto.music.response.MusicFetchAcceptedResponse;
 import com.dauducbach.clone.modules.media.entity.music.Musics;
+import com.dauducbach.clone.modules.media.service.music.BulkMusicFetchService;
 import com.dauducbach.clone.modules.media.service.music.MusicService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -16,6 +19,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Mono;
@@ -26,6 +30,18 @@ import reactor.core.publisher.Mono;
 public class MusicsController {
     private static final Logger log = LoggerFactory.getLogger(MusicsController.class);
     private final MusicService musicService;
+    private final BulkMusicFetchService bulkMusicFetchService;
+
+    @PostMapping("/fetch")
+    public Mono<ResponseEntity<ApiResponse<BulkMusicFetchResponse>>> triggerMusicFetch(
+            @RequestBody BulkMusicFetchRequest request) {
+        return bulkMusicFetchService.triggerFetch(request)
+                .map(result -> ResponseEntity.accepted().body(
+                        ApiResponse.<BulkMusicFetchResponse>builder()
+                                .message("Bulk music fetch accepted")
+                                .result(result)
+                                .build()));
+    }
 
     @PostMapping("/{trackId}/fetch")
     public Mono<ResponseEntity<ApiResponse<MusicFetchAcceptedResponse>>> fetchSpotifyMusic(
