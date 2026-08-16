@@ -29,6 +29,7 @@ class PushNotificationDeliveryTest {
     private final NotificationEventsRepository eventRepository = mock(NotificationEventsRepository.class);
     private final R2dbcEntityTemplate entityTemplate = mock(R2dbcEntityTemplate.class);
     private final NotificationPushGateway pushGateway = mock(NotificationPushGateway.class);
+    private final NotificationSseService realtime = mock(NotificationSseService.class);
 
     @Test
     void persistsInAppNotificationWhenRecipientHasNoPushToken() {
@@ -42,6 +43,7 @@ class PushNotificationDeliveryTest {
 
         verify(entityTemplate).insert(NotificationEvents.class);
         verify(entityTemplate).insert(UserNotifications.class);
+        verify(realtime).notifyChanged(eq("recipient-1"), anyString());
         verifyNoInteractions(pushGateway);
     }
 
@@ -61,12 +63,13 @@ class PushNotificationDeliveryTest {
             order.add("push");
             return Mono.error(new IllegalStateException("FCM unavailable"));
         });
+        when(realtime.notifyChanged(eq("recipient-1"), anyString())).thenAnswer(invocation -> Mono.fromRunnable(() -> order.add("realtime")));
 
         StepVerifier.create(service.sendPushNotification(notificationRequest()))
                 .expectNextMatches(result -> result.contains("persisted"))
                 .verifyComplete();
 
-        assertThat(order).containsExactly("event", "user-notification", "push");
+        assertThat(order).containsExactly("event", "user-notification", "realtime", "push");
         verify(eventRepository, never()).deleteById(any(String.class));
     }
 
@@ -109,6 +112,7 @@ class PushNotificationDeliveryTest {
 
         verify(entityTemplate, never()).insert(NotificationEvents.class);
         verify(entityTemplate, never()).insert(UserNotifications.class);
+        verifyNoInteractions(realtime);
         verifyNoInteractions(pushGateway);
     }
 
@@ -134,11 +138,13 @@ class PushNotificationDeliveryTest {
 
         verify(entityTemplate, never()).insert(NotificationEvents.class);
         verify(entityTemplate, never()).insert(UserNotifications.class);
+        verifyNoInteractions(realtime);
         verifyNoInteractions(pushGateway);
     }
 
     private PushNotificationService newService() {
         lenient().when(eventRepository.findByDedupKey(anyString())).thenReturn(Mono.empty());
+        lenient().when(realtime.notifyChanged(anyString(), anyString())).thenReturn(Mono.empty());
         return new PushNotificationService(
                 tokenRepository,
                 eventRepository,
@@ -147,7 +153,8 @@ class PushNotificationDeliveryTest {
                 new NotificationDestinationBuilder(),
                 new NotificationContentNormalizer(),
                 new NotificationMetadataCodec(new ObjectMapper()),
-                new FirebasePushMessageFactory());
+                new FirebasePushMessageFactory(),
+                realtime);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})

@@ -51,7 +51,8 @@ public class PushNotificationService {
             NotificationDestinationBuilder destinationBuilder,
             NotificationContentNormalizer contentNormalizer,
             NotificationMetadataCodec metadataCodec,
-            FirebasePushMessageFactory pushMessageFactory
+            FirebasePushMessageFactory pushMessageFactory,
+            NotificationSseService realtime
     ) {
         this.userPushNotificationRepository = userPushNotificationRepository;
         this.notificationEventsRepository = notificationEventsRepository;
@@ -63,7 +64,8 @@ public class PushNotificationService {
         this.pushMessageFactory = pushMessageFactory;
         this.notificationPersistenceFlow = new NotificationPersistenceFlow(
                 userPushNotificationRepository, notificationEventsRepository, r2dbcEntityTemplate,
-                notificationPushGateway, destinationBuilder, contentNormalizer, metadataCodec, pushMessageFactory);
+                notificationPushGateway, destinationBuilder, contentNormalizer, metadataCodec, pushMessageFactory,
+                realtime);
     }
 
     PushNotificationService(
@@ -79,7 +81,8 @@ public class PushNotificationService {
                 new NotificationDestinationBuilder(),
                 new NotificationContentNormalizer(),
                 new NotificationMetadataCodec(new ObjectMapper()),
-                new FirebasePushMessageFactory());
+                new FirebasePushMessageFactory(),
+                new NotificationSseService());
     }
 
     public Mono<PushTokenRegisterResponse> registerPushToken(PushTokenRegisterRequest request) {

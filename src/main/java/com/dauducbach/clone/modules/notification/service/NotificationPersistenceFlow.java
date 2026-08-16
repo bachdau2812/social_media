@@ -29,6 +29,7 @@ final class NotificationPersistenceFlow {
     private final NotificationContentNormalizer contentNormalizer;
     private final NotificationMetadataCodec metadataCodec;
     private final FirebasePushMessageFactory pushMessageFactory;
+    private final NotificationSseService realtime;
 
     NotificationPersistenceFlow(
             UserPushNotificationRepository tokenRepository,
@@ -38,7 +39,8 @@ final class NotificationPersistenceFlow {
             NotificationDestinationBuilder destinationBuilder,
             NotificationContentNormalizer contentNormalizer,
             NotificationMetadataCodec metadataCodec,
-            FirebasePushMessageFactory pushMessageFactory
+            FirebasePushMessageFactory pushMessageFactory,
+            NotificationSseService realtime
     ) {
         this.tokenRepository = tokenRepository;
         this.eventRepository = eventRepository;
@@ -48,6 +50,7 @@ final class NotificationPersistenceFlow {
         this.contentNormalizer = contentNormalizer;
         this.metadataCodec = metadataCodec;
         this.pushMessageFactory = pushMessageFactory;
+        this.realtime = realtime;
     }
 
     Mono<String> send(NotificationForService request) {
@@ -55,7 +58,13 @@ final class NotificationPersistenceFlow {
         PreparedPushNotification prepared = prepare(request);
         return persist(prepared.event(), prepared.userNotification())
                 .flatMap(inserted -> inserted
-                        ? deliver(request, prepared)
+                        ? realtime.notifyChanged(request.getRecipient(), prepared.userNotification().getId())
+                                .onErrorResume(error -> {
+                                    log.warn("|NotificationPersistenceFlow|send|realtime invalidation failed|recipientId={}|error={}",
+                                            request.getRecipient(), error.getMessage());
+                                    return Mono.empty();
+                                })
+                                .then(deliver(request, prepared))
                         : Mono.just("Duplicate notification skipped"))
                 .onErrorMap(error -> error instanceof AppException
                         ? error
