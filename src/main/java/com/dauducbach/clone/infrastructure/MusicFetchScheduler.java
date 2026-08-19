@@ -16,7 +16,7 @@ public class MusicFetchScheduler {
 
     private final BulkMusicFetchService bulkMusicFetchService;
 
-    @Scheduled(cron = "0 0 2 * * *", zone = "Asia/Ho_Chi_Minh")
+//    @Scheduled(cron = "0 0 2 * * *", zone = "Asia/Ho_Chi_Minh")
     public void fetchTopUnfetchedMusics() {
         log.info("|MusicFetchScheduler|fetchTopUnfetchedMusics|start|limit={}", DAILY_TOP_LIMIT);
         bulkMusicFetchService.triggerFetch(BulkMusicFetchRequest.top(DAILY_TOP_LIMIT))

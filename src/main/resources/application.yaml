@@ -141,4 +141,4 @@ music:
     temp-root: ${SPOTIFY_MUSIC_TEMP_ROOT:}
     lock-ttl: ${SPOTIFY_MUSIC_LOCK_TTL:10m}
     max-concurrent-fetches: ${SPOTIFY_MUSIC_MAX_CONCURRENT_FETCHES:2}
-    max-queued-fetches: ${SPOTIFY_MUSIC_MAX_QUEUED_FETCHES:50}
+    max-queued-fetches: ${SPOTIFY_MUSIC_MAX_QUEUED_FETCHES:1000}
