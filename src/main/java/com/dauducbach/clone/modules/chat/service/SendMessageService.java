@@ -119,8 +119,14 @@ public class SendMessageService {
     private MediaMetadataRequest normalizedMetadata(MediaMetadataRequest requested, Media media) {
         String deliveryUrl = firstNonBlank(media.getSecureUrl(), media.getUrl(), requested.url());
         long bytes = media.getBytes() > 0 ? media.getBytes() : requested.size();
-        Integer width = media.getWidth() > 0 ? media.getWidth() : requested.width();
-        Integer height = media.getHeight() > 0 ? media.getHeight() : requested.height();
+        Integer width = requested.width();
+        if (media.getWidth() > 0) {
+            width = media.getWidth();
+        }
+        Integer height = requested.height();
+        if (media.getHeight() > 0) {
+            height = media.getHeight();
+        }
         return new MediaMetadataRequest(
                 deliveryUrl,
                 media.getPublicId(),

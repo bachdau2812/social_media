@@ -2,6 +2,7 @@ package com.dauducbach.clone.modules.chat.service;
 
 import com.dauducbach.clone.modules.chat.constant.ConversationType;
 import com.dauducbach.clone.modules.chat.constant.MessageType;
+import com.dauducbach.clone.modules.chat.dto.request.MediaMetadataRequest;
 import com.dauducbach.clone.modules.chat.dto.request.SendMessageRequest;
 import com.dauducbach.clone.modules.chat.dto.request.StoryContextRequest;
 import com.dauducbach.clone.modules.chat.entity.ChatMessage;
@@ -11,6 +12,8 @@ import com.dauducbach.clone.modules.chat.repository.ChatMessageRepository;
 import com.dauducbach.clone.modules.chat.repository.ChatReadRepository;
 import com.dauducbach.clone.modules.chat.repository.ConversationMemberRepository;
 import com.dauducbach.clone.modules.chat.repository.ConversationRepository;
+import com.dauducbach.clone.modules.media.constant.OwnerType;
+import com.dauducbach.clone.modules.media.entity.Media;
 import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
 import com.dauducbach.clone.modules.media.service.MediaService;
 import com.dauducbach.clone.modules.media.configuration.MediaPolicyProperties;
@@ -33,6 +36,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -118,5 +122,71 @@ class SendMessageServiceTest {
                 .contains("\"previewAtMs\":12400");
         verify(mediaFacade, never()).fetchMediaByPublicId(any());
         verify(mediaService, never()).registerFetchedMedia(any(), any(), any());
+    }
+
+    @Test
+    void createsAudioMessageWhenCloudinaryAndRequestDimensionsAreUnavailable() {
+        MediaMetadataRequest metadata = new MediaMetadataRequest(
+                "https://cdn.test/voice.webm",
+                "voice-1",
+                "audio/webm",
+                5L,
+                "voice.webm",
+                null,
+                null,
+                1200L);
+        SendMessageRequest request = new SendMessageRequest(
+                UUID.randomUUID().toString(),
+                MessageType.AUDIO,
+                null,
+                metadata,
+                null,
+                "recipient-1",
+                null,
+                null);
+        Conversation conversation = Conversation.builder()
+                .id("conversation-1")
+                .conversationType(ConversationType.DIRECT)
+                .lastMessageSeq(4L)
+                .build();
+        Media fetched = Media.builder()
+                .assetId("asset-1")
+                .publicId("voice-1")
+                .resourceType("video")
+                .bytes(5)
+                .secureUrl("https://cdn.test/voice.webm")
+                .width(0)
+                .height(0)
+                .build();
+
+        when(accessService.requireActiveMember("conversation-1", "actor-1"))
+                .thenReturn(Mono.just(ConversationMember.builder().build()));
+        when(memberRepository.findActiveUserIds("conversation-1"))
+                .thenReturn(Flux.just("actor-1", "recipient-1"));
+        when(messageRepository.findBySenderIdAndClientMessageId("actor-1", request.clientMessageId()))
+                .thenReturn(Mono.empty());
+        when(mediaFacade.fetchMediaByPublicId("voice-1")).thenReturn(Mono.just(fetched));
+        when(conversationRepository.findByIdForUpdate("conversation-1"))
+                .thenReturn(Mono.just(conversation));
+        when(entityTemplate.insert(ChatMessage.class)).thenReturn(insertSpec);
+        when(insertSpec.using(any(ChatMessage.class)))
+                .thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+        when(mediaService.registerFetchedMedia(any(Media.class), any(), eq(OwnerType.CHAT_MESSAGE)))
+                .thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+        when(conversationRepository.updateMessageSummary(any(), any(Long.class), any(), any()))
+                .thenReturn(Mono.just(1));
+        when(chatReadRepository.findAfterSequence("conversation-1", 1L, 4L, 1))
+                .thenReturn(Flux.empty());
+        when(eventPublisher.publish(any())).thenReturn(Mono.empty());
+
+        StepVerifier.create(service.sendMessage("actor-1", "conversation-1", request))
+                .assertNext(response -> {
+                    assertThat(response.messageType()).isEqualTo(MessageType.AUDIO);
+                    assertThat(response.metadata()).isNotNull();
+                    assertThat(response.metadata().width()).isNull();
+                    assertThat(response.metadata().height()).isNull();
+                    assertThat(response.metadata().duration()).isEqualTo(1200L);
+                })
+                .verifyComplete();
     }
 }
