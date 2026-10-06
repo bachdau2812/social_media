@@ -31,7 +31,12 @@ public class FeedCandidatePipeline {
             int limit,
             Set<String> excludedPostIds
     ) {
-        return snapshots.load(userId).defaultIfEmpty(new FeedVectorSnapshot(0L, List.of()))
+        return snapshots.load(userId)
+                .onErrorResume(error -> {
+                    log.warn("|FeedCandidatePipeline|snapshot-unavailable|userId={}|error={}", userId, error.toString());
+                    return Mono.empty();
+                })
+                .defaultIfEmpty(new FeedVectorSnapshot(0L, List.of()))
                 .flatMap(snapshot -> select(snapshot, limit, excludedPostIds));
     }
 

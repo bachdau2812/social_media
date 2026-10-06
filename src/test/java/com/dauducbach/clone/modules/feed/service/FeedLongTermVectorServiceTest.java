@@ -1,19 +1,22 @@
 package com.dauducbach.clone.modules.feed.service;
 
+import com.dauducbach.clone.infrastructure.vector.InMemoryVectorRedisState;
+import com.dauducbach.clone.infrastructure.vector.UserVectorCoordinator;
 import com.dauducbach.clone.modules.audit.dto.AuditActionType;
 import com.dauducbach.clone.modules.audit.entity.AuditLogs;
 import com.dauducbach.clone.modules.audit.service.AuditInteractionQueryService;
 import com.dauducbach.clone.modules.post.service.post.PostFeedQueryService;
-import com.dauducbach.clone.modules.user.entity.UserDetails;
-import com.dauducbach.clone.modules.user.service.UserDetailsService;
+import com.dauducbach.clone.modules.user.entity.UserDetailVector;
+import com.dauducbach.clone.modules.user.entity.UserVectorUpdateOperation;
+import com.dauducbach.clone.modules.user.repositoty.UserDetailsRepository;
+import com.dauducbach.clone.modules.user.service.UserVectorOperationService;
 import com.dauducbach.clone.modules.user.service.UserVectorQueryService;
+import com.dauducbach.clone.modules.user.service.UserVectorStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.redis.core.ReactiveRedisTemplate;
-import org.springframework.data.redis.core.ReactiveValueOperations;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -31,71 +34,18 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class FeedLongTermVectorServiceTest {
-    @Mock
-    AuditInteractionQueryService auditInteractionQueryService;
-    @Mock
-    PostFeedQueryService postFeedQueryService;
-    @Mock
-    UserVectorQueryService userVectorQueryService;
-    @Mock
-    UserDetailsService userDetailsService;
-    @Mock
-    ReactiveRedisTemplate<String, String> redisTemplate;
-    @Mock
-    ReactiveValueOperations<String, String> valueOperations;
+    @Mock AuditInteractionQueryService auditInteractionQueryService;
+    @Mock PostFeedQueryService postFeedQueryService;
+    @Mock UserVectorQueryService userVectorQueryService;
+    @Mock UserDetailsRepository users;
+    @Mock UserVectorOperationService operations;
+    @Mock FeedInteractionProcessingService shortTermProcessing;
 
     @Test
-    void updateLongTermVectorsForRangeBlendsAndSavesNormalizedVector() {
-        FeedVectorService feedVectorService = new FeedVectorService(redisTemplate, postFeedQueryService, userVectorQueryService);
-        FeedLongTermVectorService service = new FeedLongTermVectorService(
-                auditInteractionQueryService,
-                postFeedQueryService,
-                userVectorQueryService,
-                userDetailsService,
-                feedVectorService,
-                redisTemplate
-        );
+    void refreshLongTermVectorsReturnsNoSignalForAnEmptyRange() {
+        FeedLongTermVectorService service = newService();
         Instant from = Instant.parse("2026-06-21T00:00:00Z");
         Instant to = Instant.parse("2026-06-22T00:00:00Z");
-        AuditLogs log = AuditLogs.builder()
-                .actorId("user-1")
-                .action(AuditActionType.LIKE_POST)
-                .resourceId("post-1")
-                .status("SUCCESS")
-                .build();
-
-        when(auditInteractionQueryService.findPostInteractionsBetween(from, to)).thenReturn(Flux.just(log));
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get("user_long_term_vector_snapshot:user-1")).thenReturn(Mono.empty());
-        when(userVectorQueryService.getLongTermOrUserVector("user-1")).thenReturn(Mono.just(List.of(0.0, 1.0)));
-        when(valueOperations.set(eq("user_long_term_vector_snapshot:user-1"), anyString(), any())).thenReturn(Mono.just(true));
-        when(postFeedQueryService.getPostVector("post-1")).thenReturn(Mono.just(List.of(1.0, 0.0)));
-        when(userVectorQueryService.saveLongTermVector(eq("user-1"), any())).thenReturn(Mono.empty());
-        when(redisTemplate.delete("user_long_term_vector_snapshot:user-1")).thenReturn(Mono.just(1L));
-
-        StepVerifier.create(service.updateLongTermVectorsForRange(from, to))
-                .verifyComplete();
-
-        ArgumentCaptor<List<Double>> vectorCaptor = ArgumentCaptor.forClass(List.class);
-        verify(userVectorQueryService).saveLongTermVector(eq("user-1"), vectorCaptor.capture());
-        assertThat(vectorLength(vectorCaptor.getValue())).isCloseTo(1.0, org.assertj.core.data.Offset.offset(0.000001));
-        assertThat(vectorCaptor.getValue().get(1)).isGreaterThan(vectorCaptor.getValue().get(0));
-    }
-
-    @Test
-    void refreshLongTermVectorsRunsCustomRangeAndReturnsCompletedResponse() {
-        FeedVectorService feedVectorService = new FeedVectorService(redisTemplate, postFeedQueryService, userVectorQueryService);
-        FeedLongTermVectorService service = new FeedLongTermVectorService(
-                auditInteractionQueryService,
-                postFeedQueryService,
-                userVectorQueryService,
-                userDetailsService,
-                feedVectorService,
-                redisTemplate
-        );
-        Instant from = Instant.parse("2026-06-21T00:00:00Z");
-        Instant to = Instant.parse("2026-06-22T00:00:00Z");
-
         when(auditInteractionQueryService.findPostInteractionsBetween(from, to)).thenReturn(Flux.empty());
 
         StepVerifier.create(service.refreshLongTermVectors(from.toString(), to.toString(), null))
@@ -103,49 +53,30 @@ class FeedLongTermVectorServiceTest {
                     assertThat(response.userId()).isNull();
                     assertThat(response.from()).isEqualTo(from);
                     assertThat(response.to()).isEqualTo(to);
-                    assertThat(response.status()).isEqualTo("COMPLETED");
+                    assertThat(response.status()).isEqualTo("SKIPPED_NO_SIGNAL");
                     assertThat(response.refreshedAt()).isNotNull();
                 })
                 .verifyComplete();
-
         verify(auditInteractionQueryService).findPostInteractionsBetween(from, to);
     }
 
     @Test
-    void refreshLongTermVectorsWithUserIdOnlyUpdatesThatUser() {
-        FeedVectorService feedVectorService = new FeedVectorService(redisTemplate, postFeedQueryService, userVectorQueryService);
-        FeedLongTermVectorService service = new FeedLongTermVectorService(
-                auditInteractionQueryService,
-                postFeedQueryService,
-                userVectorQueryService,
-                userDetailsService,
-                feedVectorService,
-                redisTemplate
-        );
+    void refreshForUserUsesOnlyThatUsersSuccessfulPostInteractions() {
+        FeedLongTermVectorService service = newService();
         Instant from = Instant.parse("2026-06-21T00:00:00Z");
         Instant to = Instant.parse("2026-06-22T00:00:00Z");
-        AuditLogs targetUserLog = AuditLogs.builder()
-                .actorId("user-1")
-                .action(AuditActionType.LIKE_POST)
-                .resourceId("post-1")
-                .status("SUCCESS")
-                .build();
-        AuditLogs otherUserLog = AuditLogs.builder()
-                .actorId("user-2")
-                .action(AuditActionType.LIKE_POST)
-                .resourceId("post-2")
-                .status("SUCCESS")
-                .build();
-
-        when(userDetailsService.getUserDetailsById("user-1")).thenReturn(Mono.just(UserDetails.builder().userId("user-1").build()));
-        when(auditInteractionQueryService.findPostInteractionsBetween(from, to)).thenReturn(Flux.just(targetUserLog, otherUserLog));
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get("user_long_term_vector_snapshot:user-1")).thenReturn(Mono.empty());
-        when(userVectorQueryService.getLongTermOrUserVector("user-1")).thenReturn(Mono.just(List.of(0.0, 1.0)));
-        when(valueOperations.set(eq("user_long_term_vector_snapshot:user-1"), anyString(), any())).thenReturn(Mono.just(true));
-        when(postFeedQueryService.getPostVector("post-1")).thenReturn(Mono.just(List.of(1.0, 0.0)));
-        when(userVectorQueryService.saveLongTermVector(eq("user-1"), any())).thenReturn(Mono.empty());
-        when(redisTemplate.delete("user_long_term_vector_snapshot:user-1")).thenReturn(Mono.just(1L));
+        AuditLogs target = audit("user-1", "post-1");
+        AuditLogs other = audit("user-2", "post-2");
+        when(auditInteractionQueryService.findPostInteractionsBetween(from, to)).thenReturn(Flux.just(target, other));
+        when(users.existsById("user-1")).thenReturn(Mono.just(true));
+        when(operations.findByOperationKey(anyString())).thenReturn(Mono.empty());
+        when(operations.reconcilePending(any())).thenReturn(Mono.empty());
+        when(shortTermProcessing.reconcilePending(any())).thenReturn(Mono.empty());
+        when(shortTermProcessing.requireContinuity(any())).thenReturn(Mono.empty());
+        when(postFeedQueryService.getPostRecommendationVector("post-1")).thenReturn(Mono.just(basis(0)));
+        when(userVectorQueryService.getSnapshot("user-1")).thenReturn(Mono.just(new UserDetailVector()));
+        when(operations.applyLongTerm(any(), anyString(), any(), any(), anyString(), any(), any()))
+                .thenReturn(Mono.just(new UserVectorUpdateOperation()));
 
         StepVerifier.create(service.refreshLongTermVectors(from.toString(), to.toString(), " user-1 "))
                 .assertNext(response -> {
@@ -154,14 +85,27 @@ class FeedLongTermVectorServiceTest {
                 })
                 .verifyComplete();
 
-        verify(userDetailsService).getUserDetailsById("user-1");
-        verify(postFeedQueryService).getPostVector("post-1");
-        verify(postFeedQueryService, never()).getPostVector("post-2");
-        verify(userVectorQueryService).saveLongTermVector(eq("user-1"), any());
-        verify(userVectorQueryService, never()).saveLongTermVector(eq("user-2"), any());
+        verify(postFeedQueryService).getPostRecommendationVector("post-1");
+        verify(postFeedQueryService, never()).getPostRecommendationVector("post-2");
+        ArgumentCaptor<List<Double>> desired = ArgumentCaptor.forClass(List.class);
+        verify(operations).applyLongTerm(any(), anyString(), any(), desired.capture(), anyString(), any(), any());
+        assertThat(desired.getValue()).isEqualTo(basis(0));
     }
 
-    private double vectorLength(List<Double> vector) {
-        return Math.sqrt(vector.stream().mapToDouble(value -> value * value).sum());
+    private FeedLongTermVectorService newService() {
+        UserVectorCoordinator coordinator = new UserVectorCoordinator(new InMemoryVectorRedisState());
+        return new FeedLongTermVectorService(auditInteractionQueryService, postFeedQueryService, userVectorQueryService,
+                users, coordinator, operations, shortTermProcessing, new FeedInteractionWeightPolicy(1.0, 0.4));
+    }
+
+    private AuditLogs audit(String actorId, String postId) {
+        return AuditLogs.builder().actorId(actorId).action(AuditActionType.LIKE_POST).resourceId(postId)
+                .status("SUCCESS").build();
+    }
+
+    private List<Double> basis(int coordinate) {
+        java.util.ArrayList<Double> vector = new java.util.ArrayList<>(java.util.Collections.nCopies(768, 0.0));
+        vector.set(coordinate, 1.0);
+        return vector;
     }
 }

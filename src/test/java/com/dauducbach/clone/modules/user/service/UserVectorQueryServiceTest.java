@@ -19,8 +19,7 @@ import static org.mockito.Mockito.*;
 
 class UserVectorQueryServiceTest {
     private final ReactiveElasticsearchOperations operations = mock(ReactiveElasticsearchOperations.class);
-    private final UserVectorStore store = mock(UserVectorStore.class);
-    private final UserVectorQueryService service = new UserVectorQueryService(operations, store);
+    private final UserVectorQueryService service = new UserVectorQueryService(operations);
 
     @Test
     void snapshotExposesDocumentAndDoesNotMaskMissingOrInfrastructureFailure() {
@@ -44,11 +43,31 @@ class UserVectorQueryServiceTest {
     }
 
     @Test
-    void legacyLongTermWritePropagatesInfrastructureFailure() {
-        IllegalStateException failure = new IllegalStateException("ES unavailable");
-        when(operations.get("user", UserDetailVector.class)).thenReturn(Mono.error(failure));
-        StepVerifier.create(service.saveLongTermVector("user", List.of(1.0)))
-                .expectErrorMatches(error -> error == failure).verify();
+    void compatibleLongTermBaseUsesValidatedLongTermVectorBeforeProfileFallback() {
+        UserDetailVector document = UserDetailVector.builder()
+                .userVector(unitVector(1)).userVectorModel("gemini-embedding-2").userVectorDimension(768).userVectorSchemaVersion(1)
+                .userLongTermVector(unitVector(0)).userLongTermVectorModel("gemini-embedding-2").userLongTermVectorDimension(768).userLongTermVectorSchemaVersion(1)
+                .build();
+
+        assertThat(service.compatibleLongTermBase(document)).isEqualTo(unitVector(0));
+
+        document.setUserLongTermVector(List.of());
+        assertThat(service.compatibleLongTermBase(document)).isEqualTo(unitVector(1));
+    }
+
+    @Test
+    void compatibleLongTermBaseRejectsUnknownMetadataInsteadOfResettingHistory() {
+        UserDetailVector document = UserDetailVector.builder().userLongTermVector(List.of(1.0)).build();
+
+        assertThatThrownBy(() -> service.compatibleLongTermBase(document))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("repair required");
+    }
+
+    private List<Double> unitVector(int coordinate) {
+        java.util.ArrayList<Double> values = new java.util.ArrayList<>(java.util.Collections.nCopies(768, 0.0));
+        values.set(coordinate, 1.0);
+        return values;
     }
 
     private Mono<UserDetailVector> snapshot(String userId) {
@@ -75,26 +94,6 @@ class UserVectorQueryServiceTest {
         converter.write(document, serialized);
         assertThat(serialized).doesNotContainKeys("seqNoPrimaryTerm", "seq_no_primary_term");
         assertThat(serialized).containsEntry("has_learned_history", true);
-    }
-
-    @Test
-    void legacyWriterUsesPartialStoreAndSnapshotTokens() {
-        UserDetailVector document = UserDetailVector.builder().userId("user").userLongTermVector(List.of(1.0))
-                .userLongTermVectorModel("gemini-embedding-2").userLongTermVectorDimension(768).userLongTermVectorSchemaVersion(1)
-                .seqNoPrimaryTerm(new SeqNoPrimaryTerm(12, 3)).build();
-        when(operations.get("user", UserDetailVector.class)).thenReturn(Mono.just(document));
-        when(store.updateLongTerm(eq("user"), eq(List.of(1.0)), anyString(), eq(12L), eq(3L))).thenReturn(Mono.empty());
-        StepVerifier.create(service.saveLongTermVector("user", List.of(1.0))).verifyComplete();
-        verify(store).updateLongTerm(eq("user"), eq(List.of(1.0)), anyString(), eq(12L), eq(3L));
-        verify(operations, never()).save(any(UserDetailVector.class));
-    }
-
-    @Test
-    void legacyWriterDoesNotGuessUnknownLongTermMetadata() {
-        when(operations.get("user", UserDetailVector.class)).thenReturn(Mono.just(UserDetailVector.builder()
-                .userId("user").userLongTermVector(List.of(1.0)).seqNoPrimaryTerm(new SeqNoPrimaryTerm(12, 3)).build()));
-        StepVerifier.create(service.saveLongTermVector("user", List.of(1.0))).expectError(IllegalArgumentException.class).verify();
-        verifyNoInteractions(store);
     }
 
     @Test

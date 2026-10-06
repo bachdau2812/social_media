@@ -18,11 +18,11 @@ class FeedCandidatePipelineTest {
 
     @Test
     void vectorCandidatesLeadRecentCandidatesAndDuplicatesKeepFirstSource() {
-        FeedVectorService vectorService = mock(FeedVectorService.class);
+        FeedVectorSnapshotService vectorService = mock(FeedVectorSnapshotService.class);
         PostFeedQueryService postQuery = mock(PostFeedQueryService.class);
         FeedCandidatePipeline pipeline = new FeedCandidatePipeline(vectorService, postQuery);
 
-        when(vectorService.buildQueryVector("user-1")).thenReturn(Mono.just(List.of(0.2, 0.8)));
+        when(vectorService.load("user-1")).thenReturn(Mono.just(new com.dauducbach.clone.modules.feed.dto.FeedVectorSnapshot(1L, List.of(0.2, 0.8))));
         when(postQuery.searchRecommendedPostIds(List.of(0.2, 0.8), 10, Set.of("seen")))
                 .thenReturn(Mono.just(List.of("vector-1", "duplicate")));
         when(postQuery.getRecentApprovedPosts(10, Set.of("seen")))
@@ -41,12 +41,12 @@ class FeedCandidatePipelineTest {
     }
 
     @Test
-    void recentSourceRemainsAvailableWhenVectorSourceFails() {
-        FeedVectorService vectorService = mock(FeedVectorService.class);
+    void recentSourceRemainsAvailableWhenVectorSnapshotFails() {
+        FeedVectorSnapshotService vectorService = mock(FeedVectorSnapshotService.class);
         PostFeedQueryService postQuery = mock(PostFeedQueryService.class);
         FeedCandidatePipeline pipeline = new FeedCandidatePipeline(vectorService, postQuery);
 
-        when(vectorService.buildQueryVector("user-1")).thenReturn(Mono.error(new IllegalStateException("vector unavailable")));
+        when(vectorService.load("user-1")).thenReturn(Mono.error(new IllegalStateException("vector unavailable")));
         when(postQuery.getRecentApprovedPosts(5, Set.of())).thenReturn(Flux.just(post("recent-1")));
 
         StepVerifier.create(pipeline.select("user-1", 5, Set.of()))

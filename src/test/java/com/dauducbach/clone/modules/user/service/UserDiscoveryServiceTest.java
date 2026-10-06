@@ -9,6 +9,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
+import com.dauducbach.clone.modules.user.dto.UserVectorSnapshot;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
@@ -26,7 +27,7 @@ class UserDiscoveryServiceTest {
     @Mock
     UserDiscoveryHydrator hydrator;
     @Mock
-    UserVectorQueryService userVectorQueryService;
+    UserVectorSnapshotService userVectorSnapshotService;
     @Mock
     SemanticVectorSearchService semanticVectorSearchService;
     @Mock
@@ -39,7 +40,7 @@ class UserDiscoveryServiceTest {
         UserDiscoveryService service = new UserDiscoveryService(
                 userSearchService,
                 hydrator,
-                userVectorQueryService,
+                userVectorSnapshotService,
                 semanticVectorSearchService,
                 userDetailsRepository,
                 redisTemplate
@@ -67,7 +68,7 @@ class UserDiscoveryServiceTest {
         UserDiscoveryService service = new UserDiscoveryService(
                 userSearchService,
                 hydrator,
-                userVectorQueryService,
+                userVectorSnapshotService,
                 semanticVectorSearchService,
                 userDetailsRepository,
                 redisTemplate
@@ -75,7 +76,7 @@ class UserDiscoveryServiceTest {
         List<Double> targetVector = List.of(0.1, 0.2, 0.3);
         UserDiscoveryResponse result = user("user-4");
 
-        when(userVectorQueryService.getLongTermOrUserVector("target-1")).thenReturn(Mono.just(targetVector));
+        when(userVectorSnapshotService.load("target-1")).thenReturn(Mono.just(new UserVectorSnapshot(1L, List.of(), targetVector, List.of(), true, "gemini-embedding-2")));
         when(semanticVectorSearchService.searchUserIdsByVector(
                 targetVector,
                 4,
@@ -105,12 +106,12 @@ class UserDiscoveryServiceTest {
         UserDiscoveryService service = new UserDiscoveryService(
                 userSearchService,
                 hydrator,
-                userVectorQueryService,
+                userVectorSnapshotService,
                 semanticVectorSearchService,
                 userDetailsRepository,
                 redisTemplate
         );
-        when(userVectorQueryService.getLongTermOrUserVector("target-1")).thenReturn(Mono.just(List.of()));
+        when(userVectorSnapshotService.load("target-1")).thenReturn(Mono.just(new UserVectorSnapshot(1L, List.of(), List.of(), List.of(), false, "gemini-embedding-2")));
 
         StepVerifier.create(service.findSimilar("viewer-1", "target-1", 0, 20))
                 .assertNext(page -> {
@@ -125,14 +126,14 @@ class UserDiscoveryServiceTest {
         UserDiscoveryService service = new UserDiscoveryService(
                 userSearchService,
                 hydrator,
-                userVectorQueryService,
+                userVectorSnapshotService,
                 semanticVectorSearchService,
                 userDetailsRepository,
                 redisTemplate
         );
         List<Double> targetVector = List.of(0.1, 0.2);
 
-        when(userVectorQueryService.getLongTermOrUserVector("target-1")).thenReturn(Mono.just(targetVector));
+        when(userVectorSnapshotService.load("target-1")).thenReturn(Mono.just(new UserVectorSnapshot(1L, List.of(), targetVector, List.of(), true, "gemini-embedding-2")));
         when(semanticVectorSearchService.searchUserIdsByVector(
                 targetVector,
                 200,

@@ -1,5 +1,6 @@
 package com.dauducbach.clone.modules.post.service.post;
 
+import com.dauducbach.clone.infrastructure.outbox.InteractionOutbox;
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.post.dto.response.RepostToggleResponse;
@@ -42,6 +43,8 @@ class RepostServiceTest {
     ReactiveRedisTemplate<String, String> reactiveRedisStringTemplate;
     @Mock
     ReactiveValueOperations<String, String> valueOperations;
+    @Mock
+    InteractionOutbox interactionOutbox;
 
     @Test
     void repostCreatesRelationshipForAnotherUsersPost() {
@@ -126,7 +129,9 @@ class RepostServiceTest {
         org.mockito.Mockito.lenient().when(valueOperations.set(anyString(), anyString(), any(java.time.Duration.class))).thenReturn(Mono.just(true));
         org.mockito.Mockito.lenient().when(valueOperations.increment(anyString(), anyLong())).thenReturn(Mono.just(0L));
         org.mockito.Mockito.lenient().when(reactiveRedisStringTemplate.expire(anyString(), any(java.time.Duration.class))).thenReturn(Mono.just(true));
-        return new RepostService(repostRepository, postDetailsRepository, r2dbcEntityTemplate, reactiveRedisStringTemplate);
+        org.mockito.Mockito.lenient().when(interactionOutbox.commit(any(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        return new RepostService(repostRepository, postDetailsRepository, r2dbcEntityTemplate, reactiveRedisStringTemplate, interactionOutbox);
     }
 
     private PostDetails post(String postId, String userId) {

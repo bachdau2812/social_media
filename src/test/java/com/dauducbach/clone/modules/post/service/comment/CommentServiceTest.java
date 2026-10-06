@@ -1,5 +1,6 @@
 package com.dauducbach.clone.modules.post.service.comment;
 
+import com.dauducbach.clone.infrastructure.outbox.InteractionOutbox;
 import com.dauducbach.clone.modules.post.service.post.PostSseService;
 import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
 
@@ -19,7 +20,6 @@ import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.data.redis.core.ReactiveValueOperations;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.kafka.sender.KafkaSender;
 import reactor.test.StepVerifier;
 
 import java.time.Instant;
@@ -42,7 +42,7 @@ class CommentServiceTest {
     @Mock
     ReactiveValueOperations<String, String> valueOperations;
     @Mock
-    KafkaSender<String, String> kafkaSender;
+    InteractionOutbox interactionOutbox;
     @Mock
     PostSseService postSseService;
     @Mock
@@ -246,7 +246,9 @@ class CommentServiceTest {
         org.mockito.Mockito.lenient().when(r2dbcEntityTemplate.insert(Comment.class)).thenReturn(commentInsertSpec);
         org.mockito.Mockito.lenient().when(commentInsertSpec.using(any(Comment.class)))
                 .thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
-        return new CommentService(commentRepository, reactiveRedisStringTemplate, kafkaSender, postSseService, r2dbcEntityTemplate, cloudinaryMediaService);
+        org.mockito.Mockito.lenient().when(interactionOutbox.commit(any(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        return new CommentService(commentRepository, reactiveRedisStringTemplate, postSseService, r2dbcEntityTemplate, cloudinaryMediaService, interactionOutbox);
     }
 
     private Comment comment(String id, String postId, String userId, String parentId) {

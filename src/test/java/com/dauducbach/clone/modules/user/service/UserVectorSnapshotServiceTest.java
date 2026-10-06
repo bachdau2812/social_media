@@ -3,6 +3,9 @@ import org.junit.jupiter.api.Test;
 import com.dauducbach.clone.infrastructure.vector.VectorMath;
 import com.dauducbach.clone.utils.GsonUtils;
 import reactor.test.StepVerifier;
+import com.dauducbach.clone.modules.feed.service.FeedInteractionProcessingService;
+import org.springframework.beans.factory.ObjectProvider;
+import static org.mockito.Mockito.mock;
 import reactor.core.publisher.Mono;
 import static org.mockito.Mockito.when;
 import static org.assertj.core.api.Assertions.*;
@@ -41,6 +44,12 @@ class UserVectorSnapshotServiceTest {
         StepVerifier.create(service(f).load("u")).expectErrorMessage("ES offline").verify();
     }
     private UserVectorSnapshotService service(VectorOperationFixture f) {
-        return new UserVectorSnapshotService(f.coordinator, f.service, f.query, f.users, f.redis);
+        FeedInteractionProcessingService processing = mock(FeedInteractionProcessingService.class);
+        when(processing.reconcilePending(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.empty());
+        when(processing.requireContinuity(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.empty());
+        @SuppressWarnings("unchecked")
+        ObjectProvider<FeedInteractionProcessingService> provider = mock(ObjectProvider.class);
+        when(provider.getObject()).thenReturn(processing);
+        return new UserVectorSnapshotService(f.coordinator, f.service, f.query, f.users, f.redis, provider);
     }
 }

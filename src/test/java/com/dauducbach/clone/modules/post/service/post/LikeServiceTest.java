@@ -1,5 +1,6 @@
 package com.dauducbach.clone.modules.post.service.post;
 
+import com.dauducbach.clone.infrastructure.outbox.InteractionOutbox;
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.audit.entity.AuditLogs;
@@ -14,7 +15,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.reactivestreams.Publisher;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
 import org.springframework.data.r2dbc.core.ReactiveInsertOperation;
@@ -22,10 +22,11 @@ import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.data.redis.core.ReactiveValueOperations;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.kafka.sender.KafkaSender;
 import reactor.test.StepVerifier;
 
 import java.time.Duration;
+import com.google.gson.JsonObject;
+import java.util.function.Function;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -45,7 +46,7 @@ class LikeServiceTest {
     @Mock
     CommentRepository commentRepository;
     @Mock
-    KafkaSender<String, String> kafkaSender;
+    InteractionOutbox interactionOutbox;
     @Mock
     ReactiveRedisTemplate<String, String> reactiveRedisStringTemplate;
     @Mock
@@ -56,9 +57,10 @@ class LikeServiceTest {
     ReactiveInsertOperation.ReactiveInsert<Like> likeInsertSpec;
     @Mock
     UserAuditService userAuditService;
+    private final java.util.concurrent.atomic.AtomicReference<String> lockToken = new java.util.concurrent.atomic.AtomicReference<>();
 
     @Test
-    void likeSavesRecordAndPublishesEvent() {
+    void likeSavesRecordThroughInteractionOutbox() {
         LikeService service = newService();
         LikeRequest request = new LikeRequest("post-1", "post");
 
@@ -67,8 +69,15 @@ class LikeServiceTest {
                 .thenReturn(Mono.empty());
         when(r2dbcEntityTemplate.insert(Like.class)).thenReturn(likeInsertSpec);
         when(likeInsertSpec.using(any(Like.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
-        when(kafkaSender.send(any(Publisher.class))).thenReturn(Flux.empty());
-        mockPostLikeCacheUpdate(1, 1);
+
+        when(likeRepository.countByTargetIdAndTargetType("post-1", "POST")).thenReturn(Mono.just(1L));
+        when(interactionOutbox.append(anyString(), anyString(), anyString(), any(JsonObject.class), any()))
+                .thenReturn(Mono.empty());
+        when(reactiveRedisStringTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.setIfAbsent(eq("post_like_count_lock:post-1"), anyString(), any(Duration.class)))
+                .thenAnswer(invocation -> { lockToken.set(invocation.getArgument(1)); return Mono.just(true); });
+        when(valueOperations.get(eq("post_like_count_lock:post-1"))).thenAnswer(invocation -> Mono.just(lockToken.get()));
+        when(reactiveRedisStringTemplate.delete(anyString())).thenReturn(Mono.just(1L));
 
         StepVerifier.create(service.like("user-1", request))
                 .expectNextMatches(response -> response.liked()
@@ -124,7 +133,7 @@ class LikeServiceTest {
                 .verifyComplete();
 
         verify(likeRepository, never()).save(any());
-        verify(kafkaSender, never()).send(any(Publisher.class));
+        verify(interactionOutbox, never()).commit(any(), any());
     }
 
     @Test
@@ -211,7 +220,12 @@ class LikeServiceTest {
     }
 
     private LikeService newService() {
-        return new LikeService(likeRepository, postDetailsRepository, commentRepository, kafkaSender, reactiveRedisStringTemplate, r2dbcEntityTemplate);
+        org.mockito.Mockito.lenient().when(interactionOutbox.commit(any(), any())).thenAnswer(invocation -> {
+            Mono<Object> mutation = invocation.getArgument(0);
+            Function<Object, Mono<Void>> append = invocation.getArgument(1);
+            return mutation.flatMap(saved -> append.apply(saved).thenReturn(saved));
+        });
+        return new LikeService(likeRepository, postDetailsRepository, commentRepository, reactiveRedisStringTemplate, r2dbcEntityTemplate, interactionOutbox);
     }
 
     private void mockPostLikeCacheUpdate(long currentCount, long updatedCount) {

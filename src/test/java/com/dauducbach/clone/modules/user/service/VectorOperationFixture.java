@@ -4,6 +4,8 @@ import com.dauducbach.clone.infrastructure.vector.*;
 import com.dauducbach.clone.modules.user.entity.*;
 import com.dauducbach.clone.modules.user.repositoty.*;
 import com.dauducbach.clone.utils.GsonUtils;
+import com.dauducbach.clone.modules.feed.service.FeedInteractionProcessingService;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.elasticsearch.core.query.SeqNoPrimaryTerm;
 import org.springframework.dao.OptimisticLockingFailureException;
 import reactor.core.publisher.Flux;
@@ -19,7 +21,11 @@ class VectorOperationFixture {
     final UserVectorStore store = mock(UserVectorStore.class);
     final InMemoryVectorRedisState redis = new InMemoryVectorRedisState();
     final UserVectorCoordinator coordinator = new UserVectorCoordinator(redis);
-    final UserVectorOperationService service = new UserVectorOperationService(repository, users, query, store, coordinator, redis);
+    final UserVectorContinuityService continuity = new UserVectorContinuityService(repository, users, query, coordinator, redis);
+    final FeedInteractionProcessingService processing = mock(FeedInteractionProcessingService.class);
+    @SuppressWarnings("unchecked")
+    final ObjectProvider<FeedInteractionProcessingService> processingProvider = mock(ObjectProvider.class);
+    final UserVectorOperationService service = new UserVectorOperationService(repository, users, query, store, coordinator, redis, continuity, processingProvider);
     final Map<String, UserVectorUpdateOperation> journal = new LinkedHashMap<>();
     UserDetailVector document;
     boolean userExists = true;
@@ -29,8 +35,12 @@ class VectorOperationFixture {
     boolean hangAfterEs;
     int esWrites;
     VectorOperationFixture() {
+        when(processingProvider.getObject()).thenReturn(processing);
+        when(processing.reconcilePending(any())).thenReturn(Mono.empty());
+        when(processing.requireContinuity(any())).thenReturn(Mono.empty());
         when(users.existsById("u")).thenAnswer(call -> Mono.fromSupplier(() -> userExists));
         when(query.getSnapshot("u")).thenAnswer(call -> Mono.defer(() -> Mono.justOrEmpty(copyDoc(document))));
+        when(repository.findLatestCompletedVector("u")).thenReturn(Mono.empty());
         when(repository.findPending("u")).thenAnswer(call -> Flux.defer(() -> Flux.fromIterable(journal.values())
                 .filter(op -> List.of("PREPARED", "ES_APPLIED").contains(op.getStatus())).map(this::copy)));
         when(repository.findByOperationKey(anyString())).thenAnswer(call -> Mono.defer(() -> Mono.justOrEmpty(journal.get(call.getArgument(0))).map(this::copy)));
