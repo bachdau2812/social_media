@@ -76,7 +76,8 @@ class PostServiceTest {
                 reactiveRedisStringTemplate,
                 kafkaSender,
                 postSseService,
-                postMediaModerationOrchestrator
+                postMediaModerationOrchestrator,
+                org.mockito.Mockito.mock(PostVectorService.class)
         );
     }
 }

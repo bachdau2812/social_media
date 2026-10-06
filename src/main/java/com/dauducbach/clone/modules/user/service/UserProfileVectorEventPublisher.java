@@ -44,10 +44,12 @@ public class UserProfileVectorEventPublisher {
         }
 
         JsonObject payload = basePayload(userId, source, operation, resourceId);
+        payload.addProperty("eventId", "profile-create:" + userId);
         JsonObject profile = new JsonObject();
         if (userDetails != null) {
             profile.addProperty("userId", userDetails.getUserId());
             profile.addProperty("username", userDetails.getUsername());
+            profile.addProperty("fullName", userDetails.getFullName());
             profile.addProperty("hometown", userDetails.getHometown());
             profile.addProperty("livingIn", userDetails.getLivingIn());
             profile.addProperty("sex", userDetails.getSex());
@@ -76,6 +78,7 @@ public class UserProfileVectorEventPublisher {
         );
 
         return kafkaSender.send(Mono.just(record))
+                .concatMap(result -> result.exception() == null ? Mono.just(result) : Mono.error(result.exception()))
                 .doOnComplete(() -> log.info("|UserProfileVectorEventPublisher|publishRefreshEvent|sent|userId={}|source={}|operation={}",
                         userId, source, operation))
                 .doOnError(error -> log.error("|UserProfileVectorEventPublisher|publishRefreshEvent|failed|userId={}|source={}|error={}",

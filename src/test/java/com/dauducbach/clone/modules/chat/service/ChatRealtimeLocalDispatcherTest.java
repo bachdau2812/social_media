@@ -11,6 +11,23 @@ import static org.mockito.Mockito.verify;
 class ChatRealtimeLocalDispatcherTest {
 
     @Test
+    void reactionFanoutRechecksCurrentMembershipAndHistoryVisibility() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        ChatSessionRegistry registry = mock(ChatSessionRegistry.class);
+        var reactions = mock(com.dauducbach.clone.modules.chat.repository.MessageReactionRepository.class);
+        var dispatcher = new ChatRealtimeLocalDispatcher(mapper, registry, reactions);
+        var event = com.dauducbach.clone.modules.chat.dto.event.ChatEvent.reactionChanged("c",
+                new com.dauducbach.clone.modules.chat.dto.response.ReactionState("m", 5, 1, "me", null, 0, java.util.List.of()),
+                java.util.List.of("me", "removed", "hidden"));
+        String payload = mapper.writeValueAsString(event);
+        org.mockito.Mockito.when(reactions.eligibleRecipients("c", 5))
+                .thenReturn(reactor.core.publisher.Flux.just("me", "joined-later"));
+        reactor.test.StepVerifier.create(dispatcher.dispatch(payload)).verifyComplete();
+        verify(registry).sendToUser("me", payload);
+        org.mockito.Mockito.verifyNoMoreInteractions(registry);
+    }
+
+    @Test
     void dispatchesOnlyToLocalRecipientSessions() {
         ChatSessionRegistry registry = mock(ChatSessionRegistry.class);
         ChatRealtimeLocalDispatcher dispatcher = new ChatRealtimeLocalDispatcher(

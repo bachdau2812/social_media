@@ -27,14 +27,20 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.kafka.sender.KafkaSender;
 import reactor.kafka.sender.SenderRecord;
+import reactor.kafka.sender.SenderResult;
 import reactor.test.StepVerifier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.inOrder;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @ExtendWith(MockitoExtension.class)
 class MediaForProfileTest {
@@ -56,6 +62,77 @@ class MediaForProfileTest {
     MediaScanUtils mediaScanUtils;
     @Mock
     UserAuditService userAuditService;
+
+    @Test
+    void rejectionWaitsForAssetCleanupBeforeSendingTheResult() {
+        MediaForProfile service = newService();
+        String url = "https://cdn/avatar.png";
+        when(mediaScanUtils.scanMedia(url, "avatar")).thenReturn(Mono.just(MediaScanUtils.ScanResult.rejected()));
+        when(cloudinaryMediaService.deleteAsset("avatar")).thenReturn(Mono.error(new IllegalStateException("cleanup failed")));
+        lenient().when(postSseService.sendToUser(anyString(), anyString(), anyString())).thenReturn(Mono.empty());
+        assertThatThrownBy(() -> service.handleAvatarScanEvent("{\"userId\":\"user-1\",\"avatarUrl\":\"https://cdn/avatar.png\",\"publicId\":\"avatar\"}").join())
+                .hasCauseInstanceOf(IllegalStateException.class);
+        verify(postSseService, never()).sendToUser(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void safeAvatarIsSavedAndPublishedBeforeTheApprovalEvent() {
+        MediaForProfile service = newService();
+        String url = "https://res.cloudinary.com/demo/image/upload/v1/folder/avatar.png";
+        when(mediaScanUtils.scanMedia(url, "folder/avatar")).thenReturn(Mono.just(MediaScanUtils.ScanResult.approved()));
+        when(mediaService.saveCloudinaryMedia("folder/avatar", "user-1", OwnerType.AVATAR))
+                .thenReturn(Mono.just(Media.builder().assetId("media-1").publicId("folder/avatar").secureUrl(url).build()));
+        when(kafkaSender.send(any(Publisher.class))).thenAnswer(invocation -> {
+            Publisher<SenderRecord<String, String, String>> publisher = invocation.getArgument(0);
+            return Flux.from(publisher).doOnNext(record -> {
+                assertThat(record.topic()).isEqualTo("avatar_update_event");
+                assertThat(GsonUtils.fromString(record.value()).get("mediaId").getAsString()).isEqualTo("media-1");
+            }).thenMany(Flux.empty());
+        });
+        when(postSseService.sendToUser(eq("user-1"), eq("avatar_upload_event"), any(String.class)))
+                .thenAnswer(invocation -> {
+                    JsonObject payload = GsonUtils.fromString(invocation.getArgument(2));
+                    assertThat(payload.get("result").getAsString()).isEqualTo("APPROVED");
+                    assertThat(payload.get("publicId").getAsString()).isEqualTo("folder/avatar");
+                    return Mono.empty();
+                });
+        service.handleAvatarScanEvent("{\"userId\":\"user-1\",\"avatarUrl\":\"" + url + "\",\"publicId\":\"folder/avatar\"}").join();
+        var order = inOrder(mediaService, kafkaSender, postSseService);
+        order.verify(mediaService).saveCloudinaryMedia("folder/avatar", "user-1", OwnerType.AVATAR);
+        order.verify(kafkaSender).send(any(Publisher.class));
+        order.verify(postSseService).sendToUser(eq("user-1"), eq("avatar_upload_event"), any(String.class));
+    }
+
+    @Test
+    void sensitiveAvatarIsDeletedWithoutReplacingTheAvatarOrNotifyingFollowers() {
+        MediaForProfile service = newService();
+        String url = "https://res.cloudinary.com/demo/image/upload/v1/folder/avatar.png";
+        when(mediaScanUtils.scanMedia(url, "folder/avatar")).thenReturn(Mono.just(MediaScanUtils.ScanResult.rejected()));
+        when(cloudinaryMediaService.deleteAsset("folder/avatar")).thenReturn(Mono.empty());
+        when(postSseService.sendToUser(eq("user-1"), eq("avatar_upload_event"), any(String.class)))
+                .thenAnswer(invocation -> {
+                    JsonObject payload = GsonUtils.fromString(invocation.getArgument(2));
+                    assertThat(payload.get("result").getAsString()).isEqualTo("REJECTED");
+                    assertThat(payload.get("publicId").getAsString()).isEqualTo("folder/avatar");
+                    return Mono.empty();
+                });
+        service.handleAvatarScanEvent("{\"userId\":\"user-1\",\"avatarUrl\":\"" + url + "\",\"publicId\":\"folder/avatar\"}").join();
+        verify(cloudinaryMediaService).deleteAsset("folder/avatar");
+        verify(mediaService, never()).saveCloudinaryMedia(any(), any(), any());
+        verify(kafkaSender, never()).send(any(Publisher.class));
+    }
+
+    @Test
+    void avatarUploadFailsWhenKafkaDoesNotAcknowledgeTheScanRequest() {
+        MediaForProfile service = newService();
+        when(userDetailsRepository.existsById("user-1")).thenReturn(Mono.just(true));
+        SenderResult<String> result = mock(SenderResult.class);
+        when(result.exception()).thenReturn(new IllegalStateException("broker unavailable"));
+        when(kafkaSender.send(any(Publisher.class))).thenReturn(Flux.just(result));
+        StepVerifier.create(service.uploadAvatar(new AvatarUploadRequest("user-1", "https://cdn/avatar.png")))
+                .expectErrorMatches(error -> error.getCause() != null && error.getCause().getMessage().equals("broker unavailable"))
+                .verify();
+    }
 
     @Test
     void uploadAvatarPublishesScanEventWithResolvedPublicId() {

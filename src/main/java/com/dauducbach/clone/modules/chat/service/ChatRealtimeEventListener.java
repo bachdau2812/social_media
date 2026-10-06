@@ -23,6 +23,8 @@ public class ChatRealtimeEventListener {
             topics = {
                     KafkaChatEventPublisher.MESSAGE_CREATED_TOPIC,
                     KafkaChatEventPublisher.CURSOR_UPDATED_TOPIC,
+                    KafkaChatEventPublisher.MESSAGE_MUTATION_TOPIC,
+                    KafkaChatEventPublisher.MESSAGE_REACTION_CHANGED_TOPIC,
                     KafkaChatEventPublisher.MEMBERSHIP_CHANGED_TOPIC
             },
             groupId = "chat-realtime-service")

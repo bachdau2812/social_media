@@ -2,6 +2,7 @@ package com.dauducbach.clone.modules.feed.service;
 
 import com.dauducbach.clone.modules.post.entity.PostDetails;
 import com.dauducbach.clone.modules.post.service.post.PostFeedQueryService;
+import com.dauducbach.clone.modules.feed.dto.FeedVectorSnapshot;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,7 +23,7 @@ public class FeedCandidatePipeline {
     static final String VECTOR_REASON = "similar_to_your_interests";
     static final String RECENT_REASON = "recent_post";
 
-    private final FeedVectorService feedVectorService;
+    private final FeedVectorSnapshotService snapshots;
     private final PostFeedQueryService postFeedQueryService;
 
     public Mono<List<FeedCandidate>> select(
@@ -30,28 +31,24 @@ public class FeedCandidatePipeline {
             int limit,
             Set<String> excludedPostIds
     ) {
+        return snapshots.load(userId).defaultIfEmpty(new FeedVectorSnapshot(0L, List.of()))
+                .flatMap(snapshot -> select(snapshot, limit, excludedPostIds));
+    }
+
+    /** Ranking runs only after the shared snapshot lease has been released. */
+    public Mono<List<FeedCandidate>> select(FeedVectorSnapshot snapshot, int limit, Set<String> excludedPostIds) {
         int safeLimit = Math.max(limit, 0);
         if (safeLimit == 0) {
             return Mono.just(List.of());
         }
 
-        Mono<List<String>> vectorCandidates = feedVectorService.buildQueryVector(userId)
-                .flatMap(vector -> postFeedQueryService.searchRecommendedPostIds(vector, safeLimit, excludedPostIds))
-                .onErrorResume(error -> {
-                    log.warn("|FeedCandidatePipeline|select|vector source failed|userId={}|error={}",
-                            userId, error.getMessage());
-                    return Mono.just(List.of());
-                });
+        Mono<List<String>> vectorCandidates = snapshot.queryVector().isEmpty() ? Mono.just(List.of())
+                : postFeedQueryService.searchRecommendedPostIds(snapshot.queryVector(), safeLimit, excludedPostIds);
 
         Mono<List<String>> recentCandidates = postFeedQueryService
                 .getRecentApprovedPosts(safeLimit, excludedPostIds)
                 .map(PostDetails::getPostId)
-                .collectList()
-                .onErrorResume(error -> {
-                    log.warn("|FeedCandidatePipeline|select|recent source failed|userId={}|error={}",
-                            userId, error.getMessage());
-                    return Mono.just(List.of());
-                });
+                .collectList();
 
         return Mono.zip(vectorCandidates, recentCandidates)
                 .map(tuple -> rank(tuple.getT1(), tuple.getT2(), safeLimit));

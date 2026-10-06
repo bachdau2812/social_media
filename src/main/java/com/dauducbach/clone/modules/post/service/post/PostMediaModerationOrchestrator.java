@@ -50,6 +50,7 @@ public class PostMediaModerationOrchestrator {
     private final MediaCompatibilityFacade cloudinaryMediaService;
     private final MediaModerationProvider moderationProvider;
     private final MediaAssetCleanupService cleanupService;
+    private final PostVectorService postVectorService;
 
     public Mono<Void> process(String postId, String userId, List<PostMediaScanItem> items) {
         if (postId == null || postId.isBlank() || userId == null || userId.isBlank()
@@ -234,7 +235,11 @@ public class PostMediaModerationOrchestrator {
                 .distinct()
                 .toList();
 
-        return cleanupService.deleteAll(publicIds)
+        return postDetailsRepository.findById(postId).map(java.util.Optional::of).defaultIfEmpty(java.util.Optional.empty())
+                .flatMap(source -> {
+                    if (source.isEmpty()) return postVectorService.rebuild(postId);
+                    String authorId = source.get().getUserId();
+                    return cleanupService.deleteAll(publicIds)
                 .then(postItemRepository.deleteByPostId(postId))
                 .then(mediaService.deleteByOwnerIdAndOwnerType(postId, OwnerType.POST))
                 .then(redisTemplate.opsForValue().delete(POST_CACHE_PREFIX + postId).then())
@@ -242,7 +247,10 @@ public class PostMediaModerationOrchestrator {
                 .doOnError(error -> log.error(
                         "|PostMediaModerationOrchestrator|cleanupFailedPost|postId={}|error={}",
                         postId, error.getMessage()))
-                .onErrorResume(error -> postDetailsRepository.deleteById(postId).then());
+                .onErrorResume(error -> postDetailsRepository.deleteById(postId).then())
+                // Fence only after SQL deletion succeeds, outside the best-effort asset-cleanup boundary.
+                .then(Mono.defer(() -> postVectorService.deletePost(postId, authorId)));
+                });
     }
 
     private Mono<Void> sendPostSuccessSse(String userId, PostDetails post, String message) {
@@ -282,6 +290,7 @@ public class PostMediaModerationOrchestrator {
                 new ProducerRecord<>("post_upload_event", post.getPostId(), payload.toString()),
                 "post_upload_event");
         return kafkaSender.send(Mono.just(record))
+                .flatMap(result -> result.exception() == null ? Mono.just(result) : Mono.error(result.exception()))
                 .doOnError(error -> log.error(
                         "|PostMediaModerationOrchestrator|sendPostUploadEvent|postId={}|error={}",
                         post.getPostId(), error.getMessage()))

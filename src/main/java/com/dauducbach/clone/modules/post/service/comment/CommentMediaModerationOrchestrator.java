@@ -1,5 +1,6 @@
 package com.dauducbach.clone.modules.post.service.comment;
 
+import com.dauducbach.clone.infrastructure.outbox.InteractionOutbox;
 import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
 import com.dauducbach.clone.modules.post.service.post.MediaModerationProvider;
 import com.dauducbach.clone.modules.post.service.post.PostSseService;
@@ -13,18 +14,14 @@ import com.dauducbach.clone.modules.post.dto.request.MediaUploadRequest;
 import com.dauducbach.clone.modules.post.entity.Comment;
 import com.dauducbach.clone.modules.media.entity.Media;
 import com.dauducbach.clone.modules.post.repositoty.CommentRepository;
-import com.dauducbach.clone.utils.GsonUtils;
 import com.google.gson.JsonObject;
 import lombok.RequiredArgsConstructor;
-import org.apache.kafka.clients.producer.ProducerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.kafka.sender.KafkaSender;
-import reactor.kafka.sender.SenderRecord;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -45,10 +42,10 @@ public class CommentMediaModerationOrchestrator {
     private final MediaService mediaService;
     private final ReactiveRedisTemplate<String, String> redisTemplate;
     private final PostSseService postSseService;
-    private final KafkaSender<String, String> kafkaSender;
     private final MediaCompatibilityFacade cloudinaryMediaService;
     private final MediaModerationProvider moderationProvider;
     private final MediaAssetCleanupService cleanupService;
+    private final InteractionOutbox interactionOutbox;
 
     public Mono<Void> process(
             String commentId,
@@ -126,10 +123,21 @@ public class CommentMediaModerationOrchestrator {
                         String.format("Comment not found for commentId=%s", commentId))))
                 .flatMap(comment -> fetchAndPersistCommentMedia(comment, postId, mediaList))
                 .flatMap(saved -> redisTemplate.opsForValue().get(waitKey)
-                        .defaultIfEmpty("")
+                        .filter(userId -> !userId.isBlank())
+                        .onErrorResume(error -> {
+                            log.warn("Approved comment wait-key lookup failed for {}; using saved owner", saved.getId(), error);
+                            return Mono.empty();
+                        })
+                        .defaultIfEmpty(saved.getUserId())
                         .flatMap(userId -> sendCommentSuccessSse(userId, saved)
-                                .then(sendCommentSuccessEvent(saved))))
-                .then(redisTemplate.opsForValue().delete(waitKey).then());
+                                .onErrorResume(error -> {
+                                    log.warn("Committed approved comment; SSE failed for {}", saved.getId(), error);
+                                    return Mono.empty();
+                                })))
+                .then(redisTemplate.opsForValue().delete(waitKey).then().onErrorResume(error -> {
+                    log.warn("Approved comment wait-key cleanup failed for {}", commentId, error);
+                    return Mono.empty();
+                }));
     }
 
     private Mono<Comment> fetchAndPersistCommentMedia(
@@ -152,12 +160,19 @@ public class CommentMediaModerationOrchestrator {
                     }
 
                     MediaUploadRequest uploaded = mediaList.get(0);
-                    comment.setMediaUrl(uploaded.getSecureUrl());
-                    comment.setCommentType("MEDIA");
-                    return commentRepository.save(comment)
-                            .flatMap(saved -> Flux.fromIterable(mediaEntities)
-                                    .concatMap(media -> mediaService.registerFetchedMedia(media, comment.getId(), OwnerType.COMMENT))
-                                    .then(Mono.just(saved)));
+                    // Provider work above stays outside the DB transaction; approval is locked and atomic.
+                    return interactionOutbox.commit(commentRepository.findForApproval(comment.getId())
+                            .switchIfEmpty(Mono.error(new AppException(ErrorCode.COMMENT_NOT_FOUND)))
+                            .flatMap(locked -> {
+                                if ("APPROVED".equals(locked.getModerationStatus())) return Mono.just(locked);
+                                locked.setMediaUrl(uploaded.getSecureUrl());
+                                locked.setCommentType("MEDIA");
+                                locked.setModerationStatus("APPROVED");
+                                return commentRepository.save(locked)
+                                        .flatMap(saved -> Flux.fromIterable(mediaEntities)
+                                                .concatMap(media -> mediaService.registerFetchedMedia(media, saved.getId(), OwnerType.COMMENT))
+                                                .then(interactionOutbox.approvedComment(saved)).thenReturn(saved));
+                            }), saved -> Mono.empty());
                 });
     }
 
@@ -189,28 +204,6 @@ public class CommentMediaModerationOrchestrator {
                 comment.getUserId(),
                 "comment_failed_event",
                 payload.toString());
-    }
-
-    private Mono<Void> sendCommentSuccessEvent(Comment comment) {
-        JsonObject payload = new JsonObject();
-        payload.addProperty("commentId", comment.getId());
-        payload.addProperty("userId", comment.getUserId());
-        payload.addProperty("postId", comment.getPostId());
-        payload.addProperty("content", comment.getContent());
-        payload.addProperty("mediaUrl", comment.getMediaUrl());
-        payload.addProperty("parentId", comment.getParentId());
-
-        SenderRecord<String, String, String> record = SenderRecord.create(
-                new ProducerRecord<>(
-                        "comment_success_event",
-                        comment.getId(),
-                        payload.toString()),
-                "comment_success_event");
-        return kafkaSender.send(Mono.just(record))
-                .doOnError(error -> log.error(
-                        "|CommentMediaModerationOrchestrator|sendCommentSuccessEvent|commentId={}|error={}",
-                        comment.getId(), error.getMessage()))
-                .then();
     }
 
     private Mono<Void> decrementCounts(String postId, String parentId) {

@@ -19,19 +19,17 @@ public class PostEventBroadcast {
 
     private final PostVectorService postVectorService;
 
-    @KafkaListener(topics = "post_upload_event", groupId = "post-service")
+    @KafkaListener(topics = {"post_upload_event", "post_update_event"}, groupId = "post-service")
     public CompletableFuture<Void> handlePostEmbeddingEvent(@Payload String payload) {
         JsonObject payloadJson = GsonUtils.fromString(payload);
         String postId = resolveField(payloadJson, "postId");
-        String content = KafkaUtils.extractString(payloadJson, "content");
-        if (postId.isBlank() || content.isBlank()) {
+        if (postId.isBlank()) {
             log.warn(
-                    "|PostEventBroadcast|handlePostEmbeddingEvent|missing data|hasPostId={}|hasContent={}",
-                    !postId.isBlank(), !content.isBlank());
+                    "|PostEventBroadcast|handlePostEmbeddingEvent|missing postId");
             return CompletableFuture.completedFuture(null);
         }
 
-        return postVectorService.processPostEmbedding(postId, content)
+        return postVectorService.rebuild(postId)
                 .doOnError(error -> log.error(
                         "|PostEventBroadcast|handlePostEmbeddingEvent|failed|postId={}|error={}",
                         postId, error.getMessage()))

@@ -366,6 +366,8 @@ public class ChatReadRepository {
                 .createdAt(instant(row, "created_at"))
                 .editedAt(instant(row, "edited_at"))
                 .deletedAt(instant(row, "deleted_at"))
+                .forwarded(booleanValue(row, "forwarded"))
+                .reactionVersion(number(row, "reaction_version"))
                 .build();
     }
 

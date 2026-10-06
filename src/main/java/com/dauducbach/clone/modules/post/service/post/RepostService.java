@@ -1,5 +1,8 @@
 package com.dauducbach.clone.modules.post.service.post;
 
+import com.google.gson.JsonObject;
+import org.springframework.dao.DuplicateKeyException;
+import com.dauducbach.clone.infrastructure.outbox.InteractionOutbox;
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.commons.response.PageResponse;
@@ -43,6 +46,7 @@ public class RepostService {
     PostDetailsRepository postDetailsRepository;
     R2dbcEntityTemplate r2dbcEntityTemplate;
     ReactiveRedisTemplate<String, String> reactiveRedisStringTemplate;
+    InteractionOutbox interactionOutbox;
 
     public Mono<RepostToggleResponse> repost(String actorId, String postId) {
         validateRequiredIds(actorId, postId);
@@ -135,11 +139,30 @@ public class RepostService {
                 .postOwnerId(post.getUserId())
                 .createdAt(Instant.now())
                 .build();
-        return ensurePostRepostCountCache(post.getPostId())
-                .then(r2dbcEntityTemplate.insert(PostRepost.class).using(repost))
-                .flatMap(saved -> updatePostRepostCountCache(post.getPostId(), 1)
-                        .then(countReposts(post.getPostId()))
+        return interactionOutbox.commit(r2dbcEntityTemplate.insert(PostRepost.class).using(repost), saved -> {
+                    JsonObject payload = new JsonObject();
+                    payload.addProperty("repostId", saved.getId());
+                    payload.addProperty("actorId", saved.getActorId());
+                    payload.addProperty("postId", saved.getPostId());
+                    payload.addProperty("postOwnerId", saved.getPostOwnerId());
+                    return interactionOutbox.append("REPOST:" + saved.getId(), "repost_event",
+                            saved.getActorId(), payload, saved.getCreatedAt());
+                })
+                .onErrorResume(DuplicateKeyException.class, error -> repostRepository
+                        .findByActorIdAndPostId(actorId, post.getPostId()).switchIfEmpty(Mono.error(error)))
+                .flatMap(saved -> invalidateCreatedRepostCount(post.getPostId())
+                        .then(repostRepository.countByPostId(post.getPostId()))
                         .map(count -> new RepostToggleResponse(post.getPostId(), true, saved.getId(), count)));
+    }
+
+    private Mono<Void> invalidateCreatedRepostCount(String postId) {
+        return withCountLock(POST_REPOST_COUNT_LOCK_PREFIX + postId,
+                () -> reactiveRedisStringTemplate.delete(postRepostCountKey(postId)).then(),
+                "Invalidate committed repost count for postId=" + postId)
+                .onErrorResume(error -> {
+                    log.warn("Committed repost; count cache invalidation failed for {}", postId, error);
+                    return Mono.empty();
+                });
     }
 
     private Mono<Long> getPostRepostCountFromCache(String postId) {

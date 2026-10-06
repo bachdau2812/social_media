@@ -87,13 +87,14 @@ public class ChatResponseMapper {
                 deleted ? null : message.getContent(),
                 deleted || !isMediaType(message.getMessageType())
                         ? null : toMediaMetadataResponse(message.getMetadata()),
-                message.getReplyToSeq(),
-                toReplyMessageResponse(message),
+                deleted ? null : message.getReplyToSeq(),
+                deleted ? null : toReplyMessageResponse(message),
                 message.getCreatedAt(),
                 message.getEditedAt(),
                 deleted,
                 deleted || message.getMessageType() != MessageType.STORY_REPLY
-                        ? null : toStoryContextResponse(message.getMetadata()));
+                        ? null : toStoryContextResponse(message.getMetadata()))
+                .withForwarded(message.isForwarded()).withReactionVersion(message.getReactionVersion());
     }
 
     private ReplyMessageResponse toReplyMessageResponse(ChatMessage message) {

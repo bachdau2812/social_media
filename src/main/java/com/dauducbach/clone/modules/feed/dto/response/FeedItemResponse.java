@@ -35,7 +35,14 @@ public record FeedItemResponse(
         FeedActivityType activityType,
         Instant activityAt,
         FeedActorResponse reposter
-) {
+ ) {
+    public FeedItemResponse withRecommendation(String source, String reason, String version) {
+        return new FeedItemResponse(postId, userId, authorUsername, authorFullName, authorAvatarUrl,
+                content, hashtags, mediaRatio, media, music, items, likeCount, commentCount, repostCount,
+                likedByCurrentUser, repostedByCurrentUser, createdAt, updatedAt, source, reason, version,
+                experimentId, impressionToken, feedEntryId, activityType, activityAt, reposter);
+    }
+
     public FeedItemResponse(
             String postId,
             String userId,

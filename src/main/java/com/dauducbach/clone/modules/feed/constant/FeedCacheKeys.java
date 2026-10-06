@@ -14,6 +14,10 @@ public final class FeedCacheKeys {
         return USER_FEED_PREFIX + userId;
     }
 
+    public static String recommendations(String userId) { return "feed:recommendations:v2:" + userId; }
+    public static String fanout(String userId) { return "feed:fanout:v2:" + userId; }
+    public static String metadata(String userId) { return "feed:metadata:v2:" + userId; }
+
     public static String postDetails(String postId) {
         return POST_DETAILS_PREFIX + postId;
     }

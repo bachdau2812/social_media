@@ -21,16 +21,13 @@ public class AuditInteractionQueryService {
 
     public Flux<AuditLogs> findPostInteractionsBetween(Instant from, Instant to) {
         if (from == null || to == null || !from.isBefore(to)) {
-            return Flux.empty();
+            return Flux.error(new IllegalArgumentException("Audit range requires from before to"));
         }
 
         return auditLogsRepository.findPostInteractionsBetween(from, to)
                 .doOnComplete(() -> log.info("|AuditInteractionQueryService|findPostInteractionsBetween|from={}|to={}",
                         from, to))
-                .onErrorResume(error -> {
-                    log.error("|AuditInteractionQueryService|findPostInteractionsBetween|failed|from={}|to={}|error={}",
-                            from, to, error.getMessage());
-                    return Flux.empty();
-                });
+                .doOnError(error -> log.error("|AuditInteractionQueryService|findPostInteractionsBetween|failed|from={}|to={}",
+                        from, to, error));
     }
 }

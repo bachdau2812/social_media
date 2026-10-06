@@ -81,6 +81,9 @@ public enum ErrorCode {
     SEARCH_SUGGESTION_FAILED(1065, "Fetch search suggestions failed", HttpStatus.INTERNAL_SERVER_ERROR),
     SEARCH_HISTORY_UPDATE_FAILED(1066, "Update search history failed", HttpStatus.INTERNAL_SERVER_ERROR),
 
+    POST_INTERACTION_INVALID(1141, "Post interaction request is invalid", HttpStatus.BAD_REQUEST),
+    POST_INTERACTION_BODY_CONFLICT(1142, "Event ID was already accepted with different data", HttpStatus.CONFLICT),
+    POST_INTERACTION_UNAVAILABLE(1143, "Post interaction ingestion is unavailable", HttpStatus.SERVICE_UNAVAILABLE),
     POST_NOT_FOUND(1100, "Post not found", HttpStatus.NOT_FOUND),
     POST_CREATE_FAILED(1101, "Create post failed", HttpStatus.INTERNAL_SERVER_ERROR),
     POST_UPDATE_FAILED(1102, "Update post failed", HttpStatus.INTERNAL_SERVER_ERROR),
@@ -119,6 +122,8 @@ public enum ErrorCode {
     REPOST_FETCH_FAILED(1139, "Fetch repost failed", HttpStatus.INTERNAL_SERVER_ERROR),
     REPOST_OWN_POST_NOT_ALLOWED(1140, "Cannot repost own post", HttpStatus.BAD_REQUEST),
 
+    FEED_CURSOR_INVALID(1202, "Feed cursor is invalid", HttpStatus.BAD_REQUEST),
+    FEED_CURSOR_EXPIRED(1203, "Feed cursor has expired", HttpStatus.CONFLICT),
     FEED_REQUEST_INVALID(1200, "Feed request is invalid", HttpStatus.BAD_REQUEST),
     FEED_LONG_TERM_VECTOR_REFRESH_FAILED(1201, "Refresh feed long term vector failed", HttpStatus.INTERNAL_SERVER_ERROR),
 

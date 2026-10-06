@@ -18,7 +18,7 @@ import java.time.Instant;
 import java.util.LinkedHashSet;
 
 @Service
-@RequiredArgsConstructor
+@RequiredArgsConstructor(onConstructor_ = @org.springframework.beans.factory.annotation.Autowired)
 @FieldDefaults(level = lombok.AccessLevel.PRIVATE, makeFinal = true)
 public class ChatMessageQueryService {
     static final int DEFAULT_PAGE_SIZE = 50;
@@ -29,6 +29,12 @@ public class ChatMessageQueryService {
     ChatResponseMapper mapper;
     ChatCursorService cursorService;
     StoryAvailabilityPort storyAvailabilityPort;
+    MessageReactionService reactionService;
+
+    public ChatMessageQueryService(ChatAccessService accessService, ChatReadRepository chatReadRepository,
+            ChatResponseMapper mapper, ChatCursorService cursorService, StoryAvailabilityPort storyAvailabilityPort) {
+        this(accessService, chatReadRepository, mapper, cursorService, storyAvailabilityPort, null);
+    }
 
     public Mono<CursorPageResponse<ChatMessageResponse>> getMessages(
             String actorId,
@@ -57,10 +63,37 @@ public class ChatMessageQueryService {
                 .collectList()
                 .map(rows -> toCursorPage(rows, pageSize, backward))
                 .flatMap(this::hydrateStoryAvailability)
+                .flatMap(page -> hydrateReactions(actorId, conversationId, page))
                 .flatMap(page -> markFetchedMessagesDelivered(actorId, conversationId, page))
                 .onErrorMap(error -> error instanceof AppException
                         ? error
                         : new AppException(ErrorCode.CHAT_MESSAGE_FETCH_FAILED, "Fetch chat messages failed", error));
+    }
+
+    /** Shared REST hydration for history, independent pins and batch reconnect state; does not advance cursors. */
+    public Mono<List<ChatMessageResponse>> hydrateMessages(String actorId,String conversationId,List<ChatMessageResponse> messages) {
+        return hydrateStoryAvailability(new CursorPageResponse<>(messages,null,false))
+            .flatMap(page->hydrateReactions(actorId,conversationId,page)).map(CursorPageResponse::items);
+    }
+
+    private Mono<CursorPageResponse<ChatMessageResponse>> hydrateReactions(
+            String actorId, String conversationId, CursorPageResponse<ChatMessageResponse> page) {
+        if (reactionService == null) return Mono.just(page); // Legacy Java constructor only.
+        List<String> ids = page.items().stream()
+                .filter(message -> !message.deleted()
+                        && message.messageType() != com.dauducbach.clone.modules.chat.constant.MessageType.SYSTEM)
+                .map(ChatMessageResponse::id).toList();
+        if (ids.isEmpty()) return Mono.just(page);
+        return reactor.core.publisher.Flux.fromIterable(ids).buffer(MAX_PAGE_SIZE)
+                .concatMap(batch -> reactionService.getSnapshots(actorId, conversationId, batch))
+                .flatMapIterable(snapshots -> snapshots).collectList().map(snapshots -> {
+            var byId = snapshots.stream().collect(java.util.stream.Collectors.toMap(
+                    com.dauducbach.clone.modules.chat.dto.response.ReactionSnapshot::messageId, snapshot -> snapshot));
+            return new CursorPageResponse<>(page.items().stream().map(message -> {
+                var snapshot = byId.get(message.id());
+                return snapshot == null ? message : message.withReactions(snapshot);
+            }).toList(), page.nextCursor(), page.hasMore());
+        });
     }
 
     private Mono<CursorPageResponse<ChatMessageResponse>> hydrateStoryAvailability(
@@ -106,7 +139,8 @@ public class ChatMessageQueryService {
                 message.id(), message.conversationId(), message.messageSeq(), message.clientMessageId(),
                 message.senderId(), message.senderDisplayName(), message.senderAvatarUrl(),
                 message.messageType(), message.content(), message.metadata(), message.replyToSeq(), message.reply(),
-                message.createdAt(), message.editedAt(), message.deleted(), hydrated);
+                message.createdAt(), message.editedAt(), message.deleted(), hydrated,
+                message.likeCount(), message.isReact(), message.myReaction(), message.reactions(), message.reactionVersion(), message.forwarded());
     }
 
     private Mono<CursorPageResponse<ChatMessageResponse>> markFetchedMessagesDelivered(

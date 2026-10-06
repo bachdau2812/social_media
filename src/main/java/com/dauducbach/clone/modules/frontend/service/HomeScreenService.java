@@ -28,13 +28,18 @@ public class HomeScreenService {
             int page,
             MediaDisplayType mediaType
     ) {
+        return getHome(userId, tab, limit, page, mediaType, null);
+    }
+
+    public Mono<HomeScreenResponse> getHome(String userId, String tab, int limit, int page,
+            MediaDisplayType mediaType, String cursor) {
         String activeTab = tab == null || tab.isBlank() ? "DISCOVER" : tab.trim().toUpperCase();
         int safeLimit = limit <= 0 ? 20 : Math.min(limit, 50);
         int safePage = Math.max(0, page);
         MediaDisplayType displayType = mediaType == null ? MediaDisplayType.FEED : mediaType;
         Mono<FeedResponse> feed = "FRIENDS".equals(activeTab)
                 ? feedService.getFriendsFeed(userId, safeLimit, safePage, displayType)
-                : feedService.getFeed(userId, safeLimit, displayType);
+                : feedService.getFeed(userId, safeLimit, displayType, cursor);
 
         return Mono.zip(storyTrayQueryService.getHomeStoryTray(userId), feed)
                 .map(tuple -> new HomeScreenResponse(

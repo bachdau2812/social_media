@@ -3,6 +3,7 @@ package com.dauducbach.clone.modules.chat.dto.event;
 import com.dauducbach.clone.modules.chat.constant.ChatEventType;
 import com.dauducbach.clone.modules.chat.dto.response.ChatCursorResponse;
 import com.dauducbach.clone.modules.chat.dto.response.ChatMessageResponse;
+import com.dauducbach.clone.modules.chat.dto.response.ReactionState;
 
 import java.time.Instant;
 import java.util.List;
@@ -19,10 +20,39 @@ public record ChatEvent(
         List<String> recipientIds,
         ChatMessageResponse message,
         Long deliveredSeq,
-        Long readSeq
+        Long readSeq,
+        ReactionState reactionState,
+        Long pinVersion
 ) {
     public ChatEvent {
         recipientIds = recipientIds == null ? List.of() : List.copyOf(recipientIds);
+    }
+
+    public ChatEvent(ChatEventType type, String eventId, String conversationId, String actorId,
+            String entityId, String targetUserId, String occurredAt, List<String> recipientIds,
+            ChatMessageResponse message, Long deliveredSeq, Long readSeq) {
+        this(type, eventId, conversationId, actorId, entityId, targetUserId, occurredAt,
+                recipientIds, message, deliveredSeq, readSeq, null);
+    }
+
+    public ChatEvent(ChatEventType type, String eventId, String conversationId, String actorId,
+            String entityId, String targetUserId, String occurredAt, List<String> recipientIds,
+            ChatMessageResponse message, Long deliveredSeq, Long readSeq, ReactionState reactionState) {
+        this(type,eventId,conversationId,actorId,entityId,targetUserId,occurredAt,recipientIds,message,deliveredSeq,readSeq,reactionState,null);
+    }
+    public static ChatEvent messageDeleted(ChatMessageResponse message,String actor,List<String> recipients) {
+        return new ChatEvent(ChatEventType.MESSAGE_DELETED,UUID.randomUUID().toString(),message.conversationId(),actor,
+            message.id(),null,Instant.now().toString(),recipients,message.neutralReactions(),null,null,null,null);
+    }
+    public static ChatEvent pinsChanged(String c,String actor,long version,List<String> recipients) {
+        return new ChatEvent(ChatEventType.PINS_CHANGED,UUID.randomUUID().toString(),c,actor,null,null,
+            Instant.now().toString(),recipients,null,null,null,null,version);
+    }
+
+    public static ChatEvent reactionChanged(String conversationId, ReactionState state, List<String> recipients) {
+        return new ChatEvent(ChatEventType.MESSAGE_REACTION_CHANGED, UUID.randomUUID().toString(),
+                conversationId, state.actorId(), state.messageId(), null, Instant.now().toString(),
+                recipients, null, null, null, state);
     }
 
     public static ChatEvent messageCreated(ChatMessageResponse message, List<String> recipientIds) {
@@ -36,7 +66,7 @@ public record ChatEvent(
                 null,
                 occurredAt.toString(),
                 recipientIds,
-                message,
+                message.neutralReactions(),
                 null,
                 null);
     }

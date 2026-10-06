@@ -12,12 +12,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
-import org.springframework.data.redis.core.ReactiveZSetOperations;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
@@ -28,7 +26,7 @@ class FeedServiceTest {
     @Mock
     ReactiveRedisTemplate<String, String> redisTemplate;
     @Mock
-    ReactiveZSetOperations<String, String> zSetOperations;
+    FeedQueueCommitService queue;
     @Mock
     PostFeedQueryService postFeedQueryService;
     @Mock
@@ -68,18 +66,13 @@ class FeedServiceTest {
     }
 
     @Test
-    void appendPostToUserFeedWritesZSetWithTtl() {
+    void appendPostToUserFeedDelegatesToQueueBoundary() {
         FeedService service = newService();
-
-        when(redisTemplate.opsForZSet()).thenReturn(zSetOperations);
-        when(zSetOperations.add("feed:user-1", "post-1", Instant.parse("2026-06-22T00:00:00Z").toEpochMilli()))
-                .thenReturn(Mono.just(true));
-        when(redisTemplate.expire("feed:user-1", Duration.ofDays(5))).thenReturn(Mono.just(true));
-
-        StepVerifier.create(service.appendPostToUserFeed("user-1", "post-1", Instant.parse("2026-06-22T00:00:00Z")))
+        Instant eventTime = Instant.parse("2026-06-22T00:00:00Z");
+        when(queue.appendFanout("user-1", "post-1", eventTime)).thenReturn(Mono.empty());
+        StepVerifier.create(service.appendPostToUserFeed("user-1", "post-1", eventTime))
                 .verifyComplete();
-
-        verify(zSetOperations).add("feed:user-1", "post-1", Instant.parse("2026-06-22T00:00:00Z").toEpochMilli());
+        verify(queue).appendFanout("user-1", "post-1", eventTime);
     }
 
     @Test
@@ -97,7 +90,9 @@ class FeedServiceTest {
                 redisTemplate,
                 postFeedQueryService,
                 candidatePipeline,
-                itemHydrator
+                itemHydrator,
+                org.mockito.Mockito.mock(FeedVectorSnapshotService.class),
+                queue
         );
     }
 

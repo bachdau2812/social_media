@@ -27,6 +27,7 @@ public class Comment {
     String content;
     String commentType;
     String mediaUrl;
+    String moderationStatus;
     Instant timestamp;
     @Transient
     long replyCount;

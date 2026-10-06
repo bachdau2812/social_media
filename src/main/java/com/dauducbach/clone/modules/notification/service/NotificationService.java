@@ -2,6 +2,7 @@ package com.dauducbach.clone.modules.notification.service;
 
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
+import com.dauducbach.clone.commons.constant.UserActionType;
 import com.dauducbach.clone.modules.notification.constants.NotificationType;
 import com.dauducbach.clone.modules.notification.dto.NotificationForService;
 import com.dauducbach.clone.modules.notification.dto.request.NotificationRequest;
@@ -58,6 +59,11 @@ public class NotificationService {
                             })
                             .onErrorResume(throwable -> {
                                 logger.error("|NotificationService|sendNotification|recipientEmail={}|error={}", recipientEmail, throwable.getMessage());
+                                // Profile media Kafka listeners must retry failed persistence/settings lookups.
+                                if (request.getActionType() == UserActionType.AVATAR_UPDATE
+                                        || request.getActionType() == UserActionType.UP_STORY) {
+                                    return Mono.error(throwable);
+                                }
                                 return Mono.empty();
                             })
                             .then()

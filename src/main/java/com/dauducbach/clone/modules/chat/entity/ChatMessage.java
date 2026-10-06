@@ -51,4 +51,6 @@ public class ChatMessage {
     Instant createdAt;
     Instant editedAt;
     Instant deletedAt;
+    boolean forwarded;
+    long reactionVersion;
 }

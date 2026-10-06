@@ -111,6 +111,25 @@ cloudinary:
   api-secret: ${CLOUDINARY_API_SECRET}
 
 post:
+  popularity:
+    ingestion-enabled: ${POST_POPULARITY_INGESTION_ENABLED:false}
+    streams-enabled: ${POST_POPULARITY_STREAMS_ENABLED:false}
+    projection-enabled: ${POST_POPULARITY_PROJECTION_ENABLED:false}
+    mixed-feed-enabled: ${POST_POPULARITY_MIXED_FEED_ENABLED:false}
+    application-id: ${POST_POPULARITY_APPLICATION_ID:local-post-popularity-v1}
+    cursor-secret: ${POST_POPULARITY_CURSOR_SECRET:}
+    redis-key: ${POST_POPULARITY_REDIS_KEY:post_popular}
+    threshold: ${POST_POPULARITY_THRESHOLD:20}
+    window-size: 5h
+    hop: 5m
+    grace: 10m
+    window-retention: 6h
+    identity-retention: 8d
+    impression-span: 2h
+    popular-lifetime: 48h
+    cursor-lifetime: 20m
+    scan-batch-size: 40
+    max-scan-per-source: 400
   media:
     scan:
       api-url: http://localhost:8000/api/v1/scan

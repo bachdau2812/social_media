@@ -1,163 +1,118 @@
 package com.dauducbach.clone.modules.user.service;
 
-import com.dauducbach.clone.modules.user.entity.UserDetailVector;
-import com.dauducbach.clone.modules.user.entity.UserDetails;
-import com.dauducbach.clone.modules.user.entity.UserHighSchool;
-import com.dauducbach.clone.modules.user.entity.UserJob;
-import com.dauducbach.clone.modules.user.entity.UserUniversity;
-import com.dauducbach.clone.modules.user.repositoty.UserDetailsRepository;
-import com.dauducbach.clone.modules.user.repositoty.UserHighSchoolRepository;
-import com.dauducbach.clone.modules.user.repositoty.UserJobRepository;
-import com.dauducbach.clone.modules.user.repositoty.UserUniversityRepository;
+import com.dauducbach.clone.modules.user.entity.*;
+import com.dauducbach.clone.modules.user.repositoty.*;
 import com.dauducbach.clone.utils.GetVectorEmbedding;
-import com.dauducbach.clone.utils.GsonUtils;
 import org.junit.jupiter.api.Test;
-import org.springframework.data.elasticsearch.core.ReactiveElasticsearchOperations;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
-
-import java.time.LocalDate;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.when;
-
-@ExtendWith(MockitoExtension.class)
 class UserProfileVectorRefreshListenerTest {
-    @Mock
-    UserDetailsRepository userDetailsRepository;
-    @Mock
-    UserJobRepository userJobRepository;
-    @Mock
-    UserHighSchoolRepository userHighSchoolRepository;
-    @Mock
-    UserUniversityRepository userUniversityRepository;
-    @Mock
-    ReactiveElasticsearchOperations elasticsearchOperations;
-    @Mock
-    GetVectorEmbedding getVectorEmbedding;
+    final VectorOperationFixture f = new VectorOperationFixture();
+    final UserJobRepository jobs = mock(UserJobRepository.class);
+    final UserHighSchoolRepository schools = mock(UserHighSchoolRepository.class);
+    final UserUniversityRepository universities = mock(UserUniversityRepository.class);
+    final GetVectorEmbedding embedding = mock(GetVectorEmbedding.class);
+    final AtomicReference<UserDetails> current = new AtomicReference<>(UserDetails.builder().userId("u").fullName("Current Name").username("bach").build());
 
-    @Test
-    void buildProfileTextAggregatesUserProfileComponents() {
-        UserProfileVectorRefreshListener listener = newListener();
-        mockProfileSources();
+    UserProfileVectorRefreshListener listener() {
+        when(f.users.findById("u")).thenAnswer(call -> Mono.defer(() -> Mono.justOrEmpty(current.get())));
+        when(jobs.findByUserId("u")).thenReturn(Flux.empty());
+        when(schools.findByUserId("u")).thenReturn(Flux.empty());
+        when(universities.findByUserId("u")).thenReturn(Flux.empty());
+        when(embedding.getEmbedding(anyString())).thenAnswer(call -> Mono.fromSupplier(() -> {
+            assertThat(f.redis.owner).as("embedding is outside the lease").isNull();
+            return VectorOperationFixture.vector(call.<String>getArgument(0).contains("Changed") ? 1 : 0);
+        }));
+        return new UserProfileVectorRefreshListener(f.users, jobs, schools, universities, embedding, f.coordinator, f.service);
+    }
+    String event(String id) { return "{\"userId\":\"u\",\"eventId\":\"" + id + "\",\"operation\":\"CREATE\",\"profile\":{\"userId\":\"u\",\"fullName\":\"Stale Name\"}}"; }
+    void refresh(UserProfileVectorRefreshListener listener, String id) { listener.handleProfileVectorRefreshEvent(event(id)).join(); }
 
-        StepVerifier.create(listener.buildProfileText("user-1"))
-                .assertNext(text -> {
-                    assertThat(text).contains("username: bach");
-                    assertThat(text).contains("hobbies: music, backend");
-                    assertThat(text).contains("job: Developer, OpenAI");
-                    assertThat(text).contains("high_school: Nguyen Trai");
-                    assertThat(text).contains("university: HUST, Computer Science");
-                })
-                .verifyComplete();
+    @Test void createUsesCurrentSqlAndSeedsBothVectors() {
+        var listener = listener(); refresh(listener, "create");
+        verify(embedding).getEmbedding("full_name: Current Name. username: bach");
+        assertThat(f.document.getUserVector()).isEqualTo(VectorOperationFixture.vector(0));
+        assertThat(f.document.getUserLongTermVector()).isEqualTo(f.document.getUserVector());
+        assertThat(f.redis.version).isEqualTo(1);
+        assertThat(f.journal.values()).allMatch(op -> op.getStatus().equals("COMPLETED"));
+    }
+    @Test void createRetryAndProfileUpdatePreserveLearnedLongTerm() {
+        var listener = listener(); refresh(listener, "create");
+        f.document.setUserLongTermVector(VectorOperationFixture.vector(2)); f.document.setHasLearnedHistory(true);
+        refresh(listener, "create");
+        current.set(UserDetails.builder().userId("u").fullName("Changed Name").build());
+        refresh(listener, "update");
+        assertThat(f.document.getUserVector()).isEqualTo(VectorOperationFixture.vector(1));
+        assertThat(f.document.getUserLongTermVector()).isEqualTo(VectorOperationFixture.vector(2));
+        assertThat(f.document.getHasLearnedHistory()).isTrue(); assertThat(f.esWrites).isEqualTo(2);
+    }
+    @Test void embeddingFailureFailsKafkaFutureAndSameEventRetries() {
+        var listener = listener(); var failure = new IllegalStateException("provider offline");
+        when(embedding.getEmbedding(anyString())).thenReturn(Mono.error(failure));
+        StepVerifier.create(Mono.fromFuture(listener.handleProfileVectorRefreshEvent(event("retry"))))
+                .expectErrorMatches(error -> error == failure).verify();
+        assertThat(f.document).isNull(); assertThat(f.journal).isEmpty();
+        when(embedding.getEmbedding(anyString())).thenReturn(Mono.just(VectorOperationFixture.vector(0)));
+        refresh(listener, "retry"); assertThat(f.redis.version).isEqualTo(1);
+    }
+    @Test void absentSqlUserSkipsEvenOldCreatePayload() {
+        var listener = listener(); current.set(null); f.userExists = false;
+        refresh(listener, "old-create"); verify(embedding, never()).getEmbedding(anyString()); assertThat(f.document).isNull();
+    }
+    @Test void sourceChangeDuringEmbeddingRebuildsOutsideLease() {
+        var listener = listener();
+        when(embedding.getEmbedding(anyString())).thenAnswer(call -> Mono.fromSupplier(() -> {
+            assertThat(f.redis.owner).isNull(); String text = call.getArgument(0);
+            if (text.contains("Current")) { current.set(UserDetails.builder().userId("u").fullName("Changed Name").build()); return VectorOperationFixture.vector(0); }
+            return VectorOperationFixture.vector(1);
+        }));
+        refresh(listener, "change"); assertThat(f.document.getUserVector()).isEqualTo(VectorOperationFixture.vector(1));
+        assertThat(f.esWrites).isEqualTo(1); verify(embedding, times(2)).getEmbedding(anyString());
+    }
+    @Test void eventIdentityAndFingerprintHandleRetryWithNewSourceAndAtoBtoA() {
+        var listener = listener(); refresh(listener, "original");
+        current.set(UserDetails.builder().userId("u").fullName("Changed Name").build()); refresh(listener, "original");
+        current.set(UserDetails.builder().userId("u").fullName("Current Name").username("bach").build()); refresh(listener, "return-to-A");
+        refresh(listener, "return-to-A"); assertThat(f.esWrites).isEqualTo(3); assertThat(f.redis.version).isEqualTo(3);
+        assertThat(f.document.getUserVector()).isEqualTo(VectorOperationFixture.vector(0));
+    }
+    @Test void employmentAndEducationOrderingIsDeterministic() {
+        var listener = listener();
+        var a = UserJob.builder().position("A").build(); var b = UserJob.builder().position("B").build();
+        var c = UserHighSchool.builder().schoolName("C").build(); var d = UserHighSchool.builder().schoolName("D").build();
+        var e = UserUniversity.builder().schoolName("E").build(); var g = UserUniversity.builder().schoolName("G").build();
+        when(jobs.findByUserId("u")).thenReturn(Flux.just(b,a)); when(schools.findByUserId("u")).thenReturn(Flux.just(d,c)); when(universities.findByUserId("u")).thenReturn(Flux.just(g,e));
+        String first = listener.buildProfileText("u").block();
+        when(jobs.findByUserId("u")).thenReturn(Flux.just(a,b)); when(schools.findByUserId("u")).thenReturn(Flux.just(c,d)); when(universities.findByUserId("u")).thenReturn(Flux.just(e,g));
+        assertThat(listener.buildProfileText("u").block()).isEqualTo(first);
+    }
+    @Test void ambiguousEsFailureRetriesDurableOperationWithoutExtraVersion() {
+        var listener = listener(); f.failApplied = true;
+        StepVerifier.create(Mono.fromFuture(listener.handleProfileVectorRefreshEvent(event("crash")))).expectError().verify();
+        assertThat(f.journal.values()).anyMatch(op -> op.getStatus().equals("PREPARED"));
+        f.failApplied = false; refresh(listener, "crash"); assertThat(f.esWrites).isEqualTo(1); assertThat(f.redis.version).isEqualTo(1);
+    }
+    @Test void sameEventIdAndProfileTextForDifferentUsersHaveDifferentOperationKeys() {
+        var service = mock(UserVectorOperationService.class);
+        when(f.users.findById(anyString())).thenReturn(Mono.just(current.get()));
+        when(jobs.findByUserId(anyString())).thenReturn(Flux.empty());
+        when(schools.findByUserId(anyString())).thenReturn(Flux.empty());
+        when(universities.findByUserId(anyString())).thenReturn(Flux.empty());
+        when(embedding.getEmbedding(anyString())).thenReturn(Mono.just(VectorOperationFixture.vector(0)));
+        when(service.applyProfile(any(), anyString(), anyList())).thenReturn(Mono.just(new UserVectorUpdateOperation()));
+        var listener = new UserProfileVectorRefreshListener(f.users, jobs, schools, universities, embedding, f.coordinator, service);
+        refresh(listener, "shared-event");
+        listener.handleProfileVectorRefreshEvent(event("shared-event").replace("\"u\"", "\"v\"")).join();
+        var keys = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(service, times(2)).applyProfile(any(), keys.capture(), anyList());
+        assertThat(keys.getAllValues()).doesNotHaveDuplicates();
     }
 
-    @Test
-    void refreshUserVectorEmbedsProfileTextAndReplacesUserVector() {
-        UserProfileVectorRefreshListener listener = newListener();
-        mockProfileSources();
-        UserDetailVector existing = UserDetailVector.builder()
-                .userId("user-1")
-                .userVector(List.of(0.1, 0.2))
-                .userLongTermVector(List.of(0.9, 0.1))
-                .build();
-
-        when(getVectorEmbedding.getEmbedding(anyString())).thenReturn(Mono.just(List.of(0.3, 0.7)));
-        when(elasticsearchOperations.get("user-1", UserDetailVector.class)).thenReturn(Mono.just(existing));
-        when(elasticsearchOperations.save(any(UserDetailVector.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
-
-        StepVerifier.create(listener.refreshUserVector("user-1"))
-                .verifyComplete();
-
-        ArgumentCaptor<UserDetailVector> captor = ArgumentCaptor.forClass(UserDetailVector.class);
-        verify(elasticsearchOperations).save(captor.capture());
-        assertThat(captor.getValue().getUserVector()).containsExactly(0.3, 0.7);
-        assertThat(captor.getValue().getUserLongTermVector()).containsExactly(0.9, 0.1);
-    }
-
-    @Test
-    void refreshCreatedUserVectorUsesEventSnapshotWithoutQueryingProfileTables() {
-        UserProfileVectorRefreshListener listener = newListener();
-        UserDetailVector existing = UserDetailVector.builder()
-                .userId("user-1")
-                .build();
-
-        when(getVectorEmbedding.getEmbedding(anyString())).thenReturn(Mono.just(List.of(0.4, 0.6)));
-        when(elasticsearchOperations.get("user-1", UserDetailVector.class)).thenReturn(Mono.just(existing));
-        when(elasticsearchOperations.save(any(UserDetailVector.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
-
-        StepVerifier.create(listener.refreshCreatedUserVector(GsonUtils.fromString("""
-                        {"userId":"user-1","username":"bach","hometown":"Ha Noi","livingIn":"Ho Chi Minh","sex":"male","dob":"2000-01-02","hobbyList":["music","backend"]}
-                        """)))
-                .verifyComplete();
-
-        verify(userDetailsRepository, never()).findById(anyString());
-        verify(userJobRepository, never()).findByUserId(anyString());
-        verify(userHighSchoolRepository, never()).findByUserId(anyString());
-        verify(userUniversityRepository, never()).findByUserId(anyString());
-        ArgumentCaptor<UserDetailVector> captor = ArgumentCaptor.forClass(UserDetailVector.class);
-        verify(elasticsearchOperations).save(captor.capture());
-        assertThat(captor.getValue().getUserVector()).containsExactly(0.4, 0.6);
-    }
-
-    private UserProfileVectorRefreshListener newListener() {
-        return new UserProfileVectorRefreshListener(
-                userDetailsRepository,
-                userJobRepository,
-                userHighSchoolRepository,
-                userUniversityRepository,
-                elasticsearchOperations,
-                getVectorEmbedding
-        );
-    }
-
-    private void mockProfileSources() {
-        UserDetails details = UserDetails.builder()
-                .userId("user-1")
-                .username("bach")
-                .hometown("Ha Noi")
-                .livingIn("Ho Chi Minh")
-                .sex("male")
-                .dob(LocalDate.of(2000, 1, 2))
-                .build();
-        details.setHobbyList(List.of("music", "backend"));
-
-        UserJob job = UserJob.builder()
-                .id("job-1")
-                .userId("user-1")
-                .position("Developer")
-                .companyName("OpenAI")
-                .fromDate(LocalDate.of(2024, 1, 1))
-                .build();
-
-        UserHighSchool highSchool = UserHighSchool.builder()
-                .id("high-1")
-                .userId("user-1")
-                .schoolName("Nguyen Trai")
-                .isGraduate(true)
-                .build();
-
-        UserUniversity university = UserUniversity.builder()
-                .id("uni-1")
-                .userId("user-1")
-                .schoolName("HUST")
-                .major("Computer Science")
-                .isGraduate(false)
-                .build();
-
-        when(userDetailsRepository.findById("user-1")).thenReturn(Mono.just(details));
-        when(userJobRepository.findByUserId("user-1")).thenReturn(Flux.just(job));
-        when(userHighSchoolRepository.findByUserId("user-1")).thenReturn(Flux.just(highSchool));
-        when(userUniversityRepository.findByUserId("user-1")).thenReturn(Flux.just(university));
-    }
 }

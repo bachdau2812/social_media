@@ -1,6 +1,8 @@
 package com.dauducbach.clone.utils;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.util.unit.DataSize;
@@ -11,6 +13,26 @@ import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 class MediaScanUtilsTest {
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{\"data\":{}}", "{\"data\":{\"is_nsfw\":null}}", "{\"data\":{\"is_nsfw\":\"false\"}}", "{\"data\":{\"is_nsfw\":0}}", ""})
+    void scanMediaRejectsResponsesWithoutAnExplicitBooleanDecision(String response) {
+        MediaScanUtils utils = newUtils(request -> Mono.just(ClientResponse.create(HttpStatus.OK)
+                .body(request.url().toString().equals("http://scan.local/api") ? response : "image-bytes")
+                .build()));
+
+        StepVerifier.create(utils.scanMedia("https://cdn.example.com/image.png", "folder/image"))
+                .expectNextMatches(MediaScanUtils.ScanResult::nsfw)
+                .verifyComplete();
+    }
+
+    @Test
+    void scanMediaRejectsAnEmptyDownloadedFile() {
+        MediaScanUtils utils = newUtils(request -> Mono.just(ClientResponse.create(HttpStatus.OK).build()));
+        StepVerifier.create(utils.scanMedia("https://cdn.example.com/image.png", "folder/image"))
+                .expectNextMatches(MediaScanUtils.ScanResult::nsfw)
+                .verifyComplete();
+    }
 
     @Test
     void scanMediaReturnsApprovedWhenScanApiMarksMediaSafe() {

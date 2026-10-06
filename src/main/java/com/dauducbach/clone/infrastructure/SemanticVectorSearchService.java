@@ -3,6 +3,7 @@ package com.dauducbach.clone.infrastructure;
 import com.dauducbach.clone.modules.post.elastic.PostVector;
 import com.dauducbach.clone.modules.user.entity.UserDetailVector;
 import com.dauducbach.clone.utils.GetVectorEmbedding;
+import com.dauducbach.clone.infrastructure.vector.VectorMath;
 import co.elastic.clients.json.JsonData;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
@@ -98,13 +99,22 @@ public class SemanticVectorSearchService {
                                                   String vectorField,
                                                   Class<T> entityClass,
                                                   int maxResults) {
+        boolean userVector = USER_LONG_TERM_VECTOR_FIELD.equals(vectorField);
+        String modelField = userVector ? vectorField + "_model" : "model";
+        String dimensionField = userVector ? vectorField + "_dimension" : "dimension";
+        String schemaField = userVector ? vectorField + "_schema_version" : "schema_version";
         NativeQuery searchQuery = NativeQuery.builder()
                 .withQuery(query -> query.scriptScore(scriptScore -> scriptScore
-                        .query(inner -> inner.exists(exists -> exists.field(vectorField)))
+                        .query(inner -> inner.bool(eligible -> eligible
+                                .must(q -> q.exists(exists -> exists.field(vectorField)))
+                                .mustNot(q -> q.term(t -> t.field("deleted").value(true)))
+                                .filter(q -> q.term(t -> t.field(modelField).value(VectorMath.MODEL)))
+                                .filter(q -> q.term(t -> t.field(dimensionField).value(VectorMath.DIMENSION)))
+                                .filter(q -> q.term(t -> t.field(schemaField).value(VectorMath.SCHEMA_VERSION)))))
                         .script(script -> script
                                 .lang("painless")
                                 .source("cosineSimilarity(params.queryVector, '" + vectorField + "') + 1.0")
-                                .params("queryVector", JsonData.of(vector)))
+                                .params("queryVector", JsonData.of(VectorMath.normalize(vector))))
                         .minScore(ELASTIC_MIN_SCORE)))
                 .withMinScore(ELASTIC_MIN_SCORE)
                 .withMaxResults(Math.max(maxResults, 1))

@@ -50,13 +50,14 @@ public class MediaScanUtils {
                 .retrieve()
                 .bodyToMono(byte[].class)
                 .flatMap(bytes -> {
-                    if (isOverMaxScanSize(bytes)) {
+                    if (bytes.length == 0 || isOverMaxScanSize(bytes)) {
                         log.warn("|MediaScanUtils|scanMedia|rejected oversized media|publicId={}|byteSize={}|limit={}",
                                 publicId, bytes.length, maxScanMemorySize.toBytes());
                         return Mono.just(ScanResult.rejected());
                     }
                     return callScanApi(bytes, publicId, mediaUrl);
                 })
+                .switchIfEmpty(Mono.just(ScanResult.rejected()))
                 .onErrorResume(error -> {
                     log.error("|MediaScanUtils|scanMedia|failed|publicId={}|mediaUrlLength={}|error={}",
                             publicId, mediaUrl.length(), error.getMessage());
@@ -101,8 +102,11 @@ public class MediaScanUtils {
             return ScanResult.rejected();
         }
 
-        boolean isNsfw = data.has("is_nsfw") && data.get("is_nsfw").getAsBoolean();
-        return new ScanResult(isNsfw);
+        var decision = data.get("is_nsfw");
+        if (decision == null || !decision.isJsonPrimitive() || !decision.getAsJsonPrimitive().isBoolean()) {
+            return ScanResult.rejected();
+        }
+        return new ScanResult(decision.getAsBoolean());
     }
 
     private String buildScanFilename(String publicId, String mediaUrl) {

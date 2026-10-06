@@ -62,6 +62,18 @@ public class PostService {
     KafkaSender<String, String> kafkaSender;
     PostSseService postSseService;
     PostMediaModerationOrchestrator postMediaModerationOrchestrator;
+    PostVectorService postVectorService;
+
+    @lombok.experimental.NonFinal
+    PostInteractionService postInteractionService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setPostInteractionService(PostInteractionService service) { this.postInteractionService = service; }
+
+    public Mono<com.dauducbach.clone.modules.post.dto.response.PostInteractionAcceptedResponse> interact(
+            String actor, com.dauducbach.clone.modules.post.dto.request.PostInteractionRequest request) {
+        return postInteractionService.accept(actor, request);
+    }
 
     public Mono<PostCreateResponse> createPost(PostCreateRequest request) {
         return Mono.defer(() -> {
@@ -399,11 +411,11 @@ public class PostService {
 
         log.info("|PostService|deletePostById|postId={}|userId={}", postId, userId);
         return postDetailsRepository.findById(postId)
-                .switchIfEmpty(Mono.error(new AppException(
-                        ErrorCode.POST_NOT_FOUND,
-                        String.format("Post not found for postId=%s", postId)
-                )))
-                .flatMap(existing -> {
+                .map(java.util.Optional::of).defaultIfEmpty(java.util.Optional.empty())
+                .flatMap(found -> {
+                    if (found.isEmpty()) return postVectorService.retryDeletedPost(postId, userId)
+                            .then(reactiveRedisStringTemplate.opsForValue().delete(cacheKey).then());
+                    PostDetails existing = found.get();
                     if (!userId.equals(existing.getUserId())) {
                         return Mono.error(new AppException(
                                 ErrorCode.POST_DELETE_FAILED,
@@ -411,7 +423,8 @@ public class PostService {
                         ));
                     }
                     return postDetailsRepository.deleteById(postId)
-                            .then(reactiveRedisStringTemplate.opsForValue().delete(cacheKey).then());
+                            .then(reactiveRedisStringTemplate.opsForValue().delete(cacheKey).then())
+                            .then(Mono.defer(() -> postVectorService.deletePost(postId, userId)));
                 })
                 .doOnSuccess(v -> log.info("|PostService|deletePostById|deleted|postId={}|userId={}", postId, userId))
                 .doOnError(error -> log.error("|PostService|deletePostById|failed|postId={}|userId={}|error={}", postId, userId, error.getMessage()))
@@ -436,7 +449,8 @@ public class PostService {
                                     .then())
                             .then();
 
-                    return cacheRemoval.then(postDetailsRepository.deleteByUserId(userId));
+                    return cacheRemoval.then(Mono.defer(() -> postDetailsRepository.deleteByUserId(userId)))
+                            .then(Mono.defer(() -> postVectorService.deletePostsByAuthor(userId, posts.stream().map(PostDetails::getPostId).toList())));
                 })
                 .doOnSuccess(v -> log.info("|PostService|deletePostsByUserId|deleted|userId={}", userId))
                 .doOnError(error -> log.error("|PostService|deletePostsByUserId|failed|userId={}|error={}", userId, error.getMessage()))
@@ -586,6 +600,7 @@ public class PostService {
         );
 
         return kafkaSender.send(Mono.just(record))
+                .flatMap(result -> result.exception() == null ? Mono.just(result) : Mono.error(result.exception()))
                 .doOnError(error -> log.error("|PostService|publishPostEvent|topic={}|error={}", topic, error.getMessage()))
                 .doOnComplete(() -> log.info("|PostService|publishPostEvent|sent|topic={}|postId={}", topic, postDetails.getPostId()))
                 .then();
@@ -600,6 +615,7 @@ public class PostService {
         );
 
         return kafkaSender.send(Mono.just(record))
+                .flatMap(result -> result.exception() == null ? Mono.just(result) : Mono.error(result.exception()))
                 .doOnError(error -> log.error("|PostService|sendPostUploadEvent|postId={}|error={}", postDetails.getPostId(), error.getMessage()))
                 .doOnComplete(() -> log.info("|PostService|sendPostUploadEvent|sent|postId={}|userId={}",
                         postDetails.getPostId(), postDetails.getUserId()))

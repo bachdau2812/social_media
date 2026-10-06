@@ -34,6 +34,8 @@ public class AuditLogs {
 
     String metadata;
 
+    String sourceEventId;
+
     @Builder.Default
     Instant createdAt = Instant.now();
 }

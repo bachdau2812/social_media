@@ -12,6 +12,7 @@ public enum AuditActionType {
     UPDATE_POST,
     DELETE_POST,
     LIKE_POST,
+    REPOST_POST,
     UNLIKE_POST,
     LIKE_COMMENT,
     UNLIKE_COMMENT,

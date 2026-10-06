@@ -37,7 +37,7 @@ public class UserDiscoveryService {
 
     private final UserSearchService userSearchService;
     private final UserDiscoveryHydrator hydrator;
-    private final UserVectorQueryService userVectorQueryService;
+    private final UserVectorSnapshotService vectorSnapshots;
     private final SemanticVectorSearchService semanticVectorSearchService;
     private final UserDetailsRepository userDetailsRepository;
     private final ReactiveRedisTemplate<String, String> redisTemplate;
@@ -64,7 +64,12 @@ public class UserDiscoveryService {
         excludedIds.add(target);
         if (hasText(viewerId)) excludedIds.add(viewerId.trim());
 
-        return userVectorQueryService.getLongTermOrUserVector(target)
+        return vectorSnapshots.load(target)
+                .map(snapshot -> snapshot.longTerm().isEmpty() ? snapshot.profile() : snapshot.longTerm())
+                .defaultIfEmpty(List.of())
+                .doOnNext(vector -> {
+                    if (vector.isEmpty()) log.debug("|UserDiscoveryService|missing-vector|userId={}|field=long-term/profile", target);
+                })
                 .flatMap(vector -> vector.isEmpty()
                         ? Mono.just(PageResponse.of(List.<UserDiscoveryResponse>of(), pageNumber, 0, pageSize))
                         : semanticVectorSearchService.searchUserIdsByVector(vector, requested, excludedIds)

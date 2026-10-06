@@ -1,6 +1,8 @@
 package com.dauducbach.clone.modules.audit.service;
 
 import com.dauducbach.clone.commons.constant.EntityType;
+import com.dauducbach.clone.modules.feed.dto.event.FeedInteractionEvent;
+import org.springframework.dao.DuplicateKeyException;
 import com.dauducbach.clone.modules.audit.dto.AuditActionType;
 import com.dauducbach.clone.modules.audit.entity.AuditLogs;
 import com.dauducbach.clone.modules.audit.repositoty.AuditLogsRepository;
@@ -38,6 +40,35 @@ public class UserAuditService {
 
     AuditLogsRepository auditLogsRepository;
     R2dbcEntityTemplate r2dbcEntityTemplate;
+
+    // A LIKE of a comment remains a post-interest signal, using its original persisted like identity.
+    public Mono<Void> recordPostInteraction(FeedInteractionEvent event) {
+        return Mono.defer(() -> {
+            AuditActionType action = switch (event.action()) {
+                case "LIKE" -> AuditActionType.LIKE_POST;
+                case "COMMENT" -> AuditActionType.COMMENT_POST;
+                case "REPOST" -> AuditActionType.REPOST_POST;
+                default -> throw new IllegalArgumentException("Unsupported post interaction");
+            };
+            JsonObject metadata = new JsonObject();
+            metadata.addProperty("postId", event.postId());
+            metadata.addProperty("sourceId", event.sourceId());
+            metadata.addProperty("occurredAt", event.occurredAt().toString());
+            AuditLogs audit = AuditLogs.builder().id(UUID.randomUUID().toString())
+                    .sourceEventId(event.eventId()).actorId(event.userId()).actorType(ACTOR_TYPE_USER)
+                    .action(action).resourceType(EntityType.POST.name()).resourceId(event.postId())
+                    .status(STATUS_SUCCESS).metadata(metadata.toString()).createdAt(Instant.now()).build();
+            return r2dbcEntityTemplate.insert(AuditLogs.class).using(audit)
+                    .onErrorResume(DuplicateKeyException.class, error -> auditLogsRepository
+                            .findBySourceEventId(event.eventId())
+                            .filter(existing -> event.userId().equals(existing.getActorId())
+                                    && event.postId().equals(existing.getResourceId()) && action == existing.getAction()
+                                    && STATUS_SUCCESS.equals(existing.getStatus())
+                                    && metadata.equals(GsonUtils.fromString(existing.getMetadata())))
+                            .switchIfEmpty(Mono.error(error)))
+                    .then();
+        });
+    }
 
     public Mono<Void> save(AuditLogs auditLog) {
         if (auditLog == null || auditLog.getAction() == null) {

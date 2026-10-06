@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
 import org.springframework.data.r2dbc.core.ReactiveInsertOperation;
+import org.springframework.dao.DataIntegrityViolationException;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
@@ -30,6 +31,60 @@ class PushNotificationDeliveryTest {
     private final R2dbcEntityTemplate entityTemplate = mock(R2dbcEntityTemplate.class);
     private final NotificationPushGateway pushGateway = mock(NotificationPushGateway.class);
     private final NotificationSseService realtime = mock(NotificationSseService.class);
+
+    @Test
+    void avatarRecipientConstraintFailureIsNotAcknowledgedAsADuplicate() {
+        PushNotificationService service = newService();
+        mockNotificationInserts(new ArrayList<>());
+        var recipientInsert = entityTemplate.insert(UserNotifications.class);
+        when(recipientInsert.using(any(UserNotifications.class)))
+                .thenReturn(Mono.error(new DataIntegrityViolationException("recipient constraint failed")));
+        when(eventRepository.deleteById(anyString())).thenReturn(Mono.empty());
+        NotificationForService request = notificationRequest();
+        request.setActionType(UserActionType.AVATAR_UPDATE);
+        request.setDedupKey("AVATAR_UPDATE_UPLOAD:media-1");
+
+        StepVerifier.create(service.sendPushNotification(request))
+                .expectErrorMatches(error -> error.getCause() instanceof DataIntegrityViolationException)
+                .verify();
+        verify(eventRepository).deleteById(anyString());
+        verifyNoInteractions(realtime, pushGateway);
+    }
+
+    @Test
+    void concurrentAvatarDuplicateIsSkippedOnlyWhenItsEventExists() {
+        PushNotificationService service = newService();
+        mockNotificationInserts(new ArrayList<>());
+        var eventInsert = entityTemplate.insert(NotificationEvents.class);
+        when(eventInsert.using(any(NotificationEvents.class)))
+                .thenReturn(Mono.error(new DataIntegrityViolationException("duplicate key")));
+        when(eventRepository.findByDedupKey("AVATAR_UPDATE_UPLOAD:media-1:recipient-1"))
+                .thenReturn(Mono.empty(), Mono.just(NotificationEvents.builder().id("surviving-event").build()));
+        NotificationForService request = notificationRequest();
+        request.setActionType(UserActionType.AVATAR_UPDATE);
+        request.setDedupKey("AVATAR_UPDATE_UPLOAD:media-1");
+
+        StepVerifier.create(service.sendPushNotification(request))
+                .expectNext("Duplicate notification skipped").verifyComplete();
+        verify(eventRepository, times(2)).findByDedupKey("AVATAR_UPDATE_UPLOAD:media-1:recipient-1");
+        verifyNoInteractions(realtime, pushGateway);
+    }
+
+    @Test
+    void skipsAnAvatarNotificationAlreadyPersistedForThisUploadAndRecipient() {
+        PushNotificationService service = newService();
+        when(eventRepository.findByDedupKey("AVATAR_UPDATE_UPLOAD:media-1:recipient-1"))
+                .thenReturn(Mono.just(NotificationEvents.builder().id("existing").build()));
+        NotificationForService request = notificationRequest();
+        request.setActionType(UserActionType.AVATAR_UPDATE);
+        request.setEntityId("actor-1");
+        request.setEntityType("USER");
+        request.setDedupKey("AVATAR_UPDATE_UPLOAD:media-1");
+        StepVerifier.create(service.sendPushNotification(request))
+                .expectNext("Duplicate notification skipped").verifyComplete();
+        verify(entityTemplate, never()).insert(NotificationEvents.class);
+        verifyNoInteractions(realtime, pushGateway);
+    }
 
     @Test
     void persistsInAppNotificationWhenRecipientHasNoPushToken() {

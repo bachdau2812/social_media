@@ -37,6 +37,7 @@ public class UserDetailsService {
     ReactiveRedisTemplate<String, String> reactiveRedisStringTemplate;
     UserAuditService userAuditService;
     UserProfileVectorEventPublisher userProfileVectorEventPublisher;
+    UserVectorCleanupService vectorCleanup;
 
     private static final Logger log = LoggerFactory.getLogger(UserDetailsService.class);
     private static final String USER_DETAILS_CACHE_PREFIX = "user_details_info:";
@@ -60,7 +61,9 @@ public class UserDetailsService {
         log.info("|UserDetailsService|createUserDetails|received|userId={}|username={}",
                 userDetails.getUserId(), userDetails.getUsername());
 
-        return insertUserDetails(userDetails)
+        return userDetailsRepository.findById(userDetails.getUserId())
+                .flatMap(current -> publishProfileVectorRefreshForCreate(current).thenReturn(current))
+                .switchIfEmpty(Mono.defer(() -> insertUserDetails(userDetails)))
                 .doOnSuccess(saved -> log.info("|UserDetailsService|createUserDetails|created user details|userId={}", saved.getUserId()))
                 .doOnError(error -> log.error("|UserDetailsService|createUserDetails|failed to create user details|userId={}|error={}",
                         userDetails.getUserId(), error.getMessage()))
@@ -81,8 +84,6 @@ public class UserDetailsService {
                         String.format("Save user details failed for userId=%s", userDetails.getUserId()),
                         throwable
                 ))
-                .flatMap(savedUserDetails -> publishProfileVectorRefreshForCreate(savedUserDetails)
-                        .thenReturn(savedUserDetails))
                 .doOnSuccess(savedUserDetails -> {
                     log.info("|UserDetailsService|insertUserDetails|saved userDetails to database|userId={}", savedUserDetails.getUserId());
                     // Cache the saved user details as JSON string
@@ -94,6 +95,8 @@ public class UserDetailsService {
                                 .subscribe();
                     }
                 })
+                .flatMap(savedUserDetails -> publishProfileVectorRefreshForCreate(savedUserDetails)
+                        .thenReturn(savedUserDetails))
                 .doOnError(error -> log.error("|UserDetailsService|insertUserDetails|failed to save userDetails to database|error={}", error.getMessage()));
     }
 
@@ -143,16 +146,6 @@ public class UserDetailsService {
 
                     return userDetailsRepository.save(existingUserDetails);
                 })
-                .flatMap(updated -> saveUpdateUserDetailsAudit(request, updated.getUserId()).thenReturn(updated))
-                .flatMap(updated -> publishProfileVectorRefresh(updated.getUserId(), "USER_DETAILS", "UPDATE", updated.getUserId())
-                        .thenReturn(updated))
-                .onErrorMap(throwable -> throwable instanceof AppException
-                        ? throwable
-                        : new AppException(
-                                ErrorCode.USER_DETAILS_UPDATE_FAILED,
-                                String.format("Update user details failed for userId=%s", request.getUserId()),
-                                throwable
-                        ))
                 .publishOn(Schedulers.boundedElastic())
                 .doOnSuccess(updatedUserDetails -> {
                     log.info("|UserDetailsService|updateUserDetails|updated userDetails successfully|userId={}", updatedUserDetails.getUserId());
@@ -165,6 +158,16 @@ public class UserDetailsService {
                                 .subscribe();
                     }
                 })
+                .flatMap(updated -> saveUpdateUserDetailsAudit(request, updated.getUserId()).thenReturn(updated))
+                .flatMap(updated -> publishProfileVectorRefresh(updated.getUserId(), "USER_DETAILS", "UPDATE", updated.getUserId())
+                        .thenReturn(updated))
+                .onErrorMap(throwable -> throwable instanceof AppException
+                        ? throwable
+                        : new AppException(
+                                ErrorCode.USER_DETAILS_UPDATE_FAILED,
+                                String.format("Update user details failed for userId=%s", request.getUserId()),
+                                throwable
+                        ))
                 .doOnError(error -> log.error("|UserDetailsService|updateUserDetails|failed to update userDetails|error={}", error.getMessage()));
     }
 
@@ -202,21 +205,11 @@ public class UserDetailsService {
                         "USER_DETAILS",
                         "CREATE",
                         userDetails.getUserId(),
-                        userDetails)
-                .onErrorResume(error -> {
-                    log.warn("|UserDetailsService|publishProfileVectorRefreshForCreate|failed|userId={}|error={}",
-                            userDetails.getUserId(), error.getMessage());
-                    return Mono.empty();
-                });
+                        userDetails);
     }
 
     private Mono<Void> publishProfileVectorRefresh(String userId, String source, String operation, String resourceId) {
-        return userProfileVectorEventPublisher.publishRefreshEvent(userId, source, operation, resourceId)
-                .onErrorResume(error -> {
-                    log.warn("|UserDetailsService|publishProfileVectorRefresh|failed|userId={}|source={}|operation={}|error={}",
-                            userId, source, operation, error.getMessage());
-                    return Mono.empty();
-                });
+        return userProfileVectorEventPublisher.publishRefreshEvent(userId, source, operation, resourceId);
     }
 
     /// Get UserDetails by userId with caching
@@ -275,26 +268,15 @@ public class UserDetailsService {
 
         String cacheKey = USER_DETAILS_CACHE_PREFIX + userId;
 
-        return userDetailsRepository.findById(userId)
-                .switchIfEmpty(Mono.error(new AppException(
-                        ErrorCode.USER_DETAILS_NOT_FOUND,
-                        String.format("User details not found for userId=%s", userId)
-                )))
-                .flatMap(existing -> reactiveRedisStringTemplate.opsForValue().delete(cacheKey)
+        return vectorCleanup.deleteUser(userId, () -> reactiveRedisStringTemplate.opsForValue().delete(cacheKey)
                         .onErrorResume(error -> {
+                            // Preserve the original best-effort details cache policy; vector fencing must still run.
                             log.warn("|UserDetailsService|deleteUserDetails|cache delete failed, continue|userId={}|error={}", userId, error.getMessage());
                             return Mono.empty();
-                        })
-                        .then(userDetailsRepository.deleteById(userId))
-                        .then()
-                        .doOnSuccess(v -> log.info("|UserDetailsService|deleteUserDetails|deleted userDetails from database|userId={}", userId))
-                        .onErrorMap(throwable -> throwable instanceof AppException
-                                ? throwable
-                                : new AppException(
-                                        ErrorCode.USER_DETAILS_DELETE_FAILED,
-                                        String.format("Delete user details failed for userId=%s", userId),
-                                        throwable
-                                ))
-                );
+                        }).then())
+                .then()
+                .onErrorMap(error -> error instanceof AppException ? error : new AppException(
+                        ErrorCode.USER_DETAILS_DELETE_FAILED,
+                        String.format("Delete user details failed for userId=%s", userId), error));
     }
 }

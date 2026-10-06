@@ -78,6 +78,9 @@ public class UserProfileNotificationHandler {
         Map<String, String> metadata = baseMetadata(userId, userId, EntityType.USER.name());
         metadata.put("AVATAR_URL", avatarUrl);
         metadata.put("MEDIA_ID", mediaId);
+        if (!mediaId.isBlank()) {
+            metadata.put("DEDUP_KEY", "AVATAR_UPDATE_UPLOAD:" + mediaId);
+        }
 
         return enrichActorUsername(userId, metadata)
                 .then(getFollowersOfUser(userId))
@@ -142,6 +145,12 @@ public class UserProfileNotificationHandler {
 
         return notificationTemplatesRepository.findByActionType(actionType)
                 .switchIfEmpty(Mono.defer(() -> {
+                    if (actionType == UserActionType.AVATAR_UPDATE) {
+                        return Mono.just(NotificationTemplates.builder()
+                                .actionType(actionType)
+                                .template("{{USERNAME}} đã cập nhật ảnh đại diện.")
+                                .build());
+                    }
                     log.warn("|UserProfileNotificationHandler|sendPush|missing template|actionType={}", actionType);
                     return Mono.empty();
                 }))
@@ -158,10 +167,9 @@ public class UserProfileNotificationHandler {
                         .notificationType(NotificationType.PUSH)
                         .build()))
                 .then()
-                .onErrorResume(error -> {
+                .doOnError(error -> {
                     log.error("|UserProfileNotificationHandler|sendPush|failed|actionType={}|entityId={}|error={}",
                             actionType, entityId, error.getMessage());
-                    return Mono.empty();
                 });
     }
 
@@ -189,10 +197,9 @@ public class UserProfileNotificationHandler {
                     }
                     return collectFollowers(userId, page + 1, accumulated);
                 })
-                .onErrorResume(error -> {
+                .doOnError(error -> {
                     log.error("|UserProfileNotificationHandler|collectFollowers|failed|userId={}|page={}|error={}",
                             userId, page, error.getMessage());
-                    return Mono.just(accumulated);
                 });
     }
 

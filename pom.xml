@@ -54,6 +54,17 @@
 			</exclusions>
 		</dependency>
 
+		<dependency>
+			<groupId>org.apache.kafka</groupId>
+			<artifactId>kafka-streams</artifactId>
+		</dependency>
+
+		<dependency>
+			<groupId>org.apache.kafka</groupId>
+			<artifactId>kafka-streams-test-utils</artifactId>
+			<scope>test</scope>
+		</dependency>
+
 		<!--Spring Data Redis Reactive-->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

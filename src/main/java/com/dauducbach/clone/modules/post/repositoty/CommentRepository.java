@@ -9,6 +9,9 @@ import reactor.core.publisher.Mono;
 
 @Repository
 public interface CommentRepository extends ReactiveCrudRepository<Comment, String> {
+    @Query("SELECT * FROM comments WHERE id = :id FOR UPDATE")
+    Mono<Comment> findForApproval(String id);
+
     @Query("SELECT * FROM comments WHERE post_id = :postId AND parent_id IS NULL ORDER BY timestamp DESC LIMIT :limit OFFSET :offset")
     Flux<Comment> findRootByPostId(String postId, int limit, int offset);
 

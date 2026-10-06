@@ -1,5 +1,13 @@
 package com.dauducbach.clone.modules.chat.controller;
 
+import com.dauducbach.clone.modules.chat.service.ChatRecallService;
+import com.dauducbach.clone.modules.chat.service.ChatPinService;
+import com.dauducbach.clone.modules.chat.service.ChatForwardService;
+import com.dauducbach.clone.modules.chat.service.ChatMessageStateService;
+import com.dauducbach.clone.modules.chat.dto.request.ForwardMessageRequest;
+import com.dauducbach.clone.modules.chat.dto.request.MessageStatesRequest;
+import com.dauducbach.clone.modules.chat.dto.response.PinCollectionResponse;
+
 import com.dauducbach.clone.commons.response.ApiResponse;
 import com.dauducbach.clone.commons.security.ActorIdentity;
 import com.dauducbach.clone.modules.chat.dto.request.AddConversationMemberRequest;
@@ -29,6 +37,14 @@ import com.dauducbach.clone.modules.chat.service.ConversationMemberService;
 import com.dauducbach.clone.modules.chat.service.ConversationService;
 import com.dauducbach.clone.modules.chat.service.ConversationMediaQueryService;
 import com.dauducbach.clone.modules.chat.service.SendMessageService;
+import com.dauducbach.clone.modules.chat.service.MessageReactionService;
+import com.dauducbach.clone.modules.chat.constant.ReactionType;
+import com.dauducbach.clone.modules.chat.dto.request.SetMessageReactionRequest;
+import com.dauducbach.clone.modules.chat.dto.request.ReactionSnapshotsRequest;
+import com.dauducbach.clone.modules.chat.dto.response.ReactionState;
+import com.dauducbach.clone.modules.chat.dto.response.ReactionSnapshot;
+import com.dauducbach.clone.modules.chat.dto.response.MessageReactorResponse;
+import java.util.List;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -45,7 +61,7 @@ import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Mono;
 
 @RestController
-@RequiredArgsConstructor
+@RequiredArgsConstructor(onConstructor_ = @org.springframework.beans.factory.annotation.Autowired)
 @RequestMapping("/chat")
 public class ChatController {
 
@@ -56,6 +72,86 @@ public class ChatController {
     private final ConversationMemberService memberService;
     private final ChatPresenceService presenceService;
     private final ConversationMediaQueryService conversationMediaQueryService;
+    private final MessageReactionService reactionService;
+
+    public ChatController(ConversationService conversations,SendMessageService sends,ChatMessageQueryService messages,
+            ChatCursorService cursors,ConversationMemberService members,ChatPresenceService presence,
+            ConversationMediaQueryService media,MessageReactionService reactions) {
+        this(conversations,sends,messages,cursors,members,presence,media,reactions,null,null,null,null);
+    }
+
+    private final ChatRecallService recallService;
+    private final ChatPinService pinService;
+    private final ChatForwardService forwardService;
+    private final ChatMessageStateService stateService;
+
+    @PostMapping("/conversations/{conversationId}/messages/{messageId}/recall")
+    public Mono<ApiResponse<ChatMessageResponse>> recall(@RequestParam String actorId, Authentication authentication,
+            @PathVariable String conversationId, @PathVariable String messageId) {
+        return recallService.recall(requireActor(authentication,actorId),conversationId,messageId)
+            .map(result->ApiResponse.<ChatMessageResponse>builder().result(result).message("Message recalled").build());
+    }
+    @PostMapping("/conversations/{conversationId}/messages/state")
+    public Mono<ApiResponse<List<ChatMessageResponse>>> states(@RequestParam String actorId, Authentication authentication,
+            @PathVariable String conversationId,@Valid @RequestBody MessageStatesRequest request) {
+        return stateService.get(requireActor(authentication,actorId),conversationId,request.messageIds())
+            .map(result->ApiResponse.<List<ChatMessageResponse>>builder().result(result).message("Message states fetched").build());
+    }
+    @PostMapping("/conversations/{conversationId}/messages/forward")
+    public Mono<ApiResponse<ChatMessageResponse>> forward(@RequestParam String actorId, Authentication authentication,
+            @PathVariable String conversationId,@Valid @RequestBody ForwardMessageRequest request) {
+        return forwardService.forward(requireActor(authentication,actorId),conversationId,request)
+            .map(result->ApiResponse.<ChatMessageResponse>builder().result(result).message("Message forwarded").build());
+    }
+    @GetMapping("/conversations/{conversationId}/pins")
+    public Mono<ApiResponse<PinCollectionResponse>> pins(@RequestParam String actorId, Authentication authentication,@PathVariable String conversationId) {
+        return pinService.get(requireActor(authentication,actorId),conversationId).map(result->ApiResponse.<PinCollectionResponse>builder().result(result).message("Pins fetched").build());
+    }
+    @PutMapping("/conversations/{conversationId}/pins/{messageId}")
+    public Mono<ApiResponse<PinCollectionResponse>> pin(@RequestParam String actorId, Authentication authentication,@PathVariable String conversationId,@PathVariable String messageId) {
+        return pinService.put(requireActor(authentication,actorId),conversationId,messageId).map(result->ApiResponse.<PinCollectionResponse>builder().result(result).message("Message pinned").build());
+    }
+    @DeleteMapping("/conversations/{conversationId}/pins/{messageId}")
+    public Mono<ApiResponse<PinCollectionResponse>> unpin(@RequestParam String actorId, Authentication authentication,@PathVariable String conversationId,@PathVariable String messageId) {
+        return pinService.remove(requireActor(authentication,actorId),conversationId,messageId).map(result->ApiResponse.<PinCollectionResponse>builder().result(result).message("Message unpinned").build());
+    }
+
+    @PutMapping("/conversations/{conversationId}/messages/{messageId}/reactions/me")
+    public Mono<ApiResponse<ReactionState>> setReaction(
+            @RequestParam String actorId, Authentication authentication,
+            @PathVariable String conversationId, @PathVariable String messageId,
+            @Valid @RequestBody SetMessageReactionRequest request) {
+        return reactionService.set(requireActor(authentication, actorId), conversationId, messageId, request.reaction())
+                .map(state -> ApiResponse.<ReactionState>builder().result(state).message("Message reaction updated").build());
+    }
+
+    @DeleteMapping("/conversations/{conversationId}/messages/{messageId}/reactions/me")
+    public Mono<ApiResponse<ReactionState>> removeReaction(
+            @RequestParam String actorId, Authentication authentication,
+            @PathVariable String conversationId, @PathVariable String messageId) {
+        return reactionService.remove(requireActor(authentication, actorId), conversationId, messageId)
+                .map(state -> ApiResponse.<ReactionState>builder().result(state).message("Message reaction removed").build());
+    }
+
+    @GetMapping("/conversations/{conversationId}/messages/{messageId}/reactions")
+    public Mono<ApiResponse<CursorPageResponse<MessageReactorResponse>>> getReactors(
+            @RequestParam String actorId, Authentication authentication,
+            @PathVariable String conversationId, @PathVariable String messageId,
+            @RequestParam(required = false) ReactionType reaction,
+            @RequestParam(required = false) String cursor, @RequestParam(defaultValue = "30") int limit) {
+        return reactionService.list(requireActor(authentication, actorId), conversationId, messageId, reaction, cursor, limit)
+                .map(page -> ApiResponse.<CursorPageResponse<MessageReactorResponse>>builder()
+                        .result(page).message("Message reactors fetched").build());
+    }
+
+    @PostMapping("/conversations/{conversationId}/messages/reactions/state")
+    public Mono<ApiResponse<List<ReactionSnapshot>>> getReactionSnapshots(
+            @RequestParam String actorId, Authentication authentication,
+            @PathVariable String conversationId, @Valid @RequestBody ReactionSnapshotsRequest request) {
+        return reactionService.getSnapshots(requireActor(authentication, actorId), conversationId, request.messageIds())
+                .map(snapshots -> ApiResponse.<List<ReactionSnapshot>>builder()
+                        .result(snapshots).message("Message reaction states fetched").build());
+    }
 
     @GetMapping("/presence/{userId}")
     public Mono<ApiResponse<ChatPresenceResponse>> getPresence(@PathVariable String userId) {
@@ -368,6 +464,6 @@ public class ChatController {
                         .build());
     }
     private String requireActor(Authentication authentication, String actorId) {
-        return ActorIdentity.require(authentication.getName(), actorId);
+        return ActorIdentity.require(authentication == null ? null : authentication.getName(), actorId);
     }
 }

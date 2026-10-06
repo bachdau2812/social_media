@@ -93,7 +93,13 @@ public class UserSearchService {
                         semanticUserIds.size()))
                 .doOnError(error -> log.error("|UserSearchService|fillUsersBySemanticSearch|failed|required={}|error={}",
                         required, error.getMessage()))
-                .map(semanticUserIds -> mergeIds(dbUserIds, semanticUserIds, pageSize));
+                .map(semanticUserIds -> mergeIds(dbUserIds, semanticUserIds, pageSize))
+                .onErrorResume(error -> {
+                    if (dbUserIds.isEmpty()) return Mono.error(error);
+                    log.warn("|UserSearchService|semanticDegraded|dbCount={}|errorType={}",
+                            dbUserIds.size(), error.getClass().getSimpleName());
+                    return Mono.just(dbUserIds);
+                });
     }
 
     private PageResponse<String> buildPage(List<String> content, int dbPageCount, int pageNumber, int pageSize, long dbTotal) {

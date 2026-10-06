@@ -11,6 +11,29 @@ import reactor.core.publisher.Mono;
 
 @Repository
 public interface PostDetailsRepository extends ReactiveCrudRepository<PostDetails, String> {
+    @Query("""
+            SELECT p.* FROM post_details p
+            WHERE p.validate_status = 'APPROVED'
+              AND p.created_at <= :upperBound
+              AND (:afterTime IS NULL OR p.created_at < :afterTime
+                   OR (p.created_at = :afterTime AND p.post_id < :afterId))
+              AND NOT EXISTS (
+                SELECT 1 FROM user_archive_items archived
+                WHERE archived.content_id = p.post_id AND UPPER(archived.content_type) = 'POST'
+              )
+              AND p.user_id IN (
+                SELECT following.following_id FROM user_follower following
+                INNER JOIN user_follower follower_back
+                  ON follower_back.follower_id = following.following_id
+                 AND follower_back.following_id = :userId
+                WHERE following.follower_id = :userId
+              )
+            ORDER BY p.created_at DESC, p.post_id DESC
+            LIMIT :limit
+            """)
+    Flux<PostDetails> findApprovedFriendPostsBefore(String userId, java.time.Instant upperBound,
+            java.time.Instant afterTime, String afterId, int limit);
+
     @Query("SELECT user_id FROM post_details WHERE post_id = :postId")
     Mono<String> findUserIdByPostId(String postId);
 

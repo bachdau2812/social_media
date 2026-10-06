@@ -26,9 +26,10 @@ public class FrontendHomeController {
             @RequestParam(defaultValue = "DISCOVER") String tab,
             @RequestParam(defaultValue = "20") int limit,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "FEED") MediaDisplayType mediaType
+            @RequestParam(defaultValue = "FEED") MediaDisplayType mediaType,
+            @RequestParam(required = false) String cursor
     ) {
-        return service.getHome(requireUser(authentication, userId), tab, limit, page, mediaType)
+        return service.getHome(requireUser(authentication, userId), tab, limit, page, mediaType, cursor)
                 .map(result -> ApiResponse.<HomeScreenResponse>builder()
                         .message("Home screen fetched")
                         .result(result)

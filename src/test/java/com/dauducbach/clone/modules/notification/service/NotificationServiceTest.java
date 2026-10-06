@@ -6,6 +6,8 @@ import com.dauducbach.clone.modules.notification.dto.NotificationForService;
 import com.dauducbach.clone.modules.notification.dto.request.NotificationRequest;
 import com.dauducbach.clone.modules.notification.repository.UserNotificationSettingRepository;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -26,6 +28,28 @@ class NotificationServiceTest {
     @Mock EmailService emailService;
     @Mock PushNotificationService pushNotificationService;
     @Mock UserNotificationSettingRepository notificationSettingRepository;
+
+    @ParameterizedTest
+    @EnumSource(value = UserActionType.class, names = {"AVATAR_UPDATE", "UP_STORY"})
+    void profileMediaPersistenceFailureIsPropagatedToTheKafkaListener(UserActionType action) {
+        NotificationService service = new NotificationService(emailService, pushNotificationService, notificationSettingRepository);
+        NotificationRequest request = NotificationRequest.builder().actionType(action)
+                .recipientIds(List.of("recipient-1")).notificationType(NotificationType.PUSH).build();
+        when(notificationSettingRepository.findById("recipient-1")).thenReturn(Mono.empty());
+        when(pushNotificationService.sendPushNotification(any())).thenReturn(Mono.error(new IllegalStateException("database unavailable")));
+        StepVerifier.create(service.sendNotification(request))
+                .expectErrorMessage("database unavailable")
+                .verify();
+    }
+
+    @Test
+    void avatarRecipientSettingsFailureIsPropagated() {
+        NotificationService service = new NotificationService(emailService, pushNotificationService, notificationSettingRepository);
+        NotificationRequest request = NotificationRequest.builder().actionType(UserActionType.AVATAR_UPDATE)
+                .recipientIds(List.of("recipient-1")).notificationType(NotificationType.PUSH).build();
+        when(notificationSettingRepository.findById("recipient-1")).thenReturn(Mono.error(new IllegalStateException("settings unavailable")));
+        StepVerifier.create(service.sendNotification(request)).expectErrorMessage("settings unavailable").verify();
+    }
 
     @Test
     void carriesMetadataAndExplicitDeepLinkToPushService() {

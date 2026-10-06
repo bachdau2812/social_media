@@ -6,6 +6,8 @@ public final class FeedTopics {
     public static final String COMMENT_SUCCESS_EVENT = "comment_success_event";
     public static final String LIKE_EVENT = "like_event";
 
+    public static final String REPOST_EVENT = "repost_event";
+
     private FeedTopics() {
     }
 }

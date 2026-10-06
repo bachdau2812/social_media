@@ -1,5 +1,6 @@
 package com.dauducbach.clone.modules.post.service.post;
 
+import com.dauducbach.clone.infrastructure.outbox.InteractionOutbox;
 import com.dauducbach.clone.commons.constant.EntityType;
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
@@ -14,7 +15,6 @@ import com.dauducbach.clone.modules.post.repositoty.PostDetailsRepository;
 import com.google.gson.JsonObject;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
-import org.apache.kafka.clients.producer.ProducerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
@@ -23,8 +23,6 @@ import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
-import reactor.kafka.sender.KafkaSender;
-import reactor.kafka.sender.SenderRecord;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -50,9 +48,9 @@ public class LikeService {
     LikeRepository likeRepository;
     PostDetailsRepository postDetailsRepository;
     CommentRepository commentRepository;
-    KafkaSender<String, String> kafkaSender;
     ReactiveRedisTemplate<String, String> reactiveRedisStringTemplate;
     R2dbcEntityTemplate r2dbcEntityTemplate;
+    InteractionOutbox interactionOutbox;
 
     // Luồng like phải kiểm tra target trước khi ghi DB để không tạo like mồ côi.
     public Mono<LikeToggleResponse> like(String actorId, LikeRequest request) {
@@ -101,27 +99,13 @@ public class LikeService {
                             .timestamp(now)
                             .build();
 
-                    return ensurePostLikeCountCache(targetId, targetType)
-                            .then(r2dbcEntityTemplate.insert(Like.class).using(like))
-                            .flatMap(saved -> updatePostLikeCountCache(targetId, targetType, 1)
-                                    .thenReturn(saved))
-                            .flatMap(saved -> resolveLikeCount(targetId, targetType)
-                                    .flatMap(likeCount -> {
-                                        LikeEventPayload payload = new LikeEventPayload(
-                                                actorId,
-                                                targetId,
-                                                targetType,
-                                                targetContext.ownerId(),
-                                                targetContext.postId(),
-                                                targetContext.parentCommentId(),
-                                                likeCount,
-                                                now
-                                        );
-                                        return publishLikeEvent(payload)
-                                                .thenReturn(new LikeToggleResponse(targetId, targetType, true, saved.getId()))
-                                                .doOnSuccess(response -> log.info("|LikeService|createLike|completed|likeId={}|actorId={}|targetId={}|targetType={}|likeCount={}",
-                                                        saved.getId(), actorId, targetId, targetType, likeCount));
-                                    }));
+                    return interactionOutbox.commit(r2dbcEntityTemplate.insert(Like.class).using(like), saved ->
+                            likeRepository.countByTargetIdAndTargetType(targetId, targetType)
+                                    .flatMap(count -> publishLikeEvent(new LikeEventPayload(saved.getId(), actorId,
+                                            targetId, targetType, targetContext.ownerId(), targetContext.postId(),
+                                            targetContext.parentCommentId(), count, now))))
+                            .flatMap(saved -> invalidateCreatedLikeCount(targetId, targetType)
+                                    .thenReturn(new LikeToggleResponse(targetId, targetType, true, saved.getId())));
                 });
     }
 
@@ -239,16 +223,20 @@ public class LikeService {
         event.addProperty("likeCount", payload.likeCount());
         event.addProperty("timestamp", payload.timestamp() == null ? null : payload.timestamp().toString());
 
-        SenderRecord<String, String, String> record = SenderRecord.create(
-                new ProducerRecord<>(LIKE_EVENT_TOPIC, payload.targetId(), event.toString()),
-                LIKE_EVENT_TOPIC
-        );
+        event.addProperty("likeId", payload.likeId());
+        return interactionOutbox.append("LIKE:" + payload.likeId(), LIKE_EVENT_TOPIC,
+                payload.actorId(), event, payload.timestamp());
+    }
 
-        return kafkaSender.send(Mono.just(record))
-                .doOnError(error -> log.error("|LikeService|publishLikeEvent|targetId={}|error={}", payload.targetId(), error.getMessage()))
-                .doOnComplete(() -> log.info("|LikeService|publishLikeEvent|sent|actorId={}|targetId={}|targetType={}|postId={}|likeCount={}",
-                        payload.actorId(), payload.targetId(), payload.targetType(), payload.postId(), payload.likeCount()))
-                .then();
+    private Mono<Void> invalidateCreatedLikeCount(String targetId, String targetType) {
+        if (!EntityType.POST.name().equals(targetType)) return Mono.empty();
+        return withCountLock(POST_LIKE_COUNT_LOCK_PREFIX + targetId,
+                () -> reactiveRedisStringTemplate.delete(postLikeCountKey(targetId)).then(),
+                ErrorCode.LIKE_FETCH_FAILED, "Invalidate committed like count for postId=" + targetId)
+                .onErrorResume(error -> {
+                    log.warn("Committed like; count cache invalidation failed for {}", targetId, error);
+                    return Mono.empty();
+                });
     }
 
     private Mono<Long> getPostLikeCountFromCache(String postId) {

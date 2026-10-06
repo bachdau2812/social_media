@@ -1,0 +1,144 @@
+server:
+  port: 8888
+
+logging:
+  config: classpath:log4j2.xml
+
+spring:
+  application:
+    name: social-media
+  webflux:
+    base-path: /app
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 5000
+      password: Forest@#2026
+
+  elasticsearch:
+    uris: http://localhost:9200
+    username: ${ELASTICSEARCH_USERNAME}
+    password: ${ELASTICSEARCH_PASSWORD}
+
+  r2dbc:
+    url: "r2dbc:mysql://localhost:3306/ins_clone"
+    username: root
+    password: 13052004Chat.
+    pool:
+      enabled: true
+      max-idle-time: 30m
+
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID}
+            client-secret: ${GOOGLE_CLIENT_SECRET}
+            scope:
+              - email
+              - profile
+            redirect-uri: ${GOOGLE_REDIRECT_URI:http://localhost:8888/app/login/oauth2/code/google}
+            authorization-grant-type: authorization_code
+            client-name: Google
+          facebook:
+            client-id: ${FACEBOOK_CLIENT_ID}
+            client-secret: ${FACEBOOK_CLIENT_SECRET}
+            scope:
+              - email
+              - public_profile
+            redirect-uri: ${FACEBOOK_REDIRECT_URI:http://localhost:8888/app/login/oauth2/code/facebook}
+            authorization-grant-type: authorization_code
+            client-name: Facebook
+          github:
+            client-id: ${GITHUB_CLIENT_ID}
+            client-secret: ${GITHUB_CLIENT_SECRET}
+            scope:
+              - user:email
+              - read:user
+            redirect-uri: ${GITHUB_REDIRECT_URI:http://localhost:8888/app/login/oauth2/code/github}
+            authorization-grant-type: authorization_code
+            client-name: GitHub
+
+  kafka:
+    #    bootstrap-servers: 127.0.0.1:9092
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    consumer:
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${SPRING_MAIL_USERNAME}
+    password: ${SPRING_MAIL_PASSWORD}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+  springdoc:
+    api-docs:
+      path: /v3/api-docs
+    swagger-ui:
+      path: /swagger-ui.html
+
+gemini-key: ${GEMINI_KEY}
+
+firebase:
+  enabled: ${FIREBASE_ENABLED:false}
+  credentials-path: ${FIREBASE_CREDENTIALS_PATH:}
+
+jwt:
+  signerKey: ${JWT_SIGNER_KEY}
+  valid-duration: 900
+
+
+cloudinary:
+  cloud-name: "dpilnbfrs"
+  api-key: ${CLOUDINARY_API_KEY}
+  api-secret: ${CLOUDINARY_API_SECRET}
+
+post:
+  media:
+    scan:
+      api-url: http://localhost:8000/api/v1/scan
+
+app:
+  media:
+    limits:
+      image: ${MEDIA_IMAGE_MAX_SIZE:100MB}
+      video: ${MEDIA_VIDEO_MAX_SIZE:100MB}
+      audio: ${MEDIA_AUDIO_MAX_SIZE:50MB}
+  frontend:
+    oauth-success-url: ${FRONTEND_OAUTH_SUCCESS_URL:http://localhost:5173/oauth/callback}
+
+auth:
+  cookie:
+    secure: ${AUTH_COOKIE_SECURE:false}
+    same-site: ${AUTH_COOKIE_SAME_SITE:Lax}
+
+#    http://localhost:8888/app/oauth2/authorization/google
+#    http://localhost:8888/app/oauth2/authorization/facebook
+#    http://localhost:8888/app/oauth2/authorization/github
+
+music:
+  spotify:
+    service-base-url: ${MUSIC_FETCH_SERVICE_BASE_URL:http://127.0.0.1:8000}
+    service-timeout: ${MUSIC_FETCH_SERVICE_TIMEOUT:6m}
+    artifact-max-size: ${MUSIC_ARTIFACT_MAX_SIZE:100MB}
+    temp-root: ${SPOTIFY_MUSIC_TEMP_ROOT:}
+    lock-ttl: ${SPOTIFY_MUSIC_LOCK_TTL:10m}
+    max-concurrent-fetches: ${SPOTIFY_MUSIC_MAX_CONCURRENT_FETCHES:2}
+    max-queued-fetches: ${SPOTIFY_MUSIC_MAX_QUEUED_FETCHES:1000}

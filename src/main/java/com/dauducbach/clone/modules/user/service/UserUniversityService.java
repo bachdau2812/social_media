@@ -65,9 +65,6 @@ public class UserUniversityService {
                         String.format("Save user university failed for userId=%s", request.getUserId()),
                         throwable
                 ))
-                .flatMap(savedUniversity -> saveProfileComponentAudit(savedUniversity.getUserId(), "USER_UNIVERSITY", savedUniversity.getId(), "CREATE").thenReturn(savedUniversity))
-                .flatMap(savedUniversity -> publishProfileVectorRefresh(savedUniversity.getUserId(), "USER_UNIVERSITY", "CREATE", savedUniversity.getId())
-                        .thenReturn(savedUniversity))
                 .doOnSuccess(savedUniversity -> {
                     log.info("|UserUniversityService|createUserUniversity|created|id={}", savedUniversity.getId());
                     String jsonString = RedisUtil.serialize(savedUniversity);
@@ -76,6 +73,9 @@ public class UserUniversityService {
                     }
                     reactiveRedisStringTemplate.opsForValue().delete(listCacheKey).subscribe();
                 })
+                .flatMap(savedUniversity -> saveProfileComponentAudit(savedUniversity.getUserId(), "USER_UNIVERSITY", savedUniversity.getId(), "CREATE").thenReturn(savedUniversity))
+                .flatMap(savedUniversity -> publishProfileVectorRefresh(savedUniversity.getUserId(), "USER_UNIVERSITY", "CREATE", savedUniversity.getId())
+                        .thenReturn(savedUniversity))
                 .doOnError(error -> log.error("|UserUniversityService|createUserUniversity|failed to create|error={}", error.getMessage(), error));
     }
 
@@ -92,13 +92,13 @@ public class UserUniversityService {
                     if (request.getIsPublic() != null) existing.setPublic(request.getIsPublic());
                     return userUniversityRepository.save(existing);
                 })
-                .flatMap(updated -> saveProfileComponentAudit(updated.getUserId(), "USER_UNIVERSITY", updated.getId(), "UPDATE").thenReturn(updated))
-                .flatMap(updated -> publishProfileVectorRefresh(updated.getUserId(), "USER_UNIVERSITY", "UPDATE", updated.getId()).thenReturn(updated))
                 .doOnSuccess(updated -> {
                     String json = RedisUtil.serialize(updated);
                     if (json != null) reactiveRedisStringTemplate.opsForValue().set(CACHE_PREFIX + updated.getId(), json, CACHE_TTL).subscribe();
                     reactiveRedisStringTemplate.opsForValue().delete(LIST_CACHE_PREFIX + updated.getUserId()).subscribe();
                 })
+                .flatMap(updated -> saveProfileComponentAudit(updated.getUserId(), "USER_UNIVERSITY", updated.getId(), "UPDATE").thenReturn(updated))
+                .flatMap(updated -> publishProfileVectorRefresh(updated.getUserId(), "USER_UNIVERSITY", "UPDATE", updated.getId()).thenReturn(updated))
                 .onErrorMap(error -> error instanceof AppException ? error : new AppException(
                         ErrorCode.USER_UNIVERSITY_SAVE_FAILED,
                         String.format("Update user university failed for id=%s", request.getId()), error));
@@ -119,12 +119,7 @@ public class UserUniversityService {
     }
 
     private Mono<Void> publishProfileVectorRefresh(String userId, String source, String operation, String resourceId) {
-        return userProfileVectorEventPublisher.publishRefreshEvent(userId, source, operation, resourceId)
-                .onErrorResume(error -> {
-                    log.warn("|UserUniversityService|publishProfileVectorRefresh|failed|userId={}|source={}|operation={}|error={}",
-                            userId, source, operation, error.getMessage());
-                    return Mono.empty();
-                });
+        return userProfileVectorEventPublisher.publishRefreshEvent(userId, source, operation, resourceId);
     }
 
     public Mono<UserUniversity> getUserUniversityById(String id) {
@@ -232,6 +227,7 @@ public class UserUniversityService {
                             reactiveRedisStringTemplate.opsForValue().delete(cacheKey).subscribe();
                             reactiveRedisStringTemplate.opsForValue().delete(LIST_CACHE_PREFIX + university.getUserId()).subscribe();
                         })
+                        .then(Mono.defer(() -> publishProfileVectorRefresh(university.getUserId(), "USER_UNIVERSITY", "DELETE", id)))
                         .doOnError(error -> log.error("|UserUniversityService|deleteUserUniversity|failed to delete|id={}|error={}", id, error.getMessage()))
                         .onErrorMap(throwable -> throwable instanceof AppException
                                 ? throwable

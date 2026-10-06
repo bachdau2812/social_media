@@ -1,146 +1,81 @@
 package com.dauducbach.clone.utils;
 
+import com.dauducbach.clone.infrastructure.vector.VectorMath;
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 @Component
 @RequiredArgsConstructor
 public class GetVectorEmbedding {
-
-    private static final Logger log =
-            LoggerFactory.getLogger(GetVectorEmbedding.class);
-
-    private static final String MODEL = "gemini-embedding-2";
-
-    /*
-     * Gemini Embedding 2 hỗ trợ 128–3072 chiều.
-     * 768 là lựa chọn cân bằng giữa chất lượng và dung lượng lưu trữ.
-     */
-    private static final int OUTPUT_DIMENSION = 768;
-
     private final WebClient webClient;
+    @Value("${gemini-key}") private String apiKey;
+    private static final int TOKEN_LIMIT = 8192;
 
-    @Value("${gemini-key}")
-    private String apiKey;
-
-    /**
-     * Tạo embedding chung cho một đoạn văn bản đã được format.
-     */
     public Mono<List<Double>> getEmbedding(String text) {
-        if (text == null || text.isBlank()) {
-            return Mono.error(
-                    new IllegalArgumentException("Embedding text must not be blank")
-            );
-        }
-
-        log.info(
-                "|GetVectorEmbedding|getEmbedding|start|textLength={}",
-                text.length()
-        );
-
-        String uri =
-                "https://generativelanguage.googleapis.com/v1beta/models/"
-                        + MODEL
-                        + ":embedContent";
-
-        Map<String, Object> body = Map.of(
-                "model", "models/" + MODEL,
-                "content", Map.of(
-                        "parts", List.of(
-                                Map.of("text", text)
-                        )
-                ),
-                "output_dimensionality", OUTPUT_DIMENSION
-        );
-
-        return webClient.post()
-                .uri(uri)
-                .contentType(MediaType.APPLICATION_JSON)
-                .header("x-goog-api-key", apiKey)
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(GeminiEmbeddingResponse.class)
-                .map(response -> {
-                    if (response.embedding() == null
-                            || response.embedding().values() == null) {
-                        throw new AppException(
-                                ErrorCode.GET_VECTOR_EMBEDDING_FAILED
-                        );
-                    }
-
-                    return response.embedding().values();
-                })
-                .doOnSuccess(vector ->
-                        log.info(
-                                "|GetVectorEmbedding|getEmbedding|success|dimension={}",
-                                vector.size()
-                        )
-                )
-                .onErrorMap(error -> {
-                    log.error(
-                            "|GetVectorEmbedding|getEmbedding|error"
-                                    + "|textLength={}|error={}",
-                            text.length(),
-                            error.getMessage(),
-                            error
-                    );
-
-                    if (error instanceof AppException) {
-                        return error;
-                    }
-
-                    return new AppException(
-                            ErrorCode.GET_VECTOR_EMBEDDING_FAILED
-                    );
-                });
+        if (text == null || text.isBlank()) return Mono.error(new IllegalArgumentException("Embedding text must not be blank"));
+        return chunks(text).collectList().map(chunks -> {
+            if (chunks.size() == 1) return chunks.getFirst().vector();
+            List<Double> sum = new ArrayList<>(Collections.nCopies(VectorMath.DIMENSION, 0.0));
+            for (Chunk chunk : chunks) {
+                if (chunk.tokens() == null || chunk.tokens() <= 0)
+                    throw new IllegalStateException("Provider usageMetadata.promptTokenCount is required for chunk weighting");
+                for (int i = 0; i < sum.size(); i++) sum.set(i, sum.get(i) + chunk.vector().get(i) * chunk.tokens());
+            }
+            return VectorMath.normalize(sum);
+        }).onErrorMap(error -> error instanceof AppException ? error
+                : new AppException(ErrorCode.GET_VECTOR_EMBEDDING_FAILED, "Get embedding failed", error));
     }
 
-    /**
-     * Tạo embedding cho tài liệu được lưu trong vector database.
-     */
-    public Mono<List<Double>> getDocumentEmbedding(
-            String title,
-            String text
-    ) {
-        String documentTitle =
-                title == null || title.isBlank()
-                        ? "none"
-                        : title;
-
-        String preparedText =
-                "title: " + documentTitle + " | text: " + text;
-
-        return getEmbedding(preparedText);
+    private Flux<Chunk> chunks(String text) {
+        return embed(text).flatMapMany(chunk -> chunk.tokens() != null && chunk.tokens() > TOKEN_LIMIT
+                        ? split(text) : Flux.just(chunk))
+                .onErrorResume(WebClientResponseException.class, error -> tokenLimit(error) ? split(text) : Flux.error(error));
     }
 
-    /**
-     * Tạo embedding cho câu tìm kiếm của người dùng.
-     */
-    public Mono<List<Double>> getQueryEmbedding(String query) {
-        String preparedQuery =
-                "task: search result | query: " + query;
-
-        return getEmbedding(preparedQuery);
+    private Flux<Chunk> split(String text) {
+        int count = text.codePointCount(0, text.length());
+        if (count < 2) return Flux.error(new IllegalStateException("Provider rejected an indivisible embedding input"));
+        // Character boundaries select candidates only. The provider enforces token limits; usage supplies weights.
+        int boundary = text.offsetByCodePoints(0, count / 2);
+        return Flux.concat(Flux.defer(() -> chunks(text.substring(0, boundary))),
+                Flux.defer(() -> chunks(text.substring(boundary))));
     }
 
-    private record GeminiEmbeddingResponse(
-            Embedding embedding
-    ) {
+    private boolean tokenLimit(WebClientResponseException error) {
+        if (error.getStatusCode().value() != 400) return false;
+        String message = error.getResponseBodyAsString().toLowerCase(Locale.ROOT);
+        return message.contains("token") && (message.contains("input") || message.contains("content"))
+                && (message.contains("exceed") || message.contains("too many"))
+                && (message.contains("maximum") || message.contains("limit") || message.contains("8192"));
     }
 
-    private record Embedding(
-            List<Double> values
-    ) {
+    private Mono<Chunk> embed(String text) {
+        Map<String, Object> body = Map.of("model", "models/" + VectorMath.MODEL,
+                "content", Map.of("parts", List.of(Map.of("text", text))),
+                "embedContentConfig", Map.of("outputDimensionality", VectorMath.DIMENSION, "autoTruncate", false));
+        return webClient.post().uri("https://generativelanguage.googleapis.com/v1beta/models/" + VectorMath.MODEL + ":embedContent")
+                .contentType(MediaType.APPLICATION_JSON).header("x-goog-api-key", apiKey).bodyValue(body)
+                .retrieve().bodyToMono(GeminiEmbeddingResponse.class)
+                .switchIfEmpty(Mono.error(new IllegalStateException("Empty embedding provider response")))
+                .map(response -> new Chunk(VectorMath.normalize(response.embedding() == null ? null : response.embedding().values()),
+                        response.usageMetadata() == null ? null : response.usageMetadata().promptTokenCount()));
     }
+
+    public Mono<List<Double>> getDocumentEmbedding(String title, String text) {
+        return getEmbedding("title: " + (title == null || title.isBlank() ? "none" : title) + " | text: " + text);
+    }
+    public Mono<List<Double>> getQueryEmbedding(String query) { return getEmbedding("task: search result | query: " + query); }
+    private record Chunk(List<Double> vector, Integer tokens) {}
+    private record GeminiEmbeddingResponse(Embedding embedding, UsageMetadata usageMetadata) {}
+    private record Embedding(List<Double> values) {}
+    private record UsageMetadata(Integer promptTokenCount) {}
 }

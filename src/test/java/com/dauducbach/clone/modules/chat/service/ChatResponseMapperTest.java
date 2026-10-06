@@ -43,6 +43,22 @@ class ChatResponseMapperTest {
     }
 
     @Test
+    void recalledLatestMessageRedactsSummaryWithoutChangingThreadTimeUnreadOrCursors() {
+        Instant sentAt = Instant.parse("2026-07-24T00:00:00Z");
+        ChatReadRepository.ConversationListRow row = new ChatReadRepository.ConversationListRow(
+                "c1", ConversationType.DIRECT, false, "Peer", null, "u2", MessageType.TEXT,
+                "private secret", Instant.parse("2026-07-25T00:00:00Z"), 10L, "m10", sentAt, MemberRole.USER,
+                6L, 1L, null, 3L, 9L, 8L, sentAt, sentAt);
+        ConversationResponse response = mapper.toConversationResponse(row);
+        assertThat(response.lastMessagePreview()).isNotBlank().doesNotContain("private secret");
+        assertThat(response.lastMessageAt()).isEqualTo(sentAt);
+        assertThat(response.lastMessageSeq()).isEqualTo(10);
+        assertThat(response.unreadCount()).isEqualTo(3);
+        assertThat(response.recipientDeliveredSeq()).isEqualTo(9);
+        assertThat(response.recipientReadSeq()).isEqualTo(8);
+    }
+
+    @Test
     void mapsAllVisibleMessageFieldsAndValidatorMetadata() {
         Instant createdAt = Instant.parse("2026-07-24T00:00:00Z");
         Instant editedAt = Instant.parse("2026-07-24T00:01:00Z");
@@ -122,7 +138,8 @@ class ChatResponseMapperTest {
         assertThat(response.deleted()).isTrue();
         assertThat(response.id()).isEqualTo("m1");
         assertThat(response.messageSeq()).isEqualTo(1L);
-        assertThat(response.replyToSeq()).isEqualTo(2L);
+        assertThat(response.replyToSeq()).isNull();
+        assertThat(response.reply()).isNull();
         assertThat(response.content()).isNull();
         assertThat(response.metadata()).isNull();
     }

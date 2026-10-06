@@ -27,8 +27,9 @@ public class FeedController {
     public Mono<ApiResponse<FeedResponse>> getFeed(@RequestParam String userId,
                                                    Authentication authentication,
                                                    @RequestParam(defaultValue = "20") int limit,
-                                                   @RequestParam(defaultValue = "FEED") MediaDisplayType mediaType) {
-        return feedService.getFeed(requireUser(authentication, userId), limit, mediaType)
+                                                   @RequestParam(defaultValue = "FEED") MediaDisplayType mediaType,
+                                                   @RequestParam(required = false) String cursor) {
+        return feedService.getFeed(requireUser(authentication, userId), limit, mediaType, cursor)
                 .map(response -> ApiResponse.<FeedResponse>builder()
                         .message("Feed retrieved successfully")
                         .result(response)

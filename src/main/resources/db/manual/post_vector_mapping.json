@@ -1,0 +1,16 @@
+{
+  "properties": {
+    "post_id": {"type": "keyword"},
+    "author_id": {"type": "keyword"},
+    "content_vector": {"type": "dense_vector", "dims": 768, "index": true, "similarity": "cosine"},
+    "recommendation_vector": {"type": "dense_vector", "dims": 768, "index": true, "similarity": "cosine"},
+    "model": {"type": "keyword"},
+    "dimension": {"type": "integer"},
+    "schema_version": {"type": "integer"},
+    "content_fingerprint": {"type": "keyword"},
+    "source_revision": {"type": "keyword"},
+    "author_vector_version": {"type": "long"},
+    "embedding_state": {"type": "keyword"},
+    "deleted": {"type": "boolean"}
+  }
+}

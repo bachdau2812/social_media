@@ -1,5 +1,6 @@
 package com.dauducbach.clone.modules.post.service.comment;
 
+import com.dauducbach.clone.infrastructure.outbox.InteractionOutbox;
 import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
 import com.dauducbach.clone.modules.post.service.post.PostSseService;
 
@@ -17,7 +18,6 @@ import com.dauducbach.clone.modules.post.entity.Like;
 import com.dauducbach.clone.modules.post.repositoty.CommentRepository;
 import com.google.gson.JsonObject;
 import com.dauducbach.clone.utils.GsonUtils;
-import org.apache.kafka.clients.producer.ProducerRecord;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
@@ -29,8 +29,6 @@ import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.kafka.sender.KafkaSender;
-import reactor.kafka.sender.SenderRecord;
 
 import java.time.Instant;
 import java.time.Duration;
@@ -62,10 +60,10 @@ public class CommentService {
 
     CommentRepository commentRepository;
     ReactiveRedisTemplate<String, String> reactiveRedisStringTemplate;
-    KafkaSender<String, String> kafkaSender;
     PostSseService postSseService;
     R2dbcEntityTemplate r2dbcEntityTemplate;
     MediaCompatibilityFacade cloudinaryMediaService;
+    InteractionOutbox interactionOutbox;
 
     public Mono<CommentCreateResponse> createComment(CommentCreateRequest request) {
         log.info("|CommentService|createComment|start|postId={}|userId={}", request.getPostId(), request.getUserId());
@@ -86,6 +84,7 @@ public class CommentService {
                 .parentId(request.getParentId())
                 .content(request.getContent())
                 .commentType(hasMedia ? "MEDIA" : "TEXT")
+                .moderationStatus(hasMedia ? "PENDING" : "APPROVED")
                 .mediaUrl(hasMedia ? mediaList.get(0).getSecureUrl() : null)
                 .timestamp(Instant.now())
                 .build();
@@ -95,22 +94,21 @@ public class CommentService {
                 ? reactiveRedisStringTemplate.opsForValue().set(WAIT_UPLOAD_PREFIX + commentId, request.getUserId(), WAIT_UPLOAD_TTL).then()
                 : Mono.empty();
 
-        Mono<Void> sendScanEvent = hasMedia
-                ? sendCheckCommentMediaEvent(comment, mediaList)
-                : Mono.empty();
-
         return validateParent(request)
-                .then(ensurePostCommentCountCache(request.getPostId()))
-                .then(r2dbcEntityTemplate.insert(Comment.class).using(comment))
+                .then(interactionOutbox.commit(r2dbcEntityTemplate.insert(Comment.class).using(comment),
+                        saved -> hasMedia ? appendCheckCommentMediaEvent(saved, mediaList) : interactionOutbox.approvedComment(saved)))
                 .doOnSuccess(comment1 -> log.info("|CommentService|createComment|insert_success={}", comment1.getId()))
                 .doOnError(throwable -> log.error("|CommentService|createComment|insert_error|postId={}|userId={}|error={}",
                         request.getPostId(), request.getUserId(), throwable.getMessage(), throwable))
                 .flatMap(saved -> {
                     Mono<Void> postSaveAction = hasMedia
-                            ? waitKeyWrite.then(sendScanEvent)
+                            ? waitKeyWrite
                             : sendImmediateCommentSuccess(saved);
-                    return updatePostCommentCountCache(saved.getPostId(), 1)
-                            .then(postSaveAction)
+                    return invalidateCreatedCommentCount(saved.getPostId())
+                            .then(postSaveAction.onErrorResume(error -> {
+                                log.warn("Committed comment; delivery side effect failed for {}", saved.getId(), error);
+                                return Mono.empty();
+                            }))
                             .thenReturn(CommentCreateResponse.builder()
                             .commentId(saved.getId())
                             .message(hasMedia ? "Dang doi xu ly va duyet media" : "Comment created")
@@ -356,6 +354,16 @@ public class CommentService {
                 ));
     }
 
+    private Mono<Void> invalidateCreatedCommentCount(String postId) {
+        return withCountLock(POST_COMMENT_COUNT_LOCK_PREFIX + postId,
+                () -> reactiveRedisStringTemplate.delete(postCommentCountKey(postId)).then(),
+                ErrorCode.COMMENT_FETCH_FAILED, "Invalidate committed comment count for postId=" + postId)
+                .onErrorResume(error -> {
+                    log.warn("Committed comment; count cache invalidation failed for {}", postId, error);
+                    return Mono.empty();
+                });
+    }
+
     private Mono<Long> getPostCommentCountFromCache(String postId) {
         String cacheKey = postCommentCountKey(postId);
         return readLongCache(cacheKey)
@@ -581,30 +589,19 @@ public class CommentService {
         );
     }
 
-    private Mono<Void> sendCheckCommentMediaEvent(Comment comment, List<MediaUploadRequest> mediaList) {
+    private Mono<Void> appendCheckCommentMediaEvent(Comment comment, List<MediaUploadRequest> mediaList) {
         JsonObject payload = new JsonObject();
         payload.addProperty("commentId", comment.getId());
         payload.addProperty("postId", comment.getPostId());
         payload.addProperty("userId", comment.getUserId());
         payload.add("media", GsonUtils.getGson().toJsonTree(mediaList));
 
-        SenderRecord<String, String, String> record = SenderRecord.create(
-                new ProducerRecord<>("check_comment_media_event", comment.getId(), payload.toString()),
-                "check_comment_media_event"
-        );
-
-        return kafkaSender.send(Mono.just(record))
-                .doOnError(error -> log.error("|CommentService|sendCheckCommentMediaEvent|commentId={}|error={}", comment.getId(), error.getMessage()))
-                .then();
+        return interactionOutbox.append("COMMENT_SCAN:" + comment.getId(), "check_comment_media_event",
+                comment.getUserId(), payload, comment.getTimestamp());
     }
 
     private Mono<Void> sendImmediateCommentSuccess(Comment comment) {
-        return sendCommentSuccessSse(comment)
-                .then(sendCommentSuccessEvent(comment).onErrorResume(error -> {
-                    log.error("|CommentService|sendImmediateCommentSuccess|event publish failed|commentId={}|error={}",
-                            comment.getId(), error.getMessage());
-                    return Mono.empty();
-                }));
+        return sendCommentSuccessSse(comment);
     }
 
     private Mono<Void> sendCommentSuccessSse(Comment comment) {
@@ -640,22 +637,5 @@ public class CommentService {
                 payload.toString());
     }
 
-    private Mono<Void> sendCommentSuccessEvent(Comment comment) {
-        JsonObject payload = new JsonObject();
-        payload.addProperty("commentId", comment.getId());
-        payload.addProperty("userId", comment.getUserId());
-        payload.addProperty("postId", comment.getPostId());
-        payload.addProperty("content", comment.getContent());
-        payload.addProperty("mediaUrl", comment.getMediaUrl());
-        payload.addProperty("parentId", comment.getParentId());
 
-        SenderRecord<String, String, String> record = SenderRecord.create(
-                new ProducerRecord<>("comment_success_event", comment.getId(), payload.toString()),
-                "comment_success_event"
-        );
-
-        return kafkaSender.send(Mono.just(record))
-                .doOnError(error -> log.error("|CommentService|sendCommentSuccessEvent|commentId={}|error={}", comment.getId(), error.getMessage()))
-                .then();
-    }
 }

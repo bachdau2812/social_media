@@ -25,6 +25,40 @@ import static org.mockito.Mockito.when;
 class ChatMessageQueryServiceTest {
 
     @Test
+    void hydratesReactionSnapshotsInOneBatchAfterStoryAvailability() {
+        ChatAccessService access = mock(ChatAccessService.class);
+        ChatReadRepository reads = mock(ChatReadRepository.class);
+        ChatCursorService cursors = mock(ChatCursorService.class);
+        StoryAvailabilityPort availability = mock(StoryAvailabilityPort.class);
+        MessageReactionService reactions = mock(MessageReactionService.class);
+        ChatMessageQueryService service = new ChatMessageQueryService(
+                access, reads, new ChatResponseMapper(), cursors, availability, reactions);
+        Instant expiry = Instant.parse("2026-08-01T00:00:00Z");
+        when(access.requireActiveMember("conversation-1", "actor-1"))
+                .thenReturn(Mono.just(ConversationMember.builder().joinedSeq(1L).build()));
+        when(reads.findBeforeSequence("conversation-1", 1L, Long.MAX_VALUE, 21))
+                .thenReturn(Flux.just(storyReply(1, 1000, expiry), storyReply(2, 2000, expiry)));
+        when(availability.resolve(any(), any())).thenReturn(Mono.just(Map.of()));
+        when(cursors.markDelivered("actor-1", "conversation-1", 2))
+                .thenReturn(Mono.just(mock(ChatCursorResponse.class)));
+        when(reactions.getSnapshots("actor-1", "conversation-1", java.util.List.of("message-1", "message-2")))
+                .thenReturn(Mono.just(java.util.List.of(new com.dauducbach.clone.modules.chat.dto.response.ReactionSnapshot(
+                        "message-1", 1, 9, com.dauducbach.clone.modules.chat.constant.ReactionType.HEART,
+                        true, 2, java.util.List.of(new com.dauducbach.clone.modules.chat.dto.response.ReactionCount(
+                        com.dauducbach.clone.modules.chat.constant.ReactionType.HEART, 2))))));
+        StepVerifier.create(service.getMessages("actor-1", "conversation-1", null, null, 20))
+                .assertNext(page -> {
+                    var first = page.items().getFirst();
+                    assertThat(first.reactionVersion()).isEqualTo(9);
+                    assertThat(first.likeCount()).isEqualTo(2);
+                    assertThat(first.isReact()).isTrue();
+                    assertThat(first.storyContext()).isNotNull();
+                    assertThat(first.storyContext().available()).isFalse();
+                }).verifyComplete();
+        verify(reactions, times(1)).getSnapshots(any(), any(), any());
+    }
+
+    @Test
     void hydratesMultipleStoryRepliesWithOneAvailabilityBatch() {
         ChatAccessService access = mock(ChatAccessService.class);
         ChatReadRepository reads = mock(ChatReadRepository.class);

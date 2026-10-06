@@ -21,6 +21,8 @@ import reactor.kafka.sender.SenderRecord;
 public class KafkaChatEventPublisher implements ChatEventPublisher {
     private static final Logger log = LoggerFactory.getLogger(KafkaChatEventPublisher.class);
     public static final String MESSAGE_CREATED_TOPIC = "chat.message.created";
+    public static final String MESSAGE_REACTION_CHANGED_TOPIC = "chat.message.reaction.changed";
+    public static final String MESSAGE_MUTATION_TOPIC = "chat.message.mutation";
     public static final String CURSOR_UPDATED_TOPIC = "chat.cursor.updated";
     public static final String MEMBER_REQUESTED_TOPIC = "chat.member.requested";
     public static final String MEMBERSHIP_CHANGED_TOPIC = "chat.membership.changed";
@@ -41,6 +43,8 @@ public class KafkaChatEventPublisher implements ChatEventPublisher {
             return Mono.error(new AppException(ErrorCode.CHAT_EVENT_PUBLISH_FAILED, "Serialize chat event failed", error));
         }
         String topic = switch (event.type()) {
+            case MESSAGE_REACTION_CHANGED -> MESSAGE_REACTION_CHANGED_TOPIC;
+            case MESSAGE_DELETED, MESSAGE_UPDATED, PINS_CHANGED -> MESSAGE_MUTATION_TOPIC;
             case CURSOR_UPDATED -> CURSOR_UPDATED_TOPIC;
             case MEMBER_REQUESTED -> MEMBER_REQUESTED_TOPIC;
             case GROUP_CREATED, MEMBER_ADDED, MEMBER_REMOVED -> MEMBERSHIP_CHANGED_TOPIC;
@@ -51,6 +55,7 @@ public class KafkaChatEventPublisher implements ChatEventPublisher {
                 event.eventId());
 
         return kafkaSender.send(Mono.just(record))
+                .concatMap(result -> result.exception() == null ? Mono.just(result) : Mono.error(result.exception()))
                 .doOnError(error -> log.error("|KafkaChatEventPublisher|publish|failed|conversationId={}|error={}",
                         event.conversationId(), error.getMessage()))
                 .onErrorMap(error -> error instanceof AppException

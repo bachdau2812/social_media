@@ -36,7 +36,7 @@ import java.util.Set;
 import java.util.UUID;
 
 @Service
-@RequiredArgsConstructor
+@RequiredArgsConstructor(onConstructor_ = @org.springframework.beans.factory.annotation.Autowired)
 @FieldDefaults(level = lombok.AccessLevel.PRIVATE, makeFinal = true)
 public class SendMessageService {
     private static final Logger log = LoggerFactory.getLogger(SendMessageService.class);
@@ -54,6 +54,18 @@ public class SendMessageService {
     R2dbcEntityTemplate r2dbcEntityTemplate;
     MediaCompatibilityFacade cloudinaryMediaService;
     MediaService mediaService;
+    MessageReactionService reactionService;
+
+    public SendMessageService(ChatMessageRepository messageRepository, ChatReadRepository chatReadRepository,
+            ConversationRepository conversationRepository, ConversationMemberRepository memberRepository,
+            ChatAccessService accessService, ChatMessageValidator validator, ChatResponseMapper mapper,
+            ChatEventPublisher eventPublisher, TransactionalOperator transactionalOperator,
+            R2dbcEntityTemplate r2dbcEntityTemplate, MediaCompatibilityFacade cloudinaryMediaService,
+            MediaService mediaService) {
+        this(messageRepository, chatReadRepository, conversationRepository, memberRepository, accessService,
+                validator, mapper, eventPublisher, transactionalOperator, r2dbcEntityTemplate,
+                cloudinaryMediaService, mediaService, null);
+    }
 
     public Mono<ChatMessageResponse> sendMessage(String actorId, String conversationId, SendMessageRequest request) {
         String actor = requireIdentifier(actorId, "actorId");
@@ -91,8 +103,15 @@ public class SendMessageService {
                         1)
                 .next()
                 .defaultIfEmpty(storedMessage)
-                .flatMap(presentedMessage -> {
-                    ChatMessageResponse response = mapper.toChatMessageResponse(presentedMessage);
+                .map(mapper::toChatMessageResponse)
+                .flatMap(response -> {
+                    if (reactionService == null || response.deleted()
+                            || response.messageType() == com.dauducbach.clone.modules.chat.constant.MessageType.SYSTEM)
+                        return Mono.just(response);
+                    return reactionService.getSnapshots(response.senderId(), response.conversationId(), List.of(response.id()))
+                            .map(snapshots -> snapshots.isEmpty() ? response : response.withReactions(snapshots.getFirst()));
+                })
+                .flatMap(response -> {
                     if (!created) {
                         return Mono.just(response);
                     }
@@ -237,11 +256,8 @@ public class SendMessageService {
                 .createdAt(now)
                 .build();
 
-        return r2dbcEntityTemplate.insert(ChatMessage.class).using(message)
-                .flatMap(saved -> insertPreparedMedia(preparedMedia.media(), messageId, now)
-                        .then(conversationRepository.updateMessageSummary(
-                                conversation.getId(), messageSeq, saved.getId(), now))
-                        .thenReturn(saved));
+        return new ChatMessageWriter(r2dbcEntityTemplate, conversationRepository).write(message, conversation,
+                Mono.defer(() -> insertPreparedMedia(preparedMedia.media(), messageId, now)));
     }
 
     private Mono<Void> insertPreparedMedia(Media media, String messageId, Instant now) {

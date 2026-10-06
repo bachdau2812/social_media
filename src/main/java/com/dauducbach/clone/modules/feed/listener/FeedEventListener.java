@@ -1,10 +1,10 @@
 package com.dauducbach.clone.modules.feed.listener;
 
 import com.dauducbach.clone.commons.constant.EntityType;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import com.dauducbach.clone.modules.feed.constant.FeedTopics;
 import com.dauducbach.clone.modules.feed.service.FeedInteractionEventPublisher;
 import com.dauducbach.clone.modules.feed.service.FeedService;
-import com.dauducbach.clone.modules.feed.service.FeedVectorService;
 import com.dauducbach.clone.modules.user.service.UserFollowerService;
 import com.dauducbach.clone.utils.GsonUtils;
 import com.dauducbach.clone.utils.KafkaUtils;
@@ -27,7 +27,6 @@ public class FeedEventListener {
     private static final Logger log = LoggerFactory.getLogger(FeedEventListener.class);
 
     FeedService feedService;
-    FeedVectorService feedVectorService;
     FeedInteractionEventPublisher interactionEventPublisher;
     UserFollowerService userFollowerService;
 
@@ -54,44 +53,52 @@ public class FeedEventListener {
     }
 
     @KafkaListener(topics = FeedTopics.LIKE_EVENT, groupId = "feed-service")
-    public CompletableFuture<Void> handleLikeEvent(@Payload String payload) {
-        JsonObject json = GsonUtils.fromString(payload);
+    public CompletableFuture<Void> handleLikeEvent(ConsumerRecord<String, String> record) {
+        JsonObject json = GsonUtils.fromString(record.value());
         String actorId = KafkaUtils.extractString(json, "actorId");
         String targetType = KafkaUtils.extractString(json, "targetType").toUpperCase();
         String postId = EntityType.POST.name().equals(targetType)
                 ? KafkaUtils.extractString(json, "targetId")
                 : KafkaUtils.extractString(json, "postId");
 
-        return interactionEventPublisher.publishInteraction(actorId, postId, "LIKE", KafkaUtils.extractString(json, "targetId"))
+        return interactionEventPublisher.publishInteraction(actorId, postId, "LIKE", sourceId(json, "likeId", record), occurredAt(json, record))
                 .doOnError(error -> log.error("|FeedEventListener|handleLikeEvent|failed|actorId={}|postId={}|error={}",
                         actorId, postId, error.getMessage()))
                 .toFuture();
     }
 
     @KafkaListener(topics = FeedTopics.COMMENT_SUCCESS_EVENT, groupId = "feed-service")
-    public CompletableFuture<Void> handleCommentSuccessEvent(@Payload String payload) {
-        JsonObject json = GsonUtils.fromString(payload);
+    public CompletableFuture<Void> handleCommentSuccessEvent(ConsumerRecord<String, String> record) {
+        JsonObject json = GsonUtils.fromString(record.value());
         String userId = KafkaUtils.extractString(json, "userId");
         String postId = KafkaUtils.extractString(json, "postId");
         String commentId = KafkaUtils.extractString(json, "commentId");
 
-        return interactionEventPublisher.publishInteraction(userId, postId, "COMMENT", commentId)
+        return interactionEventPublisher.publishInteraction(userId, postId, "COMMENT", sourceId(json, "commentId", record), occurredAt(json, record))
                 .doOnError(error -> log.error("|FeedEventListener|handleCommentSuccessEvent|failed|userId={}|postId={}|error={}",
                         userId, postId, error.getMessage()))
                 .toFuture();
     }
 
-    @KafkaListener(topics = FeedTopics.USER_INTERACTION_EVENTS, groupId = "feed-service")
-    public CompletableFuture<Void> handleUserInteractionEvent(@Payload String payload) {
-        JsonObject json = GsonUtils.fromString(payload);
-        String userId = KafkaUtils.extractString(json, "userId");
-        String postId = KafkaUtils.extractString(json, "postId");
-        String action = KafkaUtils.extractString(json, "action");
+    @KafkaListener(topics = FeedTopics.REPOST_EVENT, groupId = "feed-service")
+    public CompletableFuture<Void> handleRepostEvent(ConsumerRecord<String, String> record) {
+        JsonObject json = GsonUtils.fromString(record.value());
+        return interactionEventPublisher.publishInteraction(KafkaUtils.extractString(json, "actorId"),
+                KafkaUtils.extractString(json, "postId"), "REPOST", sourceId(json, "repostId", record),
+                occurredAt(json, record)).toFuture();
+    }
 
-        return feedVectorService.updateShortTermVector(userId, postId, action)
-                .doOnError(error -> log.error("|FeedEventListener|handleUserInteractionEvent|failed|userId={}|postId={}|error={}",
-                        userId, postId, error.getMessage()))
-                .toFuture();
+    private String sourceId(JsonObject json, String field, ConsumerRecord<String, String> record) {
+        String persistedId = KafkaUtils.extractString(json, field);
+        return persistedId.isBlank()
+                ? "LEGACY:" + record.topic() + ":" + record.partition() + ":" + record.offset()
+                : persistedId;
+    }
+
+    private Instant occurredAt(JsonObject json, ConsumerRecord<String, String> record) {
+        String original = KafkaUtils.extractString(json, "occurredAt");
+        if (original.isBlank()) original = KafkaUtils.extractString(json, "timestamp");
+        return original.isBlank() ? Instant.ofEpochMilli(Math.max(0, record.timestamp())) : Instant.parse(original);
     }
 
     private String resolvePostId(JsonObject json) {

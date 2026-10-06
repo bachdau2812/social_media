@@ -180,15 +180,15 @@ public class MediaForProfile {
     private Mono<Void> handleAvatarSuccess(String userId, String avatarUrl, String publicId) {
         log.info("|MediaForProfile|handleAvatarSuccess|userId={}|publicId={}", userId, publicId);
         return mediaService.saveCloudinaryMedia(publicId, userId, OwnerType.AVATAR)
-                .flatMap(media -> sendAvatarSuccessSse(userId, media)
-                        .then(publishAvatarUpdateEvent(userId, avatarUrl, media.getAssetId())))
+                .flatMap(media -> publishAvatarUpdateEvent(userId, media.getSecureUrl(), media.getAssetId())
+                        .then(Mono.defer(() -> sendAvatarSuccessSse(userId, media, publicId))))
                 .doOnSuccess(v -> log.info("|MediaForProfile|handleAvatarSuccess|completed|userId={}|publicId={}", userId, publicId));
     }
 
     private Mono<Void> handleAvatarFailed(String userId, String avatarUrl, String publicId) {
         log.warn("|MediaForProfile|handleAvatarFailed|userId={}|publicId={}", userId, publicId);
         return deleteCloudinaryMedia(publicId)
-                .then(sendProfileFailureSse(userId, "avatar_upload_event", userId, OwnerType.AVATAR, avatarUrl, "Avatar rejected due to invalid media"))
+                .then(Mono.defer(() -> sendProfileFailureSse(userId, "avatar_upload_event", userId, OwnerType.AVATAR, avatarUrl, publicId, "Avatar rejected due to invalid media")))
                 .then(saveProfileMediaAudit(userId, AuditActionType.UPLOAD_AVATAR, "AVATAR", userId, "FAILURE", publicId));
     }
 
@@ -248,20 +248,23 @@ public class MediaForProfile {
                 topic
         );
         return kafkaSender.send(Mono.just(record))
+                .flatMap(result -> result.exception() == null ? Mono.just(result) : Mono.error(result.exception()))
                 .doOnError(error -> log.error("|MediaForProfile|sendKafka|topic={}|key={}|error={}", topic, key, error.getMessage()))
                 .doOnComplete(() -> log.info("|MediaForProfile|sendKafka|sent|topic={}|key={}", topic, key))
                 .then();
     }
 
-    private Mono<Void> sendAvatarSuccessSse(String userId, Media media) {
+    private Mono<Void> sendAvatarSuccessSse(String userId, Media media, String publicId) {
         JsonObject payload = baseSsePayload(userId, userId, OwnerType.AVATAR, media.getSecureUrl(), STATUS_APPROVED, "Avatar approved");
         payload.addProperty("mediaId", media.getAssetId());
+        payload.addProperty("publicId", publicId);
         return postSseService.sendToUser(userId, "avatar_upload_event", payload.toString())
                 .doOnSuccess(unused -> log.info("|MediaForProfile|sendAvatarSuccessSse|sent|userId={}|mediaId={}", userId, media.getAssetId()));
     }
 
-    private Mono<Void> sendProfileFailureSse(String userId, String eventName, String entityId, OwnerType ownerType, String mediaUrl, String message) {
+    private Mono<Void> sendProfileFailureSse(String userId, String eventName, String entityId, OwnerType ownerType, String mediaUrl, String publicId, String message) {
         JsonObject payload = baseSsePayload(userId, entityId, ownerType, mediaUrl, STATUS_REJECTED, message);
+        payload.addProperty("publicId", publicId);
         return postSseService.sendToUser(userId, eventName, payload.toString())
                 .doOnSuccess(unused -> log.info("|MediaForProfile|sendProfileFailureSse|sent|userId={}|eventName={}|entityId={}|ownerType={}",
                         userId, eventName, entityId, ownerType));

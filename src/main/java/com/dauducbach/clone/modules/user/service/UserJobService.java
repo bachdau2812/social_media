@@ -66,8 +66,6 @@ public class UserJobService {
                         String.format("Save user job failed for userId=%s", request.getUserId()),
                         throwable
                 ))
-                .flatMap(savedJob -> saveProfileComponentAudit(savedJob.getUserId(), "USER_JOB", savedJob.getId(), "CREATE").thenReturn(savedJob))
-                .flatMap(savedJob -> publishProfileVectorRefresh(savedJob.getUserId(), "USER_JOB", "CREATE", savedJob.getId()).thenReturn(savedJob))
                 .doOnSuccess(savedJob -> {
                     log.info("|UserJobService|createUserJob|created user job|id={}", savedJob.getId());
                     // Cache the new job
@@ -78,6 +76,8 @@ public class UserJobService {
                     // Invalidate user's job list cache
                     reactiveRedisStringTemplate.opsForValue().delete(listCacheKey).subscribe();
                 })
+                .flatMap(savedJob -> saveProfileComponentAudit(savedJob.getUserId(), "USER_JOB", savedJob.getId(), "CREATE").thenReturn(savedJob))
+                .flatMap(savedJob -> publishProfileVectorRefresh(savedJob.getUserId(), "USER_JOB", "CREATE", savedJob.getId()).thenReturn(savedJob))
                 .doOnError(error -> log.error("|UserJobService|createUserJob|failed to create job|error={}", error.getMessage()));
     }
 
@@ -112,15 +112,6 @@ public class UserJobService {
 
                     return userJobRepository.save(existingJob);
                 })
-                .flatMap(updatedJob -> saveProfileComponentAudit(updatedJob.getUserId(), "USER_JOB", updatedJob.getId(), "UPDATE").thenReturn(updatedJob))
-                .flatMap(updatedJob -> publishProfileVectorRefresh(updatedJob.getUserId(), "USER_JOB", "UPDATE", updatedJob.getId()).thenReturn(updatedJob))
-                .onErrorMap(throwable -> throwable instanceof AppException
-                        ? throwable
-                        : new AppException(
-                                ErrorCode.USER_JOB_UPDATE_FAILED,
-                                String.format("Update user job failed for id=%s", request.getId()),
-                                throwable
-                        ))
                 .doOnSuccess(updatedJob -> {
                     log.info("|UserJobService|updateUserJob|updated user job|id={}", updatedJob.getId());
                     // Update cache
@@ -131,6 +122,15 @@ public class UserJobService {
                     // Invalidate user's job list cache
                     reactiveRedisStringTemplate.opsForValue().delete(LIST_CACHE_PREFIX + updatedJob.getUserId()).subscribe();
                 })
+                .flatMap(updatedJob -> saveProfileComponentAudit(updatedJob.getUserId(), "USER_JOB", updatedJob.getId(), "UPDATE").thenReturn(updatedJob))
+                .flatMap(updatedJob -> publishProfileVectorRefresh(updatedJob.getUserId(), "USER_JOB", "UPDATE", updatedJob.getId()).thenReturn(updatedJob))
+                .onErrorMap(throwable -> throwable instanceof AppException
+                        ? throwable
+                        : new AppException(
+                                ErrorCode.USER_JOB_UPDATE_FAILED,
+                                String.format("Update user job failed for id=%s", request.getId()),
+                                throwable
+                        ))
                 .doOnError(error -> log.error("|UserJobService|updateUserJob|failed to update job|error={}", error.getMessage()));
     }
 
@@ -150,12 +150,7 @@ public class UserJobService {
     }
 
     private Mono<Void> publishProfileVectorRefresh(String userId, String source, String operation, String resourceId) {
-        return userProfileVectorEventPublisher.publishRefreshEvent(userId, source, operation, resourceId)
-                .onErrorResume(error -> {
-                    log.warn("|UserJobService|publishProfileVectorRefresh|failed|userId={}|source={}|operation={}|error={}",
-                            userId, source, operation, error.getMessage());
-                    return Mono.empty();
-                });
+        return userProfileVectorEventPublisher.publishRefreshEvent(userId, source, operation, resourceId);
     }
 
     public Mono<UserJob> getUserJobById(String id) {
@@ -269,6 +264,7 @@ public class UserJobService {
                             // Invalidate user's job list cache
                             reactiveRedisStringTemplate.opsForValue().delete(LIST_CACHE_PREFIX + job.getUserId()).subscribe();
                         })
+                        .then(Mono.defer(() -> publishProfileVectorRefresh(job.getUserId(), "USER_JOB", "DELETE", id)))
                         .doOnError(error -> log.error("|UserJobService|deleteUserJob|failed to delete job|id={}|error={}", id, error.getMessage()))
                 )
                 .onErrorMap(throwable -> throwable instanceof AppException

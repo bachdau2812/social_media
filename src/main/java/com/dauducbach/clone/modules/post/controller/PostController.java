@@ -5,6 +5,8 @@ import com.dauducbach.clone.commons.response.PageResponse;
 import com.dauducbach.clone.commons.security.ActorIdentity;
 import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import com.dauducbach.clone.modules.post.dto.request.PostCreateRequest;
+import com.dauducbach.clone.modules.post.dto.request.PostInteractionRequest;
+import com.dauducbach.clone.modules.post.dto.response.PostInteractionAcceptedResponse;
 import com.dauducbach.clone.modules.post.dto.request.PostUpdateRequest;
 import com.dauducbach.clone.modules.post.dto.response.PostCreateResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostDetailResponse;
@@ -27,6 +29,16 @@ public class PostController {
     private final PostService postService;
     private final PostSearchService postSearchService;
     private final PostDetailQueryService postDetailQueryService;
+
+    @PostMapping("/interaction")
+    public Mono<ResponseEntity<ApiResponse<PostInteractionAcceptedResponse>>> interact(
+            @RequestBody PostInteractionRequest request,
+            Authentication authentication) {
+        return postService.interact(authentication.getName(), request)
+                .map(result -> ResponseEntity.accepted().body(ApiResponse
+                        .<PostInteractionAcceptedResponse>builder()
+                        .message("Post interaction accepted").result(result).build()));
+    }
 
     @PostMapping
     public Mono<ApiResponse<PostCreateResponse>> createPost(@RequestBody PostCreateRequest request, Authentication authentication) {

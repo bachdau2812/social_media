@@ -3,6 +3,7 @@ package com.dauducbach.clone.modules.post.dto.event;
 import java.time.Instant;
 
 public record LikeEventPayload(
+        String likeId,
         String actorId,
         String targetId,
         String targetType,

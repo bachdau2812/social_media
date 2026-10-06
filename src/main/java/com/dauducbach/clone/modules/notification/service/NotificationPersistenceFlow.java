@@ -128,14 +128,21 @@ final class NotificationPersistenceFlow {
                 .thenReturn(true))
                 .onErrorResume(DataIntegrityViolationException.class, error -> {
                     if (!durableDedup) return Mono.error(error);
-                    log.info("|NotificationPersistenceFlow|persist|duplicate skipped|dedupKey={}", event.getDedupKey());
-                    return Mono.just(false);
+                    // Recipient-row constraint failures also reach here after event cleanup.
+                    // Suppress only a duplicate backed by an event that still exists.
+                    return eventRepository.findByDedupKey(event.getDedupKey()).hasElement()
+                            .flatMap(exists -> {
+                                if (!exists) return Mono.error(error);
+                                log.info("|NotificationPersistenceFlow|persist|duplicate skipped|dedupKey={}", event.getDedupKey());
+                                return Mono.just(false);
+                            });
                 });
     }
 
     private boolean hasDurableDedupKey(String dedupKey) {
         return dedupKey != null
                 && (dedupKey.startsWith("UP_STORY:")
+                || dedupKey.startsWith("AVATAR_UPDATE_UPLOAD:")
                 || dedupKey.startsWith("LIKE_STORY:"));
     }
 

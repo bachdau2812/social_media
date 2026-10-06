@@ -1,0 +1,20 @@
+{
+  "properties": {
+    "user_id": {"type": "keyword"},
+    "deleted": {"type": "boolean"},
+    "user_vector": {"type": "dense_vector", "dims": 768, "index": true, "similarity": "cosine"},
+    "user_long_term_vector": {"type": "dense_vector", "dims": 768, "index": true, "similarity": "cosine"},
+    "user_vector_model": {"type": "keyword"},
+    "user_vector_dimension": {"type": "integer"},
+    "user_vector_schema_version": {"type": "integer"},
+    "user_long_term_vector_model": {"type": "keyword"},
+    "user_long_term_vector_dimension": {"type": "integer"},
+    "user_long_term_vector_schema_version": {"type": "integer"},
+    "has_learned_history": {"type": "boolean"},
+    "profile_version": {"type": "long"},
+    "long_term_version": {"type": "long"},
+    "vector_version": {"type": "long"},
+    "user_profile_operation_id": {"type": "keyword"},
+    "user_long_term_operation_id": {"type": "keyword"}
+  }
+}

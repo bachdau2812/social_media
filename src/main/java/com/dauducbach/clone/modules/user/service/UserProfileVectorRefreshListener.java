@@ -1,7 +1,8 @@
 package com.dauducbach.clone.modules.user.service;
 
 import com.dauducbach.clone.modules.user.constant.UserProfileVectorTopics;
-import com.dauducbach.clone.modules.user.entity.UserDetailVector;
+import com.dauducbach.clone.infrastructure.vector.UserVectorCoordinator;
+import com.dauducbach.clone.infrastructure.vector.VectorMath;
 import com.dauducbach.clone.modules.user.entity.UserDetails;
 import com.dauducbach.clone.modules.user.entity.UserHighSchool;
 import com.dauducbach.clone.modules.user.entity.UserJob;
@@ -18,7 +19,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.data.elasticsearch.core.ReactiveElasticsearchOperations;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Service;
@@ -27,6 +27,12 @@ import reactor.core.publisher.Mono;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.UUID;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+import reactor.util.retry.Retry;
 
 @Service
 @RequiredArgsConstructor
@@ -38,19 +44,19 @@ public class UserProfileVectorRefreshListener {
     UserJobRepository userJobRepository;
     UserHighSchoolRepository userHighSchoolRepository;
     UserUniversityRepository userUniversityRepository;
-    ReactiveElasticsearchOperations elasticsearchOperations;
     GetVectorEmbedding getVectorEmbedding;
+    UserVectorCoordinator coordinator;
+    UserVectorOperationService operations;
 
     @KafkaListener(topics = UserProfileVectorTopics.PROFILE_VECTOR_REFRESH, groupId = "user-service")
     public CompletableFuture<Void> handleProfileVectorRefreshEvent(@Payload String payload) {
         JsonObject json = GsonUtils.fromString(payload);
         String userId = KafkaUtils.extractString(json, "userId");
         String source = KafkaUtils.extractString(json, "source");
-        String operation = KafkaUtils.extractString(json, "operation");
-
-        Mono<Void> refreshFlow = "CREATE".equalsIgnoreCase(operation) && json.has("profile") && json.get("profile").isJsonObject()
-                ? refreshCreatedUserVector(json.getAsJsonObject("profile"))
-                : refreshUserVector(userId);
+        String eventId = KafkaUtils.extractString(json, "eventId");
+        // Legacy queued events retain a deterministic identity on redelivery too.
+        String identity = eventId.isBlank() ? fingerprint(payload) : eventId;
+        Mono<Void> refreshFlow = refreshUserVector(userId, identity);
 
         return refreshFlow
                 .doOnSuccess(unused -> log.info("|UserProfileVectorRefreshListener|handleProfileVectorRefreshEvent|success|userId={}|source={}",
@@ -61,84 +67,51 @@ public class UserProfileVectorRefreshListener {
     }
 
     public Mono<Void> refreshUserVector(String userId) {
-        if (userId == null || userId.isBlank()) {
-            return Mono.empty();
-        }
-
-        String cleanUserId = userId.trim();
-        return buildProfileText(cleanUserId)
-                .filter(text -> !text.isBlank())
-                .flatMap(getVectorEmbedding::getEmbedding)
-                .filter(vector -> vector != null && !vector.isEmpty())
-                .flatMap(vector -> saveUserVector(cleanUserId, vector))
-                .doOnSuccess(unused -> log.info("|UserProfileVectorRefreshListener|refreshUserVector|completed|userId={}", cleanUserId))
-                .onErrorResume(error -> {
-                    log.error("|UserProfileVectorRefreshListener|refreshUserVector|failed|userId={}|error={}",
-                            cleanUserId, error.getMessage());
-                    return Mono.empty();
-                });
+        return refreshUserVector(userId, UUID.randomUUID().toString());
     }
 
+    private Mono<Void> refreshUserVector(String userId, String eventId) {
+        if (userId == null || userId.isBlank()) return Mono.empty();
+        String cleanUserId = userId.trim();
+        // Each retry rebuilds outside the lease, including retry after a changed source/OCC.
+        return Mono.defer(() -> buildProfileText(cleanUserId)
+                .flatMap(text -> getVectorEmbedding.getEmbedding(text)
+                        .switchIfEmpty(Mono.error(new IllegalStateException("Embedding returned no vector")))
+                        .map(VectorMath::normalize)
+                        .flatMap(vector -> coordinator.withUserLock(cleanUserId, lease ->
+                                buildProfileText(cleanUserId).flatMap(current -> {
+                                    if (!current.equals(text)) return Mono.error(new ProfileSourceChangedException());
+                                    String key = "profile:" + fingerprint(cleanUserId) + ":" + fingerprint(eventId) + ":" + fingerprint(current);
+                                    return operations.applyProfile(lease, key, vector).then();
+                                }))))).retryWhen(Retry.max(3)
+                        .filter(error -> error instanceof ProfileSourceChangedException
+                                || error instanceof UserVectorStore.RetryableVectorConflictException)
+                        .onRetryExhaustedThrow((spec, signal) -> signal.failure()));
+    }
+
+    /** Compatibility entry point: CREATE snapshots are hints; SQL remains authoritative. */
     public Mono<Void> refreshCreatedUserVector(JsonObject profileJson) {
-        if (profileJson == null) {
-            return Mono.empty();
-        }
-
+        if (profileJson == null) return Mono.empty();
         String userId = KafkaUtils.extractString(profileJson, "userId");
-        if (userId.isBlank()) {
-            return Mono.empty();
-        }
-
-        UserDetails details = UserDetails.builder()
-                .userId(userId)
-                .username(KafkaUtils.extractString(profileJson, "username"))
-                .fullName(KafkaUtils.extractString(profileJson, "fullName"))
-                .hometown(KafkaUtils.extractString(profileJson, "hometown"))
-                .livingIn(KafkaUtils.extractString(profileJson, "livingIn"))
-                .sex(KafkaUtils.extractString(profileJson, "sex"))
-                .dob(parseOptionalLocalDate(KafkaUtils.extractString(profileJson, "dob")))
-                .build();
-        details.setHobbyList(extractHobbyList(profileJson));
-
-        String profileText = buildProfileText(details, List.of(), List.of(), List.of());
-        return Mono.just(profileText)
-                .filter(text -> !text.isBlank())
-                .flatMap(getVectorEmbedding::getEmbedding)
-                .filter(vector -> vector != null && !vector.isEmpty())
-                .flatMap(vector -> saveUserVector(userId, vector))
-                .doOnSuccess(unused -> log.info("|UserProfileVectorRefreshListener|refreshCreatedUserVector|completed|userId={}", userId))
-                .onErrorResume(error -> {
-                    log.error("|UserProfileVectorRefreshListener|refreshCreatedUserVector|failed|userId={}|error={}",
-                            userId, error.getMessage());
-                    return Mono.empty();
-                });
+        return refreshUserVector(userId, "profile-create:" + userId);
     }
 
     Mono<String> buildProfileText(String userId) {
-        Mono<UserDetails> detailsMono = userDetailsRepository.findById(userId).defaultIfEmpty(UserDetails.builder().userId(userId).build());
-        Mono<List<UserJob>> jobsMono = userJobRepository.findByUserId(userId).collectList();
-        Mono<List<UserHighSchool>> highSchoolsMono = userHighSchoolRepository.findByUserId(userId).collectList();
-        Mono<List<UserUniversity>> universitiesMono = userUniversityRepository.findByUserId(userId).collectList();
-
-        return Mono.zip(detailsMono, jobsMono, highSchoolsMono, universitiesMono)
-                .map(tuple -> buildProfileText(tuple.getT1(), tuple.getT2(), tuple.getT3(), tuple.getT4()));
+        // Absence must remain empty; a synthetic profile could resurrect a deleted user.
+        return userDetailsRepository.findById(userId).flatMap(details -> Mono.zip(
+                userJobRepository.findByUserId(userId).collectList(),
+                userHighSchoolRepository.findByUserId(userId).collectList(),
+                userUniversityRepository.findByUserId(userId).collectList())
+                .map(tuple -> buildProfileText(details, tuple.getT1(), tuple.getT2(), tuple.getT3())));
     }
 
-    private List<String> extractHobbyList(JsonObject json) {
-        List<String> hobbyList = KafkaUtils.extractStringList(json, "hobbyList");
-        if (!hobbyList.isEmpty()) {
-            return hobbyList;
-        }
-        return KafkaUtils.extractStringList(json, "hobbieList");
+    private String fingerprint(String text) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException error) { throw new IllegalStateException(error); }
     }
 
-    private Mono<Void> saveUserVector(String userId, List<Double> vector) {
-        return elasticsearchOperations.get(userId, UserDetailVector.class)
-                .defaultIfEmpty(UserDetailVector.builder().userId(userId).build())
-                .doOnNext(userDetailVector -> userDetailVector.setUserVector(vector))
-                .flatMap(elasticsearchOperations::save)
-                .then();
-    }
+    private static class ProfileSourceChangedException extends RuntimeException {}
 
     private String buildProfileText(UserDetails details,
                                     List<UserJob> jobs,
@@ -154,27 +127,27 @@ public class UserProfileVectorRefreshListener {
         append(builder, "date_of_birth", formatDate(details.getDob()));
         append(builder, "hobbies", String.join(", ", details.getHobbyList()));
 
-        jobs.forEach(job -> append(builder, "job", joinParts(
+        jobs.stream().map(job -> joinParts(
                 job.getPosition(),
                 job.getCompanyName(),
                 formatDate(job.getFromDate()),
                 formatDate(job.getToDate())
-        )));
+        )).sorted().forEach(value -> append(builder, "job", value));
 
-        highSchools.forEach(highSchool -> append(builder, "high_school", joinParts(
+        highSchools.stream().map(highSchool -> joinParts(
                 highSchool.getSchoolName(),
                 highSchool.isGraduate() ? "graduated" : "not graduated",
                 formatDate(highSchool.getFromDate()),
                 formatDate(highSchool.getToDate())
-        )));
+        )).sorted().forEach(value -> append(builder, "high_school", value));
 
-        universities.forEach(university -> append(builder, "university", joinParts(
+        universities.stream().map(university -> joinParts(
                 university.getSchoolName(),
                 university.getMajor(),
                 university.isGraduate() ? "graduated" : "not graduated",
                 formatDate(university.getFrom()),
                 formatDate(university.getTo())
-        )));
+        )).sorted().forEach(value -> append(builder, "university", value));
 
         return builder.toString().trim();
     }
@@ -201,15 +174,4 @@ public class UserProfileVectorRefreshListener {
         return date == null ? "" : date.toString();
     }
 
-    private LocalDate parseOptionalLocalDate(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        try {
-            return LocalDate.parse(value);
-        } catch (Exception error) {
-            log.warn("|UserProfileVectorRefreshListener|parseOptionalLocalDate|invalid date={}", value);
-            return null;
-        }
-    }
 }
