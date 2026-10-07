@@ -1,7 +1,6 @@
 package com.dauducbach.clone.modules.feed.service;
 
-import com.dauducbach.clone.modules.post.entity.PostDetails;
-import com.dauducbach.clone.modules.post.service.post.PostFeedQueryService;
+import com.dauducbach.clone.modules.post.publicapi.PostFeedQuery;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -19,14 +18,14 @@ class FeedCandidatePipelineTest {
     @Test
     void vectorCandidatesLeadRecentCandidatesAndDuplicatesKeepFirstSource() {
         FeedVectorSnapshotService vectorService = mock(FeedVectorSnapshotService.class);
-        PostFeedQueryService postQuery = mock(PostFeedQueryService.class);
+        PostFeedQuery postQuery = mock(PostFeedQuery.class);
         FeedCandidatePipeline pipeline = new FeedCandidatePipeline(vectorService, postQuery);
 
         when(vectorService.load("user-1")).thenReturn(Mono.just(new com.dauducbach.clone.modules.feed.dto.FeedVectorSnapshot(1L, List.of(0.2, 0.8))));
         when(postQuery.searchRecommendedPostIds(List.of(0.2, 0.8), 10, Set.of("seen")))
                 .thenReturn(Mono.just(List.of("vector-1", "duplicate")));
-        when(postQuery.getRecentApprovedPosts(10, Set.of("seen")))
-                .thenReturn(Flux.just(post("duplicate"), post("recent-1")));
+        when(postQuery.findRecentApprovedPostIds(10, Set.of("seen")))
+                .thenReturn(Flux.just("duplicate", "recent-1"));
 
         StepVerifier.create(pipeline.select("user-1", 10, Set.of("seen")))
                 .assertNext(candidates -> {
@@ -43,11 +42,11 @@ class FeedCandidatePipelineTest {
     @Test
     void recentSourceRemainsAvailableWhenVectorSnapshotFails() {
         FeedVectorSnapshotService vectorService = mock(FeedVectorSnapshotService.class);
-        PostFeedQueryService postQuery = mock(PostFeedQueryService.class);
+        PostFeedQuery postQuery = mock(PostFeedQuery.class);
         FeedCandidatePipeline pipeline = new FeedCandidatePipeline(vectorService, postQuery);
 
         when(vectorService.load("user-1")).thenReturn(Mono.error(new IllegalStateException("vector unavailable")));
-        when(postQuery.getRecentApprovedPosts(5, Set.of())).thenReturn(Flux.just(post("recent-1")));
+        when(postQuery.findRecentApprovedPostIds(5, Set.of())).thenReturn(Flux.just("recent-1"));
 
         StepVerifier.create(pipeline.select("user-1", 5, Set.of()))
                 .assertNext(candidates -> {
@@ -57,7 +56,4 @@ class FeedCandidatePipelineTest {
                 .verifyComplete();
     }
 
-    private PostDetails post(String postId) {
-        return PostDetails.builder().postId(postId).build();
-    }
 }

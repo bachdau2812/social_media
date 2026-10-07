@@ -1,7 +1,7 @@
 package com.dauducbach.clone.modules.post.listener;
 
-import com.dauducbach.clone.configuration.PostPopularityProjectionConfig;
 import com.dauducbach.clone.configuration.PostPopularityProperties;
+import com.dauducbach.clone.modules.post.popularity.infrastructure.streams.PostPopularityProjectionConfig;
 import com.dauducbach.clone.modules.post.dto.event.PostEventJson;
 import com.dauducbach.clone.modules.post.dto.event.PostPopularityUpdate;
 import com.dauducbach.clone.modules.post.service.post.PostPopularityProjectionService;

@@ -52,6 +52,20 @@ class NotificationServiceTest {
     }
 
     @Test
+    void ordinaryNotificationPersistenceFailureIsPropagatedForConsumerRetry() {
+        NotificationService service = new NotificationService(emailService, pushNotificationService, notificationSettingRepository);
+        NotificationRequest request = NotificationRequest.builder().actionType(UserActionType.NEW_POST)
+                .recipientIds(List.of("recipient-1")).notificationType(NotificationType.PUSH).build();
+        when(notificationSettingRepository.findById("recipient-1")).thenReturn(Mono.empty());
+        when(pushNotificationService.sendPushNotification(any()))
+                .thenReturn(Mono.error(new IllegalStateException("database unavailable")));
+
+        StepVerifier.create(service.sendNotification(request))
+                .expectErrorMessage("database unavailable")
+                .verify();
+    }
+
+    @Test
     void carriesMetadataAndExplicitDeepLinkToPushService() {
         NotificationService service = new NotificationService(
                 emailService, pushNotificationService, notificationSettingRepository);

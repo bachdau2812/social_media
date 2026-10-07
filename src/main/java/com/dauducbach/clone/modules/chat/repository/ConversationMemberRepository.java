@@ -38,6 +38,16 @@ public interface ConversationMemberRepository extends R2dbcRepository<Conversati
     Flux<String> findActiveUserIds(String conversationId);
 
     @Query("""
+            SELECT * FROM conversation_members
+            WHERE conversation_id = :conversationId
+              AND member_status = 'ACTIVE'
+              AND joined_seq <= :messageSeq
+              AND (last_deleted_message_seq IS NULL OR last_deleted_message_seq < :messageSeq)
+            ORDER BY user_id
+            """)
+    Flux<ConversationMember> findVisibleActiveMembers(String conversationId, long messageSeq);
+
+    @Query("""
             SELECT user_id FROM conversation_members
             WHERE conversation_id = :conversationId
               AND member_status = 'ACTIVE'

@@ -4,7 +4,7 @@ import com.dauducbach.clone.commons.response.ApiResponse;
 import com.dauducbach.clone.commons.response.PageResponse;
 import com.dauducbach.clone.commons.security.ActorIdentity;
 import com.dauducbach.clone.modules.notification.dto.response.NotificationItemResponse;
-import com.dauducbach.clone.modules.notification.service.NotificationQueryService;
+import com.dauducbach.clone.modules.notification.publicapi.NotificationQuery;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -14,7 +14,7 @@ import reactor.core.publisher.Mono;
 @RequiredArgsConstructor
 @RequestMapping("/notifications")
 public class NotificationQueryController {
-    private final NotificationQueryService service;
+    private final NotificationQuery service;
 
     @GetMapping
     public Mono<ApiResponse<PageResponse<NotificationItemResponse>>> getNotifications(

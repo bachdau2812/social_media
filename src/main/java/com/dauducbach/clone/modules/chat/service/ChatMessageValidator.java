@@ -6,7 +6,7 @@ import com.dauducbach.clone.modules.chat.constant.MessageType;
 import com.dauducbach.clone.modules.chat.dto.request.MediaMetadataRequest;
 import com.dauducbach.clone.modules.chat.dto.request.SendMessageRequest;
 import com.dauducbach.clone.modules.chat.dto.request.StoryContextRequest;
-import com.dauducbach.clone.modules.media.configuration.MediaPolicyProperties;
+import com.dauducbach.clone.modules.media.publicapi.MediaUploadPolicy;
 import lombok.RequiredArgsConstructor;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -24,7 +24,7 @@ public class ChatMessageValidator {
     static final long MAX_AUDIO_DURATION_MS = 5L * 60 * 1000;
     private static final String BLOCK_SELECTOR = "address, article, aside, blockquote, div, dl, fieldset, figcaption, figure, footer, form, h1, h2, h3, h4, h5, h6, header, hr, li, main, nav, ol, p, pre, section, table, tr, ul";
 
-    private final MediaPolicyProperties mediaPolicy;
+    private final MediaUploadPolicy mediaPolicy;
 
     public ValidatedMessage validate(SendMessageRequest request) {
         if (request == null) {

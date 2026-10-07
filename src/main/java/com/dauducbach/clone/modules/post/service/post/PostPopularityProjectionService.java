@@ -53,10 +53,15 @@ public class PostPopularityProjectionService {
     }
 
     @Scheduled(fixedDelayString = "${post.popularity.prune-delay-ms:60000}")
-    public void pruneExpired() {
-        if (!properties.isProjectionEnabled()) return;
-        redis.execute(PRUNE, List.of(properties.getRedisKey()), List.of(Long.toString(clock.millis() - properties.getPopularLifetime().toMillis())))
-                .subscribe(count -> LOG.debug("Popularity pruned {} expired members", count), error -> LOG.warn("Popularity prune failed", error));
+    public Mono<Void> pruneExpired() {
+        return Mono.defer(() -> {
+            if (!properties.isProjectionEnabled()) return Mono.empty();
+            return redis.execute(PRUNE, List.of(properties.getRedisKey()),
+                            List.of(Long.toString(clock.millis() - properties.getPopularLifetime().toMillis())))
+                    .next()
+                    .doOnNext(count -> LOG.debug("Popularity pruned {} expired members", count))
+                    .then();
+        }).doOnError(error -> LOG.warn("Popularity prune failed", error));
     }
 
     private static RedisScript<Long> script(String path) {

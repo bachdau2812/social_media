@@ -2,21 +2,20 @@ package com.dauducbach.clone.modules.user.service;
 
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
-import com.dauducbach.clone.modules.audit.dto.AuditActionType;
-import com.dauducbach.clone.modules.audit.entity.AuditLogs;
-import com.dauducbach.clone.modules.audit.service.UserAuditService;
+import com.dauducbach.clone.modules.audit.publicapi.AuditActionType;
+import com.dauducbach.clone.modules.audit.publicapi.AuditEntry;
+import com.dauducbach.clone.modules.audit.publicapi.AuditRecorder;
 import com.dauducbach.clone.modules.user.dto.request.UserJobRequest;
 import com.dauducbach.clone.modules.user.dto.request.UserJobUpdateRequest;
 import com.dauducbach.clone.modules.user.entity.UserJob;
-import com.dauducbach.clone.modules.user.repositoty.UserJobRepository;
-import com.dauducbach.clone.utils.RedisUtil;
+import com.dauducbach.clone.modules.user.profile.application.ProfileDataCache;
+import com.dauducbach.clone.modules.user.repository.UserJobRepository;
 import com.google.gson.JsonObject;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
-import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -32,8 +31,8 @@ import java.util.UUID;
 public class UserJobService {
     UserJobRepository userJobRepository;
     R2dbcEntityTemplate r2dbcEntityTemplate;
-    ReactiveRedisTemplate<String, String> reactiveRedisStringTemplate;
-    UserAuditService userAuditService;
+    ProfileDataCache profileDataCache;
+    AuditRecorder auditRecorder;
     UserProfileVectorEventPublisher userProfileVectorEventPublisher;
 
     private static final Logger log = LoggerFactory.getLogger(UserJobService.class);
@@ -66,16 +65,10 @@ public class UserJobService {
                         String.format("Save user job failed for userId=%s", request.getUserId()),
                         throwable
                 ))
-                .doOnSuccess(savedJob -> {
-                    log.info("|UserJobService|createUserJob|created user job|id={}", savedJob.getId());
-                    // Cache the new job
-                    String jsonString = RedisUtil.serialize(savedJob);
-                    if (jsonString != null) {
-                        reactiveRedisStringTemplate.opsForValue().set(cacheKey, jsonString, CACHE_TTL).subscribe();
-                    }
-                    // Invalidate user's job list cache
-                    reactiveRedisStringTemplate.opsForValue().delete(listCacheKey).subscribe();
-                })
+                .flatMap(savedJob -> profileDataCache.put(cacheKey, savedJob, CACHE_TTL)
+                        .then(profileDataCache.evict(listCacheKey))
+                        .thenReturn(savedJob))
+                .doOnSuccess(savedJob -> log.info("|UserJobService|createUserJob|created user job|id={}", savedJob.getId()))
                 .flatMap(savedJob -> saveProfileComponentAudit(savedJob.getUserId(), "USER_JOB", savedJob.getId(), "CREATE").thenReturn(savedJob))
                 .flatMap(savedJob -> publishProfileVectorRefresh(savedJob.getUserId(), "USER_JOB", "CREATE", savedJob.getId()).thenReturn(savedJob))
                 .doOnError(error -> log.error("|UserJobService|createUserJob|failed to create job|error={}", error.getMessage()));
@@ -112,16 +105,10 @@ public class UserJobService {
 
                     return userJobRepository.save(existingJob);
                 })
-                .doOnSuccess(updatedJob -> {
-                    log.info("|UserJobService|updateUserJob|updated user job|id={}", updatedJob.getId());
-                    // Update cache
-                    String jsonString = RedisUtil.serialize(updatedJob);
-                    if (jsonString != null) {
-                        reactiveRedisStringTemplate.opsForValue().set(cacheKey, jsonString, CACHE_TTL).subscribe();
-                    }
-                    // Invalidate user's job list cache
-                    reactiveRedisStringTemplate.opsForValue().delete(LIST_CACHE_PREFIX + updatedJob.getUserId()).subscribe();
-                })
+                .flatMap(updatedJob -> profileDataCache.put(cacheKey, updatedJob, CACHE_TTL)
+                        .then(profileDataCache.evict(LIST_CACHE_PREFIX + updatedJob.getUserId()))
+                        .thenReturn(updatedJob))
+                .doOnSuccess(updatedJob -> log.info("|UserJobService|updateUserJob|updated user job|id={}", updatedJob.getId()))
                 .flatMap(updatedJob -> saveProfileComponentAudit(updatedJob.getUserId(), "USER_JOB", updatedJob.getId(), "UPDATE").thenReturn(updatedJob))
                 .flatMap(updatedJob -> publishProfileVectorRefresh(updatedJob.getUserId(), "USER_JOB", "UPDATE", updatedJob.getId()).thenReturn(updatedJob))
                 .onErrorMap(throwable -> throwable instanceof AppException
@@ -139,18 +126,16 @@ public class UserJobService {
         JsonObject metadata = new JsonObject();
         metadata.addProperty("component", component);
         metadata.addProperty("operation", operation);
-        return userAuditService.save(AuditLogs.builder()
-                .actorId(userId)
-                .action(AuditActionType.UPDATE_USER_DETAILS)
-                .resourceType(component)
-                .resourceId(resourceId)
-                .status("SUCCESS")
-                .metadata(metadata.toString())
-                .build());
+        return auditRecorder.record(new AuditEntry(userId, AuditActionType.UPDATE_USER_DETAILS,
+                component, resourceId, "SUCCESS", metadata.toString(), null));
     }
 
     private Mono<Void> publishProfileVectorRefresh(String userId, String source, String operation, String resourceId) {
         return userProfileVectorEventPublisher.publishRefreshEvent(userId, source, operation, resourceId);
+    }
+
+    private <T> Mono<T> cacheRecord(String key, T record) {
+        return profileDataCache.put(key, record, CACHE_TTL).thenReturn(record);
     }
 
     public Mono<UserJob> getUserJobById(String id) {
@@ -158,19 +143,8 @@ public class UserJobService {
 
         String cacheKey = CACHE_PREFIX + id;
 
-        return reactiveRedisStringTemplate.opsForValue().get(cacheKey)
-                .onErrorResume(error -> {
-                    log.warn("|UserJobService|getUserJobById|cache read failed, fallback to database|id={}|error={}", id, error.getMessage());
-                    return Mono.empty();
-                })
-                .flatMap(cachedJsonString -> {
-                    UserJob cachedJob = RedisUtil.deserialize(cachedJsonString, UserJob.class);
-                    if (cachedJob != null) {
-                        log.info("|UserJobService|getUserJobById|found in cache|id={}", id);
-                        return Mono.just(cachedJob);
-                    }
-                    return Mono.empty();
-                })
+        return profileDataCache.find(cacheKey, UserJob.class)
+                .doOnNext(cachedJob -> log.info("|UserJobService|getUserJobById|found in cache|id={}", id))
                 .switchIfEmpty(
                         userJobRepository.findById(id)
                                 .switchIfEmpty(Mono.error(new AppException(
@@ -184,13 +158,8 @@ public class UserJobService {
                                                 String.format("Fetch user job failed for id=%s", id),
                                                 throwable
                                         ))
-                                .doOnSuccess(job -> {
-                                    log.info("|UserJobService|getUserJobById|found in database|id={}", id);
-                                    String jsonString = RedisUtil.serialize(job);
-                                    if (jsonString != null) {
-                                        reactiveRedisStringTemplate.opsForValue().set(cacheKey, jsonString, CACHE_TTL).subscribe();
-                                    }
-                                })
+                                .flatMap(job -> cacheRecord(cacheKey, job)
+                                        .doOnNext(ignored -> log.info("|UserJobService|getUserJobById|found in database|id={}", id)))
                                 .doOnError(error -> log.error("|UserJobService|getUserJobById|failed to fetch job|id={}|error={}", id, error.getMessage()))
                 );
     }
@@ -209,16 +178,12 @@ public class UserJobService {
         }
 
         // Chỉ lấy public data, có thể cache
-        return reactiveRedisStringTemplate.opsForValue().get(listCacheKey)
-                .onErrorResume(error -> {
-                    log.warn("|UserJobService|getUserJobsByUserId|cache read failed, fallback to database|userId={}|error={}", userId, error.getMessage());
-                    return Mono.empty();
-                })
+        return profileDataCache.findList(listCacheKey, UserJob.class)
                 .flatMapMany(cachedJsonString -> {
                     if (cachedJsonString != null) {
                         log.info("|UserJobService|getUserJobsByUserId|found list in cache|userId={}", userId);
                         // Trả về public jobs từ cache
-                        return Flux.fromIterable(RedisUtil.deserializeList(cachedJsonString, UserJob.class))
+                        return Flux.fromIterable(cachedJsonString)
                                 .filter(UserJob::isPublic);
                     }
                     return Flux.empty();
@@ -235,12 +200,9 @@ public class UserJobService {
                                 .publishOn(Schedulers.boundedElastic())
                                 .doOnNext(jobs -> {
                                     log.info("|UserJobService|getUserJobsByUserId|found {} public jobs in database|userId={}", jobs.size(), userId);
-                                    String jsonString = RedisUtil.serialize(jobs);
-                                    if (jsonString != null) {
-                                        reactiveRedisStringTemplate.opsForValue().set(listCacheKey, jsonString, CACHE_TTL).subscribe();
-                                    }
                                 })
-                                .flatMapMany(Flux::fromIterable)
+                                .flatMapMany(jobs -> profileDataCache.put(listCacheKey, jobs, CACHE_TTL)
+                                        .thenMany(Flux.fromIterable(jobs)))
                                 .doOnError(error -> log.error("|UserJobService|getUserJobsByUserId|failed to fetch jobs|userId={}|error={}", userId, error.getMessage()))
                 );
     }
@@ -260,10 +222,10 @@ public class UserJobService {
                         .doOnSuccess(v -> {
                             log.info("|UserJobService|deleteUserJob|deleted job|id={}", id);
                             // Delete cache
-                            reactiveRedisStringTemplate.opsForValue().delete(cacheKey).subscribe();
                             // Invalidate user's job list cache
-                            reactiveRedisStringTemplate.opsForValue().delete(LIST_CACHE_PREFIX + job.getUserId()).subscribe();
                         })
+                        .then(profileDataCache.evict(cacheKey))
+                        .then(profileDataCache.evict(LIST_CACHE_PREFIX + job.getUserId()))
                         .then(Mono.defer(() -> publishProfileVectorRefresh(job.getUserId(), "USER_JOB", "DELETE", id)))
                         .doOnError(error -> log.error("|UserJobService|deleteUserJob|failed to delete job|id={}|error={}", id, error.getMessage()))
                 )

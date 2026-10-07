@@ -3,8 +3,10 @@ package com.dauducbach.clone.modules.user.controller;
 import com.dauducbach.clone.commons.response.ApiResponse;
 import com.dauducbach.clone.modules.user.dto.request.FollowRequest;
 import com.dauducbach.clone.modules.user.dto.response.FollowResponse;
+import com.dauducbach.clone.modules.user.dto.response.FollowerCountResponse;
 import com.dauducbach.clone.modules.user.dto.response.FollowerListResponse;
-import com.dauducbach.clone.modules.user.service.UserFollowerService;
+import com.dauducbach.clone.modules.user.publicapi.UserRelationshipQuery;
+import com.dauducbach.clone.modules.user.relationship.application.FollowUseCase;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -14,12 +16,13 @@ import reactor.core.publisher.Mono;
 @RequiredArgsConstructor
 @RequestMapping("/user-followers")
 public class UserFollowerController {
-    private final UserFollowerService userFollowerService;
+    private final FollowUseCase followUseCase;
+    private final UserRelationshipQuery relationshipQuery;
 
     /// 1. Theo dõi user (Follow)
     @PostMapping("/follow")
     public Mono<ApiResponse<FollowResponse>> followUser(@Valid @RequestBody FollowRequest request) {
-        return userFollowerService.followUser(request)
+        return followUseCase.followUser(request)
                 .map(response -> ApiResponse.<FollowResponse>builder()
                         .message(response.getMessage())
                         .result(response)
@@ -31,7 +34,7 @@ public class UserFollowerController {
     public Mono<ApiResponse<String>> unfollowUser(
             @RequestParam String followerId,
             @RequestParam String followingId) {
-        return userFollowerService.unfollowUser(followerId, followingId)
+        return followUseCase.unfollowUser(followerId, followingId)
                 .map(message -> ApiResponse.<String>builder()
                         .message(message)
                         .result(message)
@@ -41,7 +44,7 @@ public class UserFollowerController {
     /// 3. Lấy UserFollower theo ID
     @GetMapping("/{id}")
     public Mono<ApiResponse<FollowResponse>> getUserFollowerById(@PathVariable String id) {
-        return userFollowerService.getUserFollowerById(id)
+        return relationshipQuery.getUserFollowerById(id)
                 .map(response -> ApiResponse.<FollowResponse>builder()
                         .message(response.getMessage())
                         .result(response)
@@ -54,7 +57,7 @@ public class UserFollowerController {
             @PathVariable String userId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return userFollowerService.getFollowers(userId, page, size)
+        return relationshipQuery.getFollowers(userId, page, size)
                 .map(response -> ApiResponse.<FollowerListResponse>builder()
                         .message("Followers retrieved successfully")
                         .result(response)
@@ -67,7 +70,7 @@ public class UserFollowerController {
             @PathVariable String userId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return userFollowerService.getFollowing(userId, page, size)
+        return relationshipQuery.getFollowing(userId, page, size)
                 .map(response -> ApiResponse.<FollowerListResponse>builder()
                         .message("Following retrieved successfully")
                         .result(response)
@@ -79,7 +82,7 @@ public class UserFollowerController {
     public Mono<ApiResponse<Boolean>> isFollowing(
             @RequestParam String followerId,
             @RequestParam String followingId) {
-        return userFollowerService.isFollowing(followerId, followingId)
+        return relationshipQuery.isFollowing(followerId, followingId)
                 .map(isFollowing -> ApiResponse.<Boolean>builder()
                         .message("Follow status checked successfully")
                         .result(isFollowing)
@@ -88,9 +91,9 @@ public class UserFollowerController {
 
     /// Lấy follower counts
     @GetMapping("/counts/{userId}")
-    public Mono<ApiResponse<UserFollowerService.FollowerCountResponse>> getFollowerCounts(@PathVariable String userId) {
-        return userFollowerService.getFollowerCounts(userId)
-                .map(counts -> ApiResponse.<UserFollowerService.FollowerCountResponse>builder()
+    public Mono<ApiResponse<FollowerCountResponse>> getFollowerCounts(@PathVariable String userId) {
+        return relationshipQuery.getFollowerCounts(userId)
+                .map(counts -> ApiResponse.<FollowerCountResponse>builder()
                         .message("Follower counts retrieved successfully")
                         .result(counts)
                         .build());

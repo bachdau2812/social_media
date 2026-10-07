@@ -4,7 +4,7 @@ import com.dauducbach.clone.commons.response.ApiResponse;
 import com.dauducbach.clone.commons.response.PageResponse;
 import com.dauducbach.clone.modules.user.dto.response.SearchSuggestionResponse;
 import com.dauducbach.clone.modules.user.service.SearchSuggestionService;
-import com.dauducbach.clone.modules.user.service.UserSearchService;
+import com.dauducbach.clone.modules.user.publicapi.UserSearchQuery;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,7 +23,7 @@ import java.util.List;
 public class UserSearchController {
     private static final Logger log = LoggerFactory.getLogger(UserSearchController.class);
     private final SearchSuggestionService searchSuggestionService;
-    private final UserSearchService userSearchService;
+    private final UserSearchQuery userSearchService;
 
     @GetMapping("/suggestions")
     public Mono<ApiResponse<List<SearchSuggestionResponse>>> getSuggestions(

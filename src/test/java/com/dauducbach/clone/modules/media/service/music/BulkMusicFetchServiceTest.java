@@ -8,6 +8,7 @@ import com.dauducbach.clone.modules.media.dto.music.response.BulkMusicFetchItemR
 import com.dauducbach.clone.modules.media.dto.music.response.MusicFetchAcceptedResponse;
 import com.dauducbach.clone.modules.media.entity.music.Musics;
 import com.dauducbach.clone.modules.media.repository.MusicsRepository;
+import com.dauducbach.clone.modules.media.music.fetch.FetchMusicUseCase;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -33,7 +34,7 @@ class BulkMusicFetchServiceTest {
     private static final String TRACK_3 = "3n3Ppam7vgaVa1iaRUc9Lp";
 
     @Mock MusicsRepository repository;
-    @Mock SpotifyMusicFetchService spotifyMusicFetchService;
+    @Mock FetchMusicUseCase spotifyMusicFetchService;
 
     @Test
     void rejectsInvalidBatchRequestsBeforeSelection() {

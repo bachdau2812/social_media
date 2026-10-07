@@ -2,9 +2,9 @@ package com.dauducbach.clone.modules.post.service.post;
 
 import com.dauducbach.clone.modules.post.entity.PostDetails;
 import com.dauducbach.clone.modules.post.elastic.PostVector;
-import com.dauducbach.clone.modules.post.repositoty.PostItemRepository;
-import com.dauducbach.clone.modules.post.repositoty.PostDetailsRepository;
-import com.dauducbach.clone.modules.post.repositoty.projection.FriendFeedActivityProjection;
+import com.dauducbach.clone.modules.post.repository.PostItemRepository;
+import com.dauducbach.clone.modules.post.repository.PostDetailsRepository;
+import com.dauducbach.clone.modules.post.repository.projection.FriendFeedActivityProjection;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.elasticsearch.core.ReactiveElasticsearchOperations;
 import reactor.core.publisher.Flux;
@@ -90,7 +90,9 @@ class PostFeedQueryServiceTest {
                 .embeddingState("READY").sourceRevision(new PostEmbeddingTextBuilder().revision(source, java.util.List.of()))
                 .contentVector(PostVectorServiceTest.axis(0)).recommendationVector(PostVectorServiceTest.axis(1)).build();
         when(es.get("p", PostVector.class)).thenReturn(Mono.just(doc));
-        StepVerifier.create(service(posts, es).getPostRecommendationVector("p")).expectNext(PostVectorServiceTest.axis(1)).verifyComplete();
+        PostFeedQueryService service = service(posts, es);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "recommendationEnabled", true);
+        StepVerifier.create(service.getRecommendationVector("p")).expectNext(PostVectorServiceTest.axis(1)).verifyComplete();
         doc.setRecommendationVector(null);
         StepVerifier.create(service(posts, es).getPostVector("p")).expectNext(PostVectorServiceTest.axis(0)).verifyComplete();
     }

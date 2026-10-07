@@ -3,7 +3,7 @@ package com.dauducbach.clone.modules.chat.service;
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.chat.constant.*;
-import com.dauducbach.clone.modules.chat.dto.event.ChatEvent;
+import com.dauducbach.clone.modules.chat.publicapi.ChatEvent;
 import com.dauducbach.clone.modules.chat.dto.response.*;
 import com.dauducbach.clone.modules.chat.entity.ConversationMember;
 import com.dauducbach.clone.modules.chat.repository.*;

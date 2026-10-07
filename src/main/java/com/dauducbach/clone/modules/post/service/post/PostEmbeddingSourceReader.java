@@ -1,6 +1,6 @@
 package com.dauducbach.clone.modules.post.service.post;
 import com.dauducbach.clone.modules.post.entity.*;
-import com.dauducbach.clone.modules.post.repositoty.*;
+import com.dauducbach.clone.modules.post.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;

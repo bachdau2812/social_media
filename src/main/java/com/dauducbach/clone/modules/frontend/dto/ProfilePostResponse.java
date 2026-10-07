@@ -1,7 +1,6 @@
 package com.dauducbach.clone.modules.frontend.dto;
 
-import com.dauducbach.clone.modules.post.dto.response.PostItemResponse;
-import com.dauducbach.clone.modules.post.dto.response.PostMusicResponse;
+import com.dauducbach.clone.modules.post.publicapi.PostPresentationSnapshot;
 
 import java.time.Instant;
 import java.util.List;
@@ -15,8 +14,8 @@ public record ProfilePostResponse(
         String content,
         List<String> hashtags,
         String mediaRatio,
-        PostItemResponse firstItem,
-        PostMusicResponse music,
+        PostPresentationSnapshot.Item firstItem,
+        PostPresentationSnapshot.Music music,
         long likeCount,
         long commentCount,
         long repostCount,

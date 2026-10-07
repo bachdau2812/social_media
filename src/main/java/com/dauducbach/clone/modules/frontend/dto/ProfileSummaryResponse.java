@@ -1,11 +1,11 @@
 package com.dauducbach.clone.modules.frontend.dto;
 
-import com.dauducbach.clone.modules.user.service.UserProfileCompositionQueryService.HighSchoolSnapshot;
-import com.dauducbach.clone.modules.user.service.UserProfileCompositionQueryService.JobSnapshot;
-import com.dauducbach.clone.modules.user.service.UserProfileCompositionQueryService.MediaSnapshot;
-import com.dauducbach.clone.modules.user.service.UserProfileCompositionQueryService.SocialMediaSnapshot;
-import com.dauducbach.clone.modules.user.service.UserProfileCompositionQueryService.UniversitySnapshot;
-import com.dauducbach.clone.modules.user.service.UserProfileCompositionQueryService.UserDetailsSnapshot;
+import com.dauducbach.clone.modules.user.publicapi.UserProfileQuery.HighSchoolSnapshot;
+import com.dauducbach.clone.modules.user.publicapi.UserProfileQuery.JobSnapshot;
+import com.dauducbach.clone.modules.user.publicapi.UserProfileQuery.MediaSnapshot;
+import com.dauducbach.clone.modules.user.publicapi.UserProfileQuery.SocialMediaSnapshot;
+import com.dauducbach.clone.modules.user.publicapi.UserProfileQuery.UniversitySnapshot;
+import com.dauducbach.clone.modules.user.publicapi.UserProfileQuery.UserDetailsSnapshot;
 
 import java.util.List;
 

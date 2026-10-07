@@ -3,7 +3,7 @@ package com.dauducbach.clone.modules.auth.controller;
 import com.dauducbach.clone.modules.auth.dto.request.LoginRequest;
 import com.dauducbach.clone.modules.auth.dto.response.AuthenticationResponse;
 import com.dauducbach.clone.modules.auth.service.UserAccountQueryService;
-import com.dauducbach.clone.modules.auth.service.AuthCookieService;
+import com.dauducbach.clone.modules.auth.infrastructure.http.AuthCookieService;
 import com.dauducbach.clone.modules.auth.service.AuthenticationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

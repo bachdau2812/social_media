@@ -1,6 +1,6 @@
 package com.dauducbach.clone.modules.audit.entity;
 
-import com.dauducbach.clone.modules.audit.dto.AuditActionType;
+import com.dauducbach.clone.modules.audit.publicapi.AuditActionType;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 import org.springframework.data.annotation.Id;

@@ -5,8 +5,8 @@ import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import com.dauducbach.clone.modules.post.dto.response.PostDetailResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostItemResponse;
 import com.dauducbach.clone.modules.post.dto.response.RichPostSearchResponse;
-import com.dauducbach.clone.modules.media.entity.Media;
-import com.dauducbach.clone.modules.user.service.MediaForProfile;
+import com.dauducbach.clone.modules.media.publicapi.MediaAssetView;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentityQuery;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -23,7 +23,7 @@ public class RichPostSearchService {
 
     private final PostSearchService postSearchService;
     private final PostDetailQueryService postDetailQueryService;
-    private final MediaForProfile mediaForProfile;
+    private final UserIdentityQuery userIdentityQuery;
 
     public Mono<PageResponse<RichPostSearchResponse>> search(String query, int page, int limit) {
         return postSearchService.searchPosts(query, page, limit)
@@ -40,16 +40,10 @@ public class RichPostSearchService {
 
     private Mono<RichPostSearchResponse> hydrate(String postId) {
         return postDetailQueryService.getPostDetail(postId, MediaDisplayType.SEARCH_THUMBNAIL)
-                .flatMap(detail -> currentAvatar(detail.userId())
-                        .map(avatar -> toResponse(detail, avatar)));
-    }
-
-    private Mono<String> currentAvatar(String userId) {
-        return mediaForProfile.getCurrentAvatar(userId, MediaDisplayType.AVATAR)
-                .map(Optional::of)
-                .defaultIfEmpty(Optional.empty())
-                .onErrorReturn(Optional.empty())
-                .map(avatar -> avatar.map(this::avatarUrl).orElse(""));
+                .flatMap(detail -> userIdentityQuery.findIdentity(detail.userId())
+                        .map(identity -> toResponse(detail, identity.avatarUrl()))
+                        .defaultIfEmpty(toResponse(detail, ""))
+                        .onErrorReturn(toResponse(detail, "")));
     }
 
     private RichPostSearchResponse toResponse(PostDetailResponse detail, String avatarUrl) {
@@ -76,10 +70,4 @@ public class RichPostSearchService {
         );
     }
 
-    private String avatarUrl(Media media) {
-        if (media.getSecureUrl() != null && !media.getSecureUrl().isBlank()) {
-            return media.getSecureUrl().trim();
-        }
-        return media.getUrl() == null ? "" : media.getUrl().trim();
-    }
 }

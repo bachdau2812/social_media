@@ -11,7 +11,7 @@ import com.dauducbach.clone.modules.auth.dto.request.RefreshTokenRequest;
 import com.dauducbach.clone.modules.auth.dto.response.IntrospectResponse;
 import com.dauducbach.clone.modules.auth.dto.response.LoginResponse;
 import com.dauducbach.clone.modules.auth.service.AuthenticationService;
-import com.dauducbach.clone.modules.auth.service.AuthCookieService;
+import com.dauducbach.clone.modules.auth.infrastructure.http.AuthCookieService;
 import com.dauducbach.clone.modules.auth.service.UserAccountQueryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;

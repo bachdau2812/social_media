@@ -1,12 +1,12 @@
 package com.dauducbach.clone.modules.post.service.post;
 
-import com.dauducbach.clone.infrastructure.vector.VectorMath;
+import com.dauducbach.clone.commons.vector.VectorMath;
 import com.dauducbach.clone.modules.post.entity.*;
 import com.dauducbach.clone.modules.post.elastic.PostVector;
-import com.dauducbach.clone.modules.post.repositoty.*;
-import com.dauducbach.clone.modules.user.dto.UserVectorSnapshot;
-import com.dauducbach.clone.modules.user.service.UserVectorSnapshotService;
-import com.dauducbach.clone.utils.GetVectorEmbedding;
+import com.dauducbach.clone.modules.post.repository.*;
+import com.dauducbach.clone.modules.post.publicapi.PostAuthorPreferenceContext;
+import com.dauducbach.clone.modules.post.publicapi.PostAuthorPreferenceQuery;
+import com.dauducbach.clone.modules.embedding.publicapi.TextEmbeddingProvider;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.elasticsearch.core.query.SeqNoPrimaryTerm;
 import reactor.core.publisher.*;
@@ -20,9 +20,9 @@ import static org.assertj.core.api.Assertions.*;
 class PostVectorServiceTest {
     final PostDetailsRepository posts = mock(PostDetailsRepository.class);
     final PostItemRepository items = mock(PostItemRepository.class);
-    final GetVectorEmbedding embeddings = mock(GetVectorEmbedding.class);
+    final TextEmbeddingProvider embeddings = mock(TextEmbeddingProvider.class);
     final PostVectorStore store = mock(PostVectorStore.class);
-    final UserVectorSnapshotService snapshots = mock(UserVectorSnapshotService.class);
+    final PostAuthorPreferenceQuery authorPreferences = mock(PostAuthorPreferenceQuery.class);
     final AtomicReference<PostDetails> current = new AtomicReference<>(post("text"));
     final AtomicReference<List<PostItem>> media = new AtomicReference<>(List.of());
     final AtomicReference<PostVector> saved = new AtomicReference<>();
@@ -35,8 +35,8 @@ class PostVectorServiceTest {
         when(store.commit(any(), any())).thenAnswer(i -> Mono.fromRunnable(() -> saved.set(i.getArgument(0))));
         when(store.retainDeletionTombstone(anyString(), any())).thenReturn(Mono.empty());
         when(embeddings.getEmbedding(anyString())).thenReturn(Mono.just(axis(0)));
-        when(snapshots.load("a")).thenReturn(Mono.just(snapshot(List.of(), axis(1))));
-        service = new PostVectorService(embeddings, store, new PostEmbeddingSourceReader(posts, items, text), snapshots);
+        when(authorPreferences.loadPostAuthorContext("a")).thenReturn(Mono.just(snapshot(List.of(), axis(1))));
+        service = new PostVectorService(embeddings, store, new PostEmbeddingSourceReader(posts, items, text), authorPreferences);
     }
     @Test void mixesContentAndHistoricalAuthorAndPersistsSeparateRawSearchVector() {
         service.rebuild("p").block();
@@ -49,13 +49,13 @@ class PostVectorServiceTest {
         assertThat(saved.get().getSourceRevision()).isEqualTo(text.revision(current.get(), media.get()));
     }
     @Test void usesProfileWhenLongTermMissing() {
-        when(snapshots.load("a")).thenReturn(Mono.just(snapshot(axis(2), List.of())));
+        when(authorPreferences.loadPostAuthorContext("a")).thenReturn(Mono.just(snapshot(axis(2), List.of())));
         service.rebuild("p").block();
         assertThat(saved.get()).isNotNull();
         assertThat(saved.get().getRecommendationVector()).isEqualTo(VectorMath.mix(axis(0), .7, axis(2), .3));
     }
     @Test void missingAuthorUsesContentOnly() {
-        when(snapshots.load("a")).thenReturn(Mono.empty()); service.rebuild("p").block();
+        when(authorPreferences.loadPostAuthorContext("a")).thenReturn(Mono.empty()); service.rebuild("p").block();
         assertThat(saved.get()).isNotNull(); assertThat(saved.get().getRecommendationVector()).isEqualTo(axis(0));
     }
     @Test void emptyTextUsesAuthorOnlyWithoutProvider() {
@@ -64,7 +64,7 @@ class PostVectorServiceTest {
         assertThat(saved.get().getContentVector()).isNullOrEmpty(); verifyNoInteractions(embeddings);
     }
     @Test void noInputPersistsCurrentSkipState() {
-        current.set(post(" ")); when(snapshots.load("a")).thenReturn(Mono.empty()); service.rebuild("p").block();
+        current.set(post(" ")); when(authorPreferences.loadPostAuthorContext("a")).thenReturn(Mono.empty()); service.rebuild("p").block();
         assertThat(saved.get()).isNotNull(); assertThat(saved.get().getEmbeddingState()).isEqualTo("SKIPPED_NO_INPUT");
         assertThat(saved.get().getRecommendationVector()).isNullOrEmpty(); verifyNoInteractions(embeddings);
     }
@@ -75,7 +75,7 @@ class PostVectorServiceTest {
         verify(store, never()).commit(any(), any());
     }
     @Test void authorInfrastructureFailureCannotBeTreatedAsMissing() {
-        RuntimeException failure = new RuntimeException("ES unavailable"); when(snapshots.load("a")).thenReturn(Mono.error(failure));
+        RuntimeException failure = new RuntimeException("ES unavailable"); when(authorPreferences.loadPostAuthorContext("a")).thenReturn(Mono.error(failure));
         StepVerifier.create(service.rebuild("p")).expectErrorMatches(e -> e == failure).verify(); verifyNoInteractions(embeddings);
     }
     @Test void commitRetryReusesComputedRawEmbeddingByFingerprint() {
@@ -86,7 +86,7 @@ class PostVectorServiceTest {
     }
     @Test void fingerprintCacheReusesRawVectorAndStillUpdatesRevisionAndAuthorSnapshot() {
         PostVector prior = ready(); saved.set(prior);
-        current.get().setMediaRatio("4:3"); when(snapshots.load("a")).thenReturn(Mono.just(snapshot(List.of(), axis(2))));
+        current.get().setMediaRatio("4:3"); when(authorPreferences.loadPostAuthorContext("a")).thenReturn(Mono.just(snapshot(List.of(), axis(2))));
         service.rebuild("p").block();
         verifyNoInteractions(embeddings); assertThat(saved.get().getSourceRevision()).isNotEqualTo(prior.getSourceRevision());
         assertThat(saved.get().getRecommendationVector()).isEqualTo(VectorMath.mix(axis(0), .7, axis(2), .3));
@@ -94,7 +94,7 @@ class PostVectorServiceTest {
     }
     @Test void unchangedReadySourceDoesNotCascadeAuthorChanges() {
         saved.set(ready()); service.rebuild("p").block();
-        verifyNoInteractions(embeddings, snapshots); verify(store, never()).commit(any(), any());
+        verifyNoInteractions(embeddings, authorPreferences); verify(store, never()).commit(any(), any());
     }
     @Test void changedSourceDuringEmbeddingDiscardsOldComputation() {
         Sinks.One<List<Double>> pending = Sinks.one(); when(embeddings.getEmbedding("text")).thenReturn(pending.asMono());
@@ -137,7 +137,7 @@ class PostVectorServiceTest {
     }
     static PostDetails post(String content) { return PostDetails.builder().postId("p").userId("a").validateStatus("APPROVED").content(content).build(); }
     static List<Double> axis(int index) { List<Double> vector = new ArrayList<>(Collections.nCopies(768, 0.0)); vector.set(index, 1.0); return vector; }
-    static UserVectorSnapshot snapshot(List<Double> profile, List<Double> longTerm) { return new UserVectorSnapshot(7, profile, longTerm, List.of(), true, VectorMath.MODEL); }
+    static PostAuthorPreferenceContext snapshot(List<Double> profile, List<Double> longTerm) { return new PostAuthorPreferenceContext(7, profile, longTerm, VectorMath.MODEL); }
     PostVector ready() { return PostVector.builder().postId("p").authorId("a").model(VectorMath.MODEL).dimension(768).schemaVersion(1)
             .contentVector(axis(0)).recommendationVector(axis(1)).contentFingerprint(text.fingerprint(current.get(), media.get()))
             .sourceRevision(text.revision(current.get(), media.get())).embeddingState("READY").seqNoPrimaryTerm(new SeqNoPrimaryTerm(3_000_000_000L, 2)).build(); }

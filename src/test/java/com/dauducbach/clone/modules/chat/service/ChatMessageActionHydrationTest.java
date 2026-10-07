@@ -2,6 +2,7 @@ package com.dauducbach.clone.modules.chat.service;
 import com.dauducbach.clone.modules.chat.constant.MessageType;
 import com.dauducbach.clone.modules.chat.entity.ChatMessage;
 import com.dauducbach.clone.modules.chat.repository.ChatReadRepository;
+import com.dauducbach.clone.modules.post.publicapi.StoryQuery;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -18,7 +19,7 @@ class ChatMessageActionHydrationTest {
         var messages=java.util.stream.IntStream.range(0,101).mapToObj(i->mapper.toChatMessageResponse(ChatMessage.builder()
             .id("m"+i).conversationId("c").messageSeq(i+1).messageType(MessageType.TEXT).build())).toList();
         var service=new ChatMessageQueryService(mock(ChatAccessService.class),mock(ChatReadRepository.class),mapper,
-            mock(ChatCursorService.class),mock(StoryAvailabilityPort.class),reactions);
+            mock(StoryQuery.class),reactions);
         StepVerifier.create(service.hydrateMessages("me","c",messages)).expectNextMatches(items->items.size()==101).verifyComplete();
         verify(reactions,times(2)).getSnapshots(eq("me"),eq("c"),anyList());
     }

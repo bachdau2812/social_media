@@ -3,8 +3,8 @@ package com.dauducbach.clone.modules.post.service.post;
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.commons.response.PageResponse;
-import com.dauducbach.clone.infrastructure.SemanticVectorSearchService;
-import com.dauducbach.clone.modules.post.repositoty.PostDetailsRepository;
+import com.dauducbach.clone.modules.post.repository.PostDetailsRepository;
+import com.dauducbach.clone.modules.semanticsearch.publicapi.SemanticVectorSearch;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
@@ -28,7 +28,7 @@ public class PostSearchService {
     private static final int SEMANTIC_FILL_THRESHOLD = 10;
 
     PostDetailsRepository postDetailsRepository;
-    SemanticVectorSearchService semanticVectorSearchService;
+    SemanticVectorSearch semanticVectorSearchService;
 
     public Mono<PageResponse<String>> searchPosts(String query, int page, int limit) {
         String normalizedQuery = normalizeQuery(query);

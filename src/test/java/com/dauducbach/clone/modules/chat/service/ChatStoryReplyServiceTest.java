@@ -4,6 +4,7 @@ import com.dauducbach.clone.modules.chat.constant.MessageType;
 import com.dauducbach.clone.modules.chat.dto.request.SendMessageRequest;
 import com.dauducbach.clone.modules.chat.dto.response.ChatMessageResponse;
 import com.dauducbach.clone.modules.chat.dto.response.ConversationResponse;
+import com.dauducbach.clone.modules.chat.publicapi.StoryReplySender;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -23,16 +24,21 @@ class ChatStoryReplyServiceTest {
         ConversationService conversations = mock(ConversationService.class);
         SendMessageService messages = mock(SendMessageService.class);
         ChatStoryReplyService service = new ChatStoryReplyService(conversations, messages);
-        StoryReplyMessaging.StoryReplyCommand command = new StoryReplyMessaging.StoryReplyCommand(
+        StoryReplySender.StoryReplyCommand command = new StoryReplySender.StoryReplyCommand(
                 "sender-1", "story-1", "owner-1", "hello", "client-1",
                 "VIDEO", 12400L, Instant.parse("2026-08-01T00:00:00Z"));
         ConversationResponse conversation = mock(ConversationResponse.class);
         when(conversation.id()).thenReturn("conversation-1");
         ChatMessageResponse sent = mock(ChatMessageResponse.class);
+        when(sent.conversationId()).thenReturn("conversation-1");
+        when(sent.id()).thenReturn("message-1");
+        when(sent.messageSeq()).thenReturn(17L);
         when(conversations.createDirect(any(), any())).thenReturn(Mono.just(conversation));
         when(messages.sendMessage(any(), any(), any())).thenReturn(Mono.just(sent));
 
-        StepVerifier.create(service.send(command)).expectNext(sent).verifyComplete();
+        StepVerifier.create(service.send(command))
+                .expectNext(new StoryReplySender.StoryReplyMessage("conversation-1", "message-1", 17L))
+                .verifyComplete();
 
         var directRequest = org.mockito.ArgumentCaptor.forClass(
                 com.dauducbach.clone.modules.chat.dto.request.CreateDirectConversationRequest.class);

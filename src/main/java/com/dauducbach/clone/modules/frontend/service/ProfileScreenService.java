@@ -4,9 +4,13 @@ import com.dauducbach.clone.modules.frontend.dto.ConnectionUserResponse;
 import com.dauducbach.clone.modules.frontend.dto.ConnectionsResponse;
 import com.dauducbach.clone.modules.frontend.dto.ProfilePostResponse;
 import com.dauducbach.clone.modules.frontend.dto.ProfileSummaryResponse;
-import com.dauducbach.clone.modules.post.service.post.PostProfileQueryService;
-import com.dauducbach.clone.modules.user.service.UserIdentityQueryService;
-import com.dauducbach.clone.modules.user.service.UserProfileCompositionQueryService;
+import com.dauducbach.clone.modules.post.publicapi.PostProfileQuery;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentity;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentityQuery;
+import com.dauducbach.clone.modules.user.publicapi.UserProfileQuery;
+import com.dauducbach.clone.modules.user.publicapi.UserProfileQuery.ConnectionSnapshot;
+import com.dauducbach.clone.modules.user.publicapi.UserProfileQuery.ProfileBundleSnapshot;
+import com.dauducbach.clone.modules.user.publicapi.UserProfileQuery.ProfileRelationshipSnapshot;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -21,9 +25,9 @@ import java.util.Locale;
 public class ProfileScreenService {
     private static final int CONNECTION_FETCH_LIMIT = 500;
 
-    private final UserProfileCompositionQueryService profileQueryService;
-    private final UserIdentityQueryService userIdentityQueryService;
-    private final PostProfileQueryService postProfileQueryService;
+    private final UserProfileQuery profileQueryService;
+    private final UserIdentityQuery userIdentityQueryService;
+    private final PostProfileQuery postProfileQueryService;
 
     public Mono<ProfileSummaryResponse> getProfile(String viewerId, String userId, int postLimit) {
         int safePostLimit = postLimit <= 0 ? 12 : Math.min(postLimit, 50);
@@ -46,8 +50,8 @@ public class ProfileScreenService {
                 recentPosts,
                 repostedPosts
         ).map(tuple -> {
-            UserProfileCompositionQueryService.ProfileBundleSnapshot profile = tuple.getT1();
-            UserProfileCompositionQueryService.ProfileRelationshipSnapshot relationship =
+            ProfileBundleSnapshot profile = tuple.getT1();
+            ProfileRelationshipSnapshot relationship =
                     profile.relationship();
             return new ProfileSummaryResponse(
                     profile.user(),
@@ -99,7 +103,7 @@ public class ProfileScreenService {
                         userId, safeTab, List.of(), 0, safePage, safeSize, false, safePage > 0));
     }
 
-    private ProfilePostResponse toProfilePost(PostProfileQueryService.ProfilePostSnapshot post) {
+    private ProfilePostResponse toProfilePost(PostProfileQuery.ProfilePostSnapshot post) {
         return new ProfilePostResponse(
                 post.postId(),
                 post.userId(),
@@ -138,7 +142,7 @@ public class ProfileScreenService {
                         followsViewer
                 )
                 .map(tuple -> {
-                    UserIdentityQueryService.IdentitySnapshot user = tuple.getT1();
+                    UserIdentity user = tuple.getT1();
                     boolean isFriend = Boolean.TRUE.equals(tuple.getT2())
                             && Boolean.TRUE.equals(tuple.getT3());
                     return new ConnectionUserResponse(
@@ -210,7 +214,7 @@ public class ProfileScreenService {
     }
 
     private String targetUserId(
-            UserProfileCompositionQueryService.ConnectionSnapshot follow,
+            ConnectionSnapshot follow,
             String tab
     ) {
         return "FOLLOWERS".equals(tab) ? follow.followerId() : follow.followingId();

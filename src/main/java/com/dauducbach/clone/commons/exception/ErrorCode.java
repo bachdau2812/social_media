@@ -154,6 +154,7 @@ public enum ErrorCode {
     CHAT_MESSAGE_FORBIDDEN(1327, "Chat message access is forbidden", HttpStatus.FORBIDDEN),
     CHAT_MESSAGE_REPLY_INVALID(1328, "Chat message reply is invalid", HttpStatus.BAD_REQUEST),
     CHAT_MESSAGE_SEQUENCE_INVALID(1329, "Chat message sequence is invalid", HttpStatus.BAD_REQUEST),
+    CHAT_MESSAGE_IDEMPOTENCY_CONFLICT(1331, "Chat client message id was reused with a different payload", HttpStatus.CONFLICT),
     CHAT_CURSOR_UPDATE_FAILED(1330, "Update chat cursor failed", HttpStatus.INTERNAL_SERVER_ERROR),
 
     CHAT_WEBSOCKET_PROTOCOL_INVALID(1340, "Chat WebSocket protocol is invalid", HttpStatus.BAD_REQUEST),

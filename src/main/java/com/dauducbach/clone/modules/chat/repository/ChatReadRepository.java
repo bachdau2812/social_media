@@ -22,6 +22,7 @@ public class ChatReadRepository {
     private final DatabaseClient databaseClient;
 
     public Flux<ConversationListRow> findConversations(String userId, Instant cursorAt, String cursorId, int limit) {
+        // Read-only query-budget exception: direct inbox title/avatar are hydrated in this single bounded SQL page query.
         String sql = """
                 SELECT c.id,
                        c.conversation_type,
@@ -130,6 +131,7 @@ public class ChatReadRepository {
     }
 
     public Mono<ConversationListRow> findConversation(String userId, String conversationId) {
+        // Read-only query-budget exception: one authorized conversation lookup joins its direct peer snapshot in one query.
         return databaseClient.sql("""
                         SELECT c.id,
                                c.conversation_type,
@@ -222,41 +224,13 @@ public class ChatReadRepository {
                 .one();
     }
 
-    public Flux<PendingDeliveryCursor> findPendingDeliveries(String userId) {
-        return databaseClient.sql("""
-                        SELECT cm.conversation_id, c.last_message_seq
-                        FROM conversation_members cm
-                        INNER JOIN conversations c ON c.id = cm.conversation_id
-                        WHERE cm.user_id = :userId
-                          AND cm.member_status = 'ACTIVE'
-                  AND (c.conversation_type = 'GROUP' OR cm.last_deleted_message_seq IS NULL OR c.last_message_seq > cm.last_deleted_message_seq)
-                          AND c.last_message_seq > GREATEST(cm.last_delivered_seq, COALESCE(cm.last_deleted_message_seq, 0))
-                        """)
-                .bind("userId", userId)
-                .map((row, metadata) -> new PendingDeliveryCursor(
-                        string(row, "conversation_id"),
-                        number(row, "last_message_seq")))
-                .all();
-    }
     public Flux<ChatMessage> findAfterSequence(String conversationId, long joinedSeq, long afterSeq, int limit) {
         return databaseClient.sql("""
                         SELECT message.*,
-                               COALESCE(NULLIF(sender_member.nickname, ''),
-                                        NULLIF(sender_details.full_name, ''),
-                                        NULLIF(sender_details.username, ''),
-                                        message.sender_id) AS sender_display_name,
-                               (SELECT COALESCE(NULLIF(avatar.secure_url, ''), avatar.url)
-                                FROM media avatar
-                                WHERE avatar.owner_id = message.sender_id
-                                  AND avatar.owner_type = 'AVATAR'
-                                ORDER BY avatar.created_at DESC
-                                LIMIT 1) AS sender_avatar_url,
+                               NULLIF(sender_member.nickname, '') AS sender_nickname,
                                reply_message.message_seq AS reply_message_seq,
                                reply_message.sender_id AS reply_sender_id,
-                               COALESCE(NULLIF(reply_sender_member.nickname, ''),
-                                        NULLIF(reply_sender_details.full_name, ''),
-                                        NULLIF(reply_sender_details.username, ''),
-                                        reply_message.sender_id) AS reply_sender_display_name,
+                               NULLIF(reply_sender_member.nickname, '') AS reply_sender_nickname,
                                reply_message.message_type AS reply_message_type,
                                reply_message.content AS reply_content,
                                reply_message.metadata AS reply_metadata,
@@ -265,7 +239,6 @@ public class ChatReadRepository {
                         LEFT JOIN conversation_members sender_member
                           ON sender_member.conversation_id = message.conversation_id
                          AND sender_member.user_id = message.sender_id
-                        LEFT JOIN user_details sender_details ON sender_details.user_id = message.sender_id
                         LEFT JOIN messages reply_message
                           ON reply_message.conversation_id = message.conversation_id
                          AND reply_message.message_seq = message.reply_to_seq
@@ -273,8 +246,6 @@ public class ChatReadRepository {
                         LEFT JOIN conversation_members reply_sender_member
                           ON reply_sender_member.conversation_id = message.conversation_id
                          AND reply_sender_member.user_id = reply_message.sender_id
-                        LEFT JOIN user_details reply_sender_details
-                          ON reply_sender_details.user_id = reply_message.sender_id
                         WHERE message.conversation_id = :conversationId
                           AND message.message_seq >= :joinedSeq
                           AND message.message_seq > :afterSeq
@@ -293,22 +264,10 @@ public class ChatReadRepository {
         return databaseClient.sql("""
                         SELECT * FROM (
                             SELECT message.*,
-                                   COALESCE(NULLIF(sender_member.nickname, ''),
-                                            NULLIF(sender_details.full_name, ''),
-                                            NULLIF(sender_details.username, ''),
-                                            message.sender_id) AS sender_display_name,
-                                   (SELECT COALESCE(NULLIF(avatar.secure_url, ''), avatar.url)
-                                    FROM media avatar
-                                    WHERE avatar.owner_id = message.sender_id
-                                      AND avatar.owner_type = 'AVATAR'
-                                    ORDER BY avatar.created_at DESC
-                                    LIMIT 1) AS sender_avatar_url,
+                                   NULLIF(sender_member.nickname, '') AS sender_nickname,
                                reply_message.message_seq AS reply_message_seq,
                                reply_message.sender_id AS reply_sender_id,
-                               COALESCE(NULLIF(reply_sender_member.nickname, ''),
-                                        NULLIF(reply_sender_details.full_name, ''),
-                                        NULLIF(reply_sender_details.username, ''),
-                                        reply_message.sender_id) AS reply_sender_display_name,
+                               NULLIF(reply_sender_member.nickname, '') AS reply_sender_nickname,
                                reply_message.message_type AS reply_message_type,
                                reply_message.content AS reply_content,
                                reply_message.metadata AS reply_metadata,
@@ -317,7 +276,6 @@ public class ChatReadRepository {
                             LEFT JOIN conversation_members sender_member
                               ON sender_member.conversation_id = message.conversation_id
                              AND sender_member.user_id = message.sender_id
-                            LEFT JOIN user_details sender_details ON sender_details.user_id = message.sender_id
                         LEFT JOIN messages reply_message
                           ON reply_message.conversation_id = message.conversation_id
                          AND reply_message.message_seq = message.reply_to_seq
@@ -325,8 +283,6 @@ public class ChatReadRepository {
                         LEFT JOIN conversation_members reply_sender_member
                           ON reply_sender_member.conversation_id = message.conversation_id
                          AND reply_sender_member.user_id = reply_message.sender_id
-                        LEFT JOIN user_details reply_sender_details
-                          ON reply_sender_details.user_id = reply_message.sender_id
                             WHERE message.conversation_id = :conversationId
                               AND message.message_seq >= :joinedSeq
                               AND message.message_seq < :beforeSeq
@@ -350,15 +306,15 @@ public class ChatReadRepository {
                 .messageSeq(number(row, "message_seq"))
                 .clientMessageId(string(row, "client_message_id"))
                 .senderId(string(row, "sender_id"))
-                .senderDisplayName(string(row, "sender_display_name"))
-                .senderAvatarUrl(string(row, "sender_avatar_url"))
+                .senderDisplayName(string(row, "sender_nickname"))
+                .senderAvatarUrl(null)
                 .messageType(MessageType.valueOf(string(row, "message_type")))
                 .content(string(row, "content"))
                 .metadata(string(row, "metadata"))
                 .replyToSeq(nullableNumber(row, "reply_to_seq"))
                 .replyMessageSeq(nullableNumber(row, "reply_message_seq"))
                 .replySenderId(string(row, "reply_sender_id"))
-                .replySenderDisplayName(string(row, "reply_sender_display_name"))
+                .replySenderDisplayName(string(row, "reply_sender_nickname"))
                 .replyMessageType(messageType(row, "reply_message_type"))
                 .replyContent(string(row, "reply_content"))
                 .replyMetadata(string(row, "reply_metadata"))
@@ -435,6 +391,4 @@ public class ChatReadRepository {
             Instant sortAt) {
     }
 
-    public record PendingDeliveryCursor(String conversationId, long sequence) {
-    }
 }

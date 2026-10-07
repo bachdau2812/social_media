@@ -2,20 +2,19 @@ package com.dauducbach.clone.modules.user.service;
 
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
-import com.dauducbach.clone.modules.audit.dto.AuditActionType;
-import com.dauducbach.clone.modules.audit.entity.AuditLogs;
-import com.dauducbach.clone.modules.audit.service.UserAuditService;
+import com.dauducbach.clone.modules.audit.publicapi.AuditActionType;
+import com.dauducbach.clone.modules.audit.publicapi.AuditEntry;
+import com.dauducbach.clone.modules.audit.publicapi.AuditRecorder;
 import com.dauducbach.clone.modules.user.dto.request.UserHighSchoolRequest;
 import com.dauducbach.clone.modules.user.entity.UserHighSchool;
-import com.dauducbach.clone.modules.user.repositoty.UserHighSchoolRepository;
-import com.dauducbach.clone.utils.RedisUtil;
+import com.dauducbach.clone.modules.user.profile.application.ProfileDataCache;
+import com.dauducbach.clone.modules.user.repository.UserHighSchoolRepository;
 import com.google.gson.JsonObject;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
-import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -31,8 +30,8 @@ import java.util.UUID;
 public class UserHighSchoolService {
     UserHighSchoolRepository userHighSchoolRepository;
     R2dbcEntityTemplate r2dbcEntityTemplate;
-    ReactiveRedisTemplate<String, String> reactiveRedisStringTemplate;
-    UserAuditService userAuditService;
+    ProfileDataCache profileDataCache;
+    AuditRecorder auditRecorder;
     UserProfileVectorEventPublisher userProfileVectorEventPublisher;
 
     private static final Logger log = LoggerFactory.getLogger(UserHighSchoolService.class);
@@ -66,14 +65,10 @@ public class UserHighSchoolService {
                         throwable
                 ))
                 .publishOn(Schedulers.boundedElastic())
-                .doOnSuccess(savedHighSchool -> {
-                    log.info("|UserHighSchoolService|createUserHighSchool|created|id={}", savedHighSchool.getId());
-                    String jsonString = RedisUtil.serialize(savedHighSchool);
-                    if (jsonString != null) {
-                        reactiveRedisStringTemplate.opsForValue().set(cacheKey, jsonString, CACHE_TTL).subscribe();
-                    }
-                    reactiveRedisStringTemplate.opsForValue().delete(listCacheKey).subscribe();
-                })
+                .flatMap(savedHighSchool -> profileDataCache.put(cacheKey, savedHighSchool, CACHE_TTL)
+                        .then(profileDataCache.evict(listCacheKey))
+                        .thenReturn(savedHighSchool))
+                .doOnSuccess(savedHighSchool -> log.info("|UserHighSchoolService|createUserHighSchool|created|id={}", savedHighSchool.getId()))
                 .flatMap(savedHighSchool -> saveProfileComponentAudit(savedHighSchool.getUserId(), "USER_HIGH_SCHOOL", savedHighSchool.getId(), "CREATE").thenReturn(savedHighSchool))
                 .flatMap(savedHighSchool -> publishProfileVectorRefresh(savedHighSchool.getUserId(), "USER_HIGH_SCHOOL", "CREATE", savedHighSchool.getId())
                         .thenReturn(savedHighSchool))
@@ -92,11 +87,9 @@ public class UserHighSchoolService {
                     if (request.getIsPublic() != null) existing.setPublic(request.getIsPublic());
                     return userHighSchoolRepository.save(existing);
                 })
-                .doOnSuccess(updated -> {
-                    String json = RedisUtil.serialize(updated);
-                    if (json != null) reactiveRedisStringTemplate.opsForValue().set(CACHE_PREFIX + updated.getId(), json, CACHE_TTL).subscribe();
-                    reactiveRedisStringTemplate.opsForValue().delete(LIST_CACHE_PREFIX + updated.getUserId()).subscribe();
-                })
+                .flatMap(updated -> profileDataCache.put(CACHE_PREFIX + updated.getId(), updated, CACHE_TTL)
+                        .then(profileDataCache.evict(LIST_CACHE_PREFIX + updated.getUserId()))
+                        .thenReturn(updated))
                 .flatMap(updated -> saveProfileComponentAudit(updated.getUserId(), "USER_HIGH_SCHOOL", updated.getId(), "UPDATE").thenReturn(updated))
                 .flatMap(updated -> publishProfileVectorRefresh(updated.getUserId(), "USER_HIGH_SCHOOL", "UPDATE", updated.getId()).thenReturn(updated))
                 .onErrorMap(error -> error instanceof AppException ? error : new AppException(
@@ -108,18 +101,16 @@ public class UserHighSchoolService {
         JsonObject metadata = new JsonObject();
         metadata.addProperty("component", component);
         metadata.addProperty("operation", operation);
-        return userAuditService.save(AuditLogs.builder()
-                .actorId(userId)
-                .action(AuditActionType.UPDATE_USER_DETAILS)
-                .resourceType(component)
-                .resourceId(resourceId)
-                .status("SUCCESS")
-                .metadata(metadata.toString())
-                .build());
+        return auditRecorder.record(new AuditEntry(userId, AuditActionType.UPDATE_USER_DETAILS,
+                component, resourceId, "SUCCESS", metadata.toString(), null));
     }
 
     private Mono<Void> publishProfileVectorRefresh(String userId, String source, String operation, String resourceId) {
         return userProfileVectorEventPublisher.publishRefreshEvent(userId, source, operation, resourceId);
+    }
+
+    private <T> Mono<T> cacheRecord(String key, T record) {
+        return profileDataCache.put(key, record, CACHE_TTL).thenReturn(record);
     }
 
     public Mono<UserHighSchool> getUserHighSchoolById(String id) {
@@ -127,19 +118,8 @@ public class UserHighSchoolService {
 
         String cacheKey = CACHE_PREFIX + id;
 
-        return reactiveRedisStringTemplate.opsForValue().get(cacheKey)
-                .onErrorResume(error -> {
-                    log.warn("|UserHighSchoolService|getUserHighSchoolById|cache read failed, fallback to database|id={}|error={}", id, error.getMessage());
-                    return Mono.empty();
-                })
-                .flatMap(cachedJsonString -> {
-                    UserHighSchool cached = RedisUtil.deserialize(cachedJsonString, UserHighSchool.class);
-                    if (cached != null) {
-                        log.info("|UserHighSchoolService|getUserHighSchoolById|found in cache|id={}", id);
-                        return Mono.just(cached);
-                    }
-                    return Mono.empty();
-                })
+        return profileDataCache.find(cacheKey, UserHighSchool.class)
+                .doOnNext(cached -> log.info("|UserHighSchoolService|getUserHighSchoolById|found in cache|id={}", id))
                 .switchIfEmpty(
                         userHighSchoolRepository.findById(id)
                                 .switchIfEmpty(Mono.error(new AppException(
@@ -154,13 +134,8 @@ public class UserHighSchoolService {
                                                 throwable
                                         ))
                                 .publishOn(Schedulers.boundedElastic())
-                                .doOnSuccess(highSchool -> {
-                                    log.info("|UserHighSchoolService|getUserHighSchoolById|found in database|id={}", id);
-                                    String jsonString = RedisUtil.serialize(highSchool);
-                                    if (jsonString != null) {
-                                        reactiveRedisStringTemplate.opsForValue().set(cacheKey, jsonString, CACHE_TTL).subscribe();
-                                    }
-                                })
+                                .flatMap(highSchool -> cacheRecord(cacheKey, highSchool)
+                                        .doOnNext(ignored -> log.info("|UserHighSchoolService|getUserHighSchoolById|found in database|id={}", id)))
                                 .doOnError(error -> log.error("|UserHighSchoolService|getUserHighSchoolById|failed to fetch|id={}|error={}", id, error.getMessage()))
                 );
     }
@@ -177,15 +152,11 @@ public class UserHighSchoolService {
                     .doOnError(error -> log.error("|UserHighSchoolService|getUserHighSchoolsByUserId|failed to fetch|userId={}|error={}", userId, error.getMessage()));
         }
 
-        return reactiveRedisStringTemplate.opsForValue().get(listCacheKey)
-                .onErrorResume(error -> {
-                    log.warn("|UserHighSchoolService|getUserHighSchoolsByUserId|cache read failed, fallback to database|userId={}|error={}", userId, error.getMessage());
-                    return Mono.empty();
-                })
+        return profileDataCache.findList(listCacheKey, UserHighSchool.class)
                 .flatMapMany(cachedJsonString -> {
                     if (cachedJsonString != null) {
                         log.info("|UserHighSchoolService|getUserHighSchoolsByUserId|found list in cache|userId={}", userId);
-                        return Flux.fromIterable(RedisUtil.deserializeList(cachedJsonString, UserHighSchool.class))
+                        return Flux.fromIterable(cachedJsonString)
                                 .filter(UserHighSchool::isPublic);
                     }
                     return Flux.empty();
@@ -201,12 +172,9 @@ public class UserHighSchoolService {
                                 ))
                                 .doOnNext(highSchoolList -> {
                                     log.info("|UserHighSchoolService|getUserHighSchoolsByUserId|found {} public items in database|userId={}", highSchoolList.size(), userId);
-                                    String jsonString = RedisUtil.serialize(highSchoolList);
-                                    if (jsonString != null) {
-                                        reactiveRedisStringTemplate.opsForValue().set(listCacheKey, jsonString, CACHE_TTL).subscribe();
-                                    }
                                 })
-                                .flatMapMany(Flux::fromIterable)
+                                .flatMapMany(highSchoolList -> profileDataCache.put(listCacheKey, highSchoolList, CACHE_TTL)
+                                        .thenMany(Flux.fromIterable(highSchoolList)))
                                 .doOnError(error -> log.error("|UserHighSchoolService|getUserHighSchoolsByUserId|failed to fetch|userId={}|error={}", userId, error.getMessage()))
                 );
     }
@@ -225,9 +193,9 @@ public class UserHighSchoolService {
                 .flatMap(highSchool -> userHighSchoolRepository.deleteById(id)
                         .doOnSuccess(v -> {
                             log.info("|UserHighSchoolService|deleteUserHighSchool|deleted|id={}", id);
-                            reactiveRedisStringTemplate.opsForValue().delete(cacheKey).subscribe();
-                            reactiveRedisStringTemplate.opsForValue().delete(LIST_CACHE_PREFIX + highSchool.getUserId()).subscribe();
                         })
+                        .then(profileDataCache.evict(cacheKey))
+                        .then(profileDataCache.evict(LIST_CACHE_PREFIX + highSchool.getUserId()))
                         .then(Mono.defer(() -> publishProfileVectorRefresh(highSchool.getUserId(), "USER_HIGH_SCHOOL", "DELETE", id)))
                         .doOnError(error -> log.error("|UserHighSchoolService|deleteUserHighSchool|failed to delete|id={}|error={}", id, error.getMessage()))
                         .onErrorMap(throwable -> throwable instanceof AppException

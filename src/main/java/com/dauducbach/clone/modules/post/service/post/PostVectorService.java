@@ -1,6 +1,7 @@
 package com.dauducbach.clone.modules.post.service.post;
-import com.dauducbach.clone.utils.GetVectorEmbedding;
-import com.dauducbach.clone.modules.user.service.UserVectorSnapshotService;
+import com.dauducbach.clone.modules.embedding.publicapi.TextEmbeddingProvider;
+import com.dauducbach.clone.modules.post.publicapi.PostAuthorPreferenceContext;
+import com.dauducbach.clone.modules.post.publicapi.PostAuthorPreferenceQuery;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
@@ -10,18 +11,17 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.time.Duration;
 import java.util.Objects;
-import com.dauducbach.clone.infrastructure.vector.VectorMath;
+import com.dauducbach.clone.commons.vector.VectorMath;
 import com.dauducbach.clone.modules.post.elastic.PostVector;
-import com.dauducbach.clone.modules.user.dto.UserVectorSnapshot;
 import reactor.core.publisher.Flux;
 @Service
 @RequiredArgsConstructor
 public class PostVectorService {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(PostVectorService.class);
-    private final GetVectorEmbedding embeddings;
+    private final TextEmbeddingProvider embeddings;
     private final PostVectorStore store;
     private final PostEmbeddingSourceReader sources;
-    private final UserVectorSnapshotService snapshots;
+    private final PostAuthorPreferenceQuery authorPreferences;
     // Bounded per-process raw cache also retains successful provider work across failed ES commits.
     // Failed/empty provider responses expire immediately so retries can recover.
     private final Map<String, Mono<List<Double>>> rawCache = Collections.synchronizedMap(new LinkedHashMap<>(128, .75f, true) {
@@ -52,9 +52,10 @@ public class PostVectorService {
                         || "SKIPPED_NO_INPUT".equals(baseline.getEmbeddingState()) && source.text().isBlank()
                             && (baseline.getRecommendationVector() == null || baseline.getRecommendationVector().isEmpty()))) return Mono.empty();
                 String authorId = source.post().getUserId();
-                Mono<UserVectorSnapshot> author = authorId == null || authorId.isBlank() ? Mono.empty() : snapshots.load(authorId);
+                Mono<PostAuthorPreferenceContext> author = authorId == null || authorId.isBlank()
+                        ? Mono.empty() : authorPreferences.loadPostAuthorContext(authorId);
                 // Snapshot service acquires/releases the user lease. Provider runs only after it completes.
-                return author.defaultIfEmpty(new UserVectorSnapshot(0, List.of(), List.of(), List.of(), false, VectorMath.MODEL))
+                return author.defaultIfEmpty(new PostAuthorPreferenceContext(0, List.of(), List.of(), VectorMath.MODEL))
                         .flatMap(snapshot -> content(source, baseline).flatMap(raw -> {
                             VectorMath.requireCompatible(snapshot.model(), VectorMath.DIMENSION, VectorMath.SCHEMA_VERSION);
                             List<Double> authorVector = !snapshot.longTerm().isEmpty() ? VectorMath.normalize(snapshot.longTerm())

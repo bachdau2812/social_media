@@ -1,6 +1,6 @@
 package com.dauducbach.clone.modules.notification.controller;
 
-import com.dauducbach.clone.modules.notification.service.NotificationSseService;
+import com.dauducbach.clone.modules.notification.infrastructure.realtime.NotificationSseService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.core.Authentication;

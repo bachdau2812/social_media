@@ -55,6 +55,12 @@ public record ChatMessageResponse(
                 createdAt, editedAt, deleted, storyContext, likeCount, false, null, reactions, reactionVersion, forwarded);
     }
 
+    public ChatMessageResponse withReply(ReplyMessageResponse value) {
+        return new ChatMessageResponse(id, conversationId, messageSeq, clientMessageId, senderId,
+                senderDisplayName, senderAvatarUrl, messageType, content, metadata, replyToSeq, value,
+                createdAt, editedAt, deleted, storyContext, likeCount, isReact, myReaction, reactions, reactionVersion, forwarded);
+    }
+
     public ChatMessageResponse withForwarded(boolean value) {
         return new ChatMessageResponse(id, conversationId, messageSeq, clientMessageId, senderId,
                 senderDisplayName, senderAvatarUrl, messageType, content, metadata, replyToSeq, reply,

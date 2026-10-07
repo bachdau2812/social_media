@@ -5,6 +5,7 @@ import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.commons.response.PageResponse;
 import com.dauducbach.clone.modules.media.constant.OwnerType;
 import com.dauducbach.clone.modules.media.entity.Media;
+import com.dauducbach.clone.modules.media.infrastructure.cloudinary.CloudinaryMediaService;
 import com.dauducbach.clone.modules.media.repository.MediaRepository;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
@@ -59,6 +60,12 @@ public class MediaService {
         return mediaRepository.findById(assetId.trim());
     }
 
+    public Flux<Media> getByIds(java.util.Collection<String> assetIds) {
+        if (assetIds == null || assetIds.isEmpty()) return Flux.empty();
+        List<String> ids = assetIds.stream().filter(id -> id != null && !id.isBlank()).distinct().toList();
+        return ids.isEmpty() ? Flux.empty() : mediaRepository.findAllById(ids);
+    }
+
     public Mono<Media> getFirstByOwnerIdAndOwnerType(String ownerId, OwnerType ownerType) {
         if (ownerId == null || ownerId.isBlank() || ownerType == null) {
             return Mono.empty();
@@ -94,6 +101,12 @@ public class MediaService {
                                 String.format("Fetch media failed for ownerId=%s", ownerId),
                                 error
                         ));
+    }
+
+    public Flux<Media> getByOwnerIds(java.util.Collection<String> ownerIds, OwnerType ownerType) {
+        if (ownerIds == null || ownerIds.isEmpty() || ownerType == null) return Flux.empty();
+        List<String> ids = ownerIds.stream().filter(id -> id != null && !id.isBlank()).distinct().toList();
+        return ids.isEmpty() ? Flux.empty() : mediaRepository.findByOwnerIdInAndOwnerType(ids, ownerType);
     }
 
     public Mono<Media> saveCloudinaryMedia(String publicId, String ownerId, OwnerType ownerType) {
@@ -348,6 +361,13 @@ public class MediaService {
                         userId, media.getAssetId()))
                 .doOnError(error -> log.error("|MediaService|getCurrentAvatar|failed|userId={}|error={}",
                         userId, error.getMessage()));
+    }
+
+    public Flux<Media> getCurrentAvatars(java.util.Collection<String> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return Flux.empty();
+        }
+        return mediaRepository.findCurrentAvatarsByOwnerIds(userIds);
     }
 
     public Mono<List<Media>> saveCloudinaryMediaList(List<String> publicIds, String ownerId, OwnerType ownerType) {

@@ -3,6 +3,7 @@ package com.dauducbach.clone.modules.media.service.music;
 import com.dauducbach.clone.modules.media.dto.music.response.MusicFetchAcceptedResponse;
 import com.dauducbach.clone.modules.media.entity.music.Musics;
 import com.dauducbach.clone.modules.media.repository.MusicsRepository;
+import com.dauducbach.clone.modules.media.music.fetch.FetchMusicUseCase;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -21,7 +22,7 @@ class MusicServiceTest {
     @Mock
     MusicsRepository musicsRepository;
     @Mock
-    SpotifyMusicFetchService spotifyMusicFetchService;
+    FetchMusicUseCase spotifyMusicFetchService;
 
     @Test
     void getMusicByIdReturnsSpotifyCatalogShape() {

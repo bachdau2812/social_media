@@ -1,8 +1,8 @@
 package com.dauducbach.clone.modules.post.service.post;
 
 import com.dauducbach.clone.modules.media.configuration.MediaPolicyProperties;
-import com.dauducbach.clone.modules.media.entity.Media;
-import com.dauducbach.clone.utils.MediaScanUtils;
+import com.dauducbach.clone.modules.media.publicapi.MediaAssetView;
+import com.dauducbach.clone.modules.media.publicapi.MediaInspection;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.util.unit.DataSize;
@@ -16,12 +16,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class MediaModerationProviderTest {
-    private MediaScanUtils scanner;
+    private MediaInspection scanner;
     private MediaModerationProvider provider;
 
     @BeforeEach
     void setUp() {
-        scanner = mock(MediaScanUtils.class);
+        scanner = mock(MediaInspection.class);
         MediaPolicyProperties policy = new MediaPolicyProperties();
         policy.setImage(DataSize.ofMegabytes(100));
         policy.setVideo(DataSize.ofMegabytes(100));
@@ -38,7 +38,7 @@ class MediaModerationProviderTest {
                 .expectNext(MediaModerationProvider.Decision.APPROVED)
                 .verifyComplete();
 
-        verify(scanner, never()).scanMedia(
+        verify(scanner, never()).inspect(
                 "https://res.cloudinary.com/demo/video/upload/v1/movie.mp4",
                 "movie");
     }
@@ -49,15 +49,15 @@ class MediaModerationProviderTest {
                 .expectNext(MediaModerationProvider.Decision.APPROVED)
                 .verifyComplete();
 
-        verify(scanner, never()).scanMedia("https://cdn.example/movie.webm?x=1", "movie");
+        verify(scanner, never()).inspect("https://cdn.example/movie.webm?x=1", "movie");
     }
 
     @Test
     void imagesAndUnknownMediaStillUseScanner() {
-        when(scanner.scanMedia("https://cdn.example/image.jpg", "image"))
-                .thenReturn(Mono.just(MediaScanUtils.ScanResult.approved()));
-        when(scanner.scanMedia("https://cdn.example/no-extension", "unknown"))
-                .thenReturn(Mono.just(MediaScanUtils.ScanResult.rejected()));
+        when(scanner.inspect("https://cdn.example/image.jpg", "image"))
+                .thenReturn(Mono.just(new MediaInspection.Result(false)));
+        when(scanner.inspect("https://cdn.example/no-extension", "unknown"))
+                .thenReturn(Mono.just(new MediaInspection.Result(true)));
 
         StepVerifier.create(provider.scan("https://cdn.example/image.jpg", "image", "image"))
                 .expectNext(MediaModerationProvider.Decision.APPROVED)
@@ -71,9 +71,14 @@ class MediaModerationProviderTest {
     void appliesOneHundredMegabyteLimitToImagesAndVideos() {
         int exactLimit = 100 * 1024 * 1024;
 
-        assertThat(provider.isAllowedAsset(Media.builder().resourceType("image").bytes(exactLimit).build())).isTrue();
-        assertThat(provider.isAllowedAsset(Media.builder().resourceType("video").bytes(exactLimit).build())).isTrue();
-        assertThat(provider.isAllowedAsset(Media.builder().resourceType("image").bytes(exactLimit + 1).build())).isFalse();
-        assertThat(provider.isAllowedAsset(Media.builder().resourceType("video").bytes(exactLimit + 1).build())).isFalse();
+        assertThat(provider.isAllowedAsset(asset("image", exactLimit))).isTrue();
+        assertThat(provider.isAllowedAsset(asset("video", exactLimit))).isTrue();
+        assertThat(provider.isAllowedAsset(asset("image", exactLimit + 1))).isFalse();
+        assertThat(provider.isAllowedAsset(asset("video", exactLimit + 1))).isFalse();
+    }
+
+    private MediaAssetView asset(String type, int bytes) {
+        return new MediaAssetView("asset", "public", 0, 0, null, type, bytes,
+                null, null, null, null, null, null, null, null, null);
     }
 }

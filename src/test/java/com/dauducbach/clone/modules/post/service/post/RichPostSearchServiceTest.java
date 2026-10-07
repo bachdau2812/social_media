@@ -5,8 +5,8 @@ import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import com.dauducbach.clone.modules.post.dto.response.PostDetailResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostItemResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostMediaResponse;
-import com.dauducbach.clone.modules.media.entity.Media;
-import com.dauducbach.clone.modules.user.service.MediaForProfile;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentity;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentityQuery;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -28,14 +28,14 @@ class RichPostSearchServiceTest {
     @Mock
     PostDetailQueryService postDetailQueryService;
     @Mock
-    MediaForProfile mediaForProfile;
+    UserIdentityQuery userIdentityQuery;
 
     @Test
     void returnsAuthorAvatarAndAtMostThreeSearchThumbnails() {
         RichPostSearchService service = new RichPostSearchService(
                 postSearchService,
                 postDetailQueryService,
-                mediaForProfile
+                userIdentityQuery
         );
         PostDetailResponse detail = new PostDetailResponse(
                 "post-1",
@@ -55,14 +55,13 @@ class RichPostSearchServiceTest {
                 Instant.parse("2026-07-28T00:00:00Z"),
                 Instant.parse("2026-07-28T00:00:00Z")
         );
-        Media avatar = Media.builder().secureUrl("https://cdn/avatar.jpg").build();
 
         when(postSearchService.searchPosts("spring", 0, 20))
                 .thenReturn(Mono.just(PageResponse.of(List.of("post-1"), 0, 1, 20)));
         when(postDetailQueryService.getPostDetail("post-1", MediaDisplayType.SEARCH_THUMBNAIL))
                 .thenReturn(Mono.just(detail));
-        when(mediaForProfile.getCurrentAvatar("author-1", MediaDisplayType.AVATAR))
-                .thenReturn(Mono.just(avatar));
+        when(userIdentityQuery.findIdentity("author-1"))
+                .thenReturn(Mono.just(new UserIdentity("author-1", "bach", "Dau Duc Bach", "https://cdn/avatar.jpg")));
 
         StepVerifier.create(service.search("spring", 0, 20))
                 .assertNext(page -> {

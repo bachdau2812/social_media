@@ -7,7 +7,7 @@ import com.dauducbach.clone.modules.post.dto.request.PostInteractionRequest;
 import com.dauducbach.clone.modules.post.dto.response.PostInteractionAcceptedResponse;
 import com.dauducbach.clone.modules.post.dto.event.PostInteractionEvent;
 import com.dauducbach.clone.modules.post.entity.PostInteractionReceipt;
-import com.dauducbach.clone.modules.post.repositoty.PostInteractionReceiptRepository;
+import com.dauducbach.clone.modules.post.repository.PostInteractionReceiptRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
@@ -20,11 +20,13 @@ import java.util.UUID;
 import java.util.HexFormat;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Service
 @RequiredArgsConstructor
 public class PostInteractionService {
+    private static final Logger log = LoggerFactory.getLogger(PostInteractionService.class);
     private final PostInteractionReceiptRepository receipts;
     private final PostFeedQueryService posts;
     private final InteractionOutbox outbox;
@@ -81,8 +83,10 @@ public class PostInteractionService {
         } catch (java.security.NoSuchAlgorithmException error) { throw new IllegalStateException(error); }
     }
     @Scheduled(fixedDelayString = "${post.popularity.receipt-cleanup-delay-ms:3600000}")
-    public void cleanupReceipts() {
-        if (ingestionEnabled) receipts.deleteExpired(Instant.now().minus(Duration.ofDays(8)), 1000)
-                .subscribe(ignored -> {}, error -> LoggerFactory.getLogger(getClass()).warn("Receipt cleanup failed", error));
+    public Mono<Void> cleanupReceipts() {
+        if (!ingestionEnabled) return Mono.empty();
+        return Mono.defer(() -> receipts.deleteExpired(Instant.now().minus(Duration.ofDays(8)), 1000))
+                .then()
+                .doOnError(error -> log.warn("Receipt cleanup failed", error));
     }
 }

@@ -1,25 +1,21 @@
 package com.dauducbach.clone.modules.post.service.post;
 
-import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
-import com.dauducbach.clone.modules.media.service.MediaAssetCleanupService;
-import com.dauducbach.clone.modules.media.service.MediaService;
-
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.media.constant.OwnerType;
+import com.dauducbach.clone.modules.media.publicapi.MediaAssetView;
+import com.dauducbach.clone.modules.media.publicapi.MediaAssetLifecycle;
 import com.dauducbach.clone.modules.post.dto.event.PostMediaScanItem;
-import com.dauducbach.clone.modules.media.entity.Media;
 import com.dauducbach.clone.modules.post.entity.PostDetails;
 import com.dauducbach.clone.modules.post.entity.PostItem;
-import com.dauducbach.clone.modules.post.repositoty.PostDetailsRepository;
-import com.dauducbach.clone.modules.post.repositoty.PostItemRepository;
-import com.dauducbach.clone.utils.GsonUtils;
+import com.dauducbach.clone.modules.post.repository.PostDetailsRepository;
+import com.dauducbach.clone.modules.post.repository.PostItemRepository;
+import com.dauducbach.clone.commons.serialization.GsonUtils;
 import com.google.gson.JsonObject;
 import lombok.RequiredArgsConstructor;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -41,15 +37,12 @@ public class PostMediaModerationOrchestrator {
     private static final String STATUS_PROCESSING = "PROCESSING_SCAN";
 
     private final PostDetailsRepository postDetailsRepository;
-    private final MediaService mediaService;
+    private final MediaAssetLifecycle mediaAssets;
     private final PostItemRepository postItemRepository;
-    private final R2dbcEntityTemplate r2dbcEntityTemplate;
     private final ReactiveRedisTemplate<String, String> redisTemplate;
     private final PostSseService postSseService;
     private final KafkaSender<String, String> kafkaSender;
-    private final MediaCompatibilityFacade cloudinaryMediaService;
     private final MediaModerationProvider moderationProvider;
-    private final MediaAssetCleanupService cleanupService;
     private final PostVectorService postVectorService;
 
     public Mono<Void> process(String postId, String userId, List<PostMediaScanItem> items) {
@@ -87,34 +80,15 @@ public class PostMediaModerationOrchestrator {
     }
 
     private Mono<Boolean> claimPendingPost(String postId) {
-        return r2dbcEntityTemplate.getDatabaseClient().sql("""
-                        UPDATE post_details
-                        SET validate_status = :processing, updated_at = :updatedAt
-                        WHERE post_id = :postId AND validate_status = :pending
-                        """)
-                .bind("processing", STATUS_PROCESSING)
-                .bind("updatedAt", Instant.now())
-                .bind("postId", postId)
-                .bind("pending", STATUS_PENDING)
-                .fetch()
-                .rowsUpdated()
+        return postDetailsRepository.claimPendingMediaScan(
+                        postId, STATUS_PENDING, STATUS_PROCESSING, Instant.now())
                 .map(updated -> updated > 0)
                 .defaultIfEmpty(false);
     }
 
     private Mono<Void> releaseClaim(String postId) {
-        return r2dbcEntityTemplate.getDatabaseClient().sql("""
-                        UPDATE post_details
-                        SET validate_status = :pending, updated_at = :updatedAt
-                        WHERE post_id = :postId AND validate_status = :processing
-                        """)
-                .bind("pending", STATUS_PENDING)
-                .bind("updatedAt", Instant.now())
-                .bind("postId", postId)
-                .bind("processing", STATUS_PROCESSING)
-                .fetch()
-                .rowsUpdated()
-                .then();
+        return postDetailsRepository.releaseMediaScanClaim(
+                postId, STATUS_PENDING, STATUS_PROCESSING, Instant.now()).then();
     }
 
     private Mono<Void> processClaimedPost(String postId, String userId, List<PostMediaScanItem> items) {
@@ -135,17 +109,17 @@ public class PostMediaModerationOrchestrator {
         return moderationProvider.scan(item.getSecureUrl(), item.getPublicId(), item.getResourceType())
                 .flatMap(decision -> {
                     if (decision == MediaModerationProvider.Decision.REJECTED) {
-                        return cleanupService.delete(item.getPublicId())
+                        return mediaAssets.deleteAsset(item.getPublicId())
                                 .thenReturn(PostScanOutcome.rejected(item, "NSFW"));
                     }
-                    return cloudinaryMediaService.fetchMediaByPublicId(item.getPublicId())
+                    return mediaAssets.fetchRemoteAsset(item.getPublicId())
                             .flatMap(media -> persistAllowedItem(postId, item, media));
                 })
                 .onErrorResume(error -> {
                     log.error(
                             "|PostMediaModerationOrchestrator|scanAndSavePostItem|postId={}|publicId={}|error={}",
                             postId, item.getPublicId(), error.getMessage());
-                    return cleanupService.delete(item.getPublicId())
+                    return mediaAssets.deleteAsset(item.getPublicId())
                             .thenReturn(PostScanOutcome.failed(item, "PROCESSING_ERROR"));
                 });
     }
@@ -153,27 +127,26 @@ public class PostMediaModerationOrchestrator {
     private Mono<PostScanOutcome> persistAllowedItem(
             String postId,
             PostMediaScanItem item,
-            Media media
+            MediaAssetView media
     ) {
         if (!moderationProvider.isAllowedAsset(media)) {
-            return cleanupService.delete(item.getPublicId())
+            return mediaAssets.deleteAsset(item.getPublicId())
                     .thenReturn(PostScanOutcome.rejected(item, "INVALID_MEDIA"));
         }
-        return mediaService.registerFetchedMedia(media, postId, OwnerType.POST)
-                .flatMap(savedMedia -> r2dbcEntityTemplate.insert(PostItem.class)
-                        .using(buildPostItem(postId, item, savedMedia))
+                    return mediaAssets.registerFetchedAsset(media, postId, OwnerType.POST)
+                .flatMap(savedMedia -> postItemRepository.save(buildPostItem(postId, item, savedMedia))
                         .thenReturn(PostScanOutcome.approved(item)));
     }
 
-    private PostItem buildPostItem(String postId, PostMediaScanItem item, Media media) {
-        boolean video = "video".equalsIgnoreCase(media.getResourceType());
+    private PostItem buildPostItem(String postId, PostMediaScanItem item, MediaAssetView media) {
+        boolean video = "video".equalsIgnoreCase(media.resourceType());
         String itemMusicId = video ? null : normalizeOptional(item.getMusicId());
         Instant now = Instant.now();
         return PostItem.builder()
                 .id(UUID.randomUUID().toString())
                 .postId(postId)
                 .orderNumber(item.getOrderNumber())
-                .mediaId(media.getAssetId())
+                .mediaId(media.assetId())
                 .caption(normalizeOptional(item.getCaption()))
                 .musicId(itemMusicId)
                 .musicStart(itemMusicId == null ? null : item.getMusicStart())
@@ -239,9 +212,9 @@ public class PostMediaModerationOrchestrator {
                 .flatMap(source -> {
                     if (source.isEmpty()) return postVectorService.rebuild(postId);
                     String authorId = source.get().getUserId();
-                    return cleanupService.deleteAll(publicIds)
+                    return mediaAssets.deleteAssets(publicIds)
                 .then(postItemRepository.deleteByPostId(postId))
-                .then(mediaService.deleteByOwnerIdAndOwnerType(postId, OwnerType.POST))
+                .then(mediaAssets.deleteAssetsForOwner(postId, OwnerType.POST))
                 .then(redisTemplate.opsForValue().delete(POST_CACHE_PREFIX + postId).then())
                 .then(postDetailsRepository.deleteById(postId))
                 .doOnError(error -> log.error(

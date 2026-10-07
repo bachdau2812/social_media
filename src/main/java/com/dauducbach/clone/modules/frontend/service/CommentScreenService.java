@@ -2,7 +2,7 @@ package com.dauducbach.clone.modules.frontend.service;
 
 import com.dauducbach.clone.commons.response.PageResponse;
 import com.dauducbach.clone.modules.frontend.dto.CommentViewResponse;
-import com.dauducbach.clone.modules.post.service.comment.CommentCompositionQueryService;
+import com.dauducbach.clone.modules.post.publicapi.CommentPresentationQuery;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -11,7 +11,7 @@ import reactor.core.publisher.Mono;
 @Service
 @RequiredArgsConstructor
 public class CommentScreenService {
-    private final CommentCompositionQueryService commentQueryService;
+    private final CommentPresentationQuery commentQueryService;
 
     public Mono<PageResponse<CommentViewResponse>> getRootComments(
             String postId, String viewerId, int page, int size
@@ -32,7 +32,7 @@ public class CommentScreenService {
                 .map(this::toResponse);
     }
 
-    private CommentViewResponse toResponse(CommentCompositionQueryService.CommentSnapshot comment) {
+    private CommentViewResponse toResponse(CommentPresentationQuery.CommentSnapshot comment) {
         return new CommentViewResponse(
                 comment.id(),
                 comment.postId(),

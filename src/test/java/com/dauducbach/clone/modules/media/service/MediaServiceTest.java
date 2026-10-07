@@ -1,5 +1,6 @@
 package com.dauducbach.clone.modules.media.service;
 
+import com.dauducbach.clone.modules.media.infrastructure.cloudinary.CloudinaryMediaService;
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.modules.media.constant.OwnerType;
 import com.dauducbach.clone.modules.media.dto.response.MediaAudioUploadResult;

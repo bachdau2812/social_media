@@ -1,10 +1,10 @@
 package com.dauducbach.clone.modules.post.service.post;
 
-import com.dauducbach.clone.modules.post.service.comment.CommentMediaModerationOrchestrator;
+import com.dauducbach.clone.modules.post.comments.moderation.CommentMediaModerationOrchestrator;
 import com.dauducbach.clone.modules.post.dto.event.PostMediaScanItem;
 import com.dauducbach.clone.modules.post.dto.request.MediaUploadRequest;
-import com.dauducbach.clone.utils.GsonUtils;
-import com.dauducbach.clone.utils.KafkaUtils;
+import com.dauducbach.clone.commons.serialization.GsonUtils;
+import com.dauducbach.clone.commons.serialization.JsonPayloadReader;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -31,8 +31,8 @@ public class ImageScanWorker {
     public CompletableFuture<Void> handlePostScanEvent(@Payload String payload) {
         try {
             JsonObject payloadJson = GsonUtils.fromString(payload);
-            String postId = KafkaUtils.extractString(payloadJson, "postId");
-            String userId = KafkaUtils.extractString(payloadJson, "userId");
+            String postId = JsonPayloadReader.extractString(payloadJson, "postId");
+            String userId = JsonPayloadReader.extractString(payloadJson, "userId");
             List<PostMediaScanItem> items = extractPostScanItems(payloadJson);
             if (postId.isBlank() || userId.isBlank() || items.isEmpty()) {
                 log.warn(
@@ -55,8 +55,8 @@ public class ImageScanWorker {
     public CompletableFuture<Void> handleCommentScanEvent(@Payload String payload) {
         try {
             JsonObject payloadJson = GsonUtils.fromString(payload);
-            String commentId = KafkaUtils.extractString(payloadJson, "commentId");
-            String postId = KafkaUtils.extractString(payloadJson, "postId");
+            String commentId = JsonPayloadReader.extractString(payloadJson, "commentId");
+            String postId = JsonPayloadReader.extractString(payloadJson, "postId");
             List<MediaUploadRequest> mediaList = extractMediaList(payloadJson);
             if (commentId.isBlank() || postId.isBlank() || mediaList.isEmpty()) {
                 log.warn(
@@ -85,18 +85,18 @@ public class ImageScanWorker {
                 }
                 JsonObject item = element.getAsJsonObject();
                 int fallbackOrder = items.size() + 1;
-                Long order = KafkaUtils.extractLong(item, "orderNumber");
+                Long order = JsonPayloadReader.extractLong(item, "orderNumber");
                 items.add(PostMediaScanItem.builder()
                         .orderNumber(order == null || order <= 0
                                 ? fallbackOrder
                                 : Math.toIntExact(order))
-                        .secureUrl(KafkaUtils.extractString(item, "secureUrl"))
-                        .publicId(KafkaUtils.extractString(item, "publicId"))
-                        .resourceType(KafkaUtils.extractString(item, "resourceType"))
-                        .caption(KafkaUtils.extractString(item, "caption"))
-                        .musicId(KafkaUtils.extractString(item, "musicId"))
-                        .musicStart(KafkaUtils.extractLong(item, "musicStart"))
-                        .musicEnd(KafkaUtils.extractLong(item, "musicEnd"))
+                        .secureUrl(JsonPayloadReader.extractString(item, "secureUrl"))
+                        .publicId(JsonPayloadReader.extractString(item, "publicId"))
+                        .resourceType(JsonPayloadReader.extractString(item, "resourceType"))
+                        .caption(JsonPayloadReader.extractString(item, "caption"))
+                        .musicId(JsonPayloadReader.extractString(item, "musicId"))
+                        .musicStart(JsonPayloadReader.extractLong(item, "musicStart"))
+                        .musicEnd(JsonPayloadReader.extractLong(item, "musicEnd"))
                         .build());
             }
         }
@@ -113,9 +113,9 @@ public class ImageScanWorker {
                 }
                 JsonObject item = element.getAsJsonObject();
                 mediaList.add(MediaUploadRequest.builder()
-                        .secureUrl(KafkaUtils.extractString(item, "secureUrl"))
-                        .publicId(KafkaUtils.extractString(item, "publicId"))
-                        .resourceType(KafkaUtils.extractString(item, "resourceType"))
+                        .secureUrl(JsonPayloadReader.extractString(item, "secureUrl"))
+                        .publicId(JsonPayloadReader.extractString(item, "publicId"))
+                        .resourceType(JsonPayloadReader.extractString(item, "resourceType"))
                         .build());
             }
         }

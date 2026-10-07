@@ -9,4 +9,5 @@ import reactor.core.publisher.Mono;
 @Repository
 public interface UserPushNotificationRepository extends ReactiveCrudRepository<NotificationPushToken, String> {
     Mono<NotificationPushToken> findByUserId(String userId);
+    Mono<Void> deleteByUserIdAndDeviceId(String userId, String deviceId);
 }

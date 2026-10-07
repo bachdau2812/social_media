@@ -1,38 +1,29 @@
 package com.dauducbach.clone.modules.user.service;
 
-import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
-import com.dauducbach.clone.modules.media.entity.Media;
-import com.dauducbach.clone.modules.user.dto.response.UserDiscoveryResponse;
-import com.dauducbach.clone.modules.user.entity.UserDetails;
-import com.dauducbach.clone.modules.user.repositoty.UserFollowerRepository;
+import com.dauducbach.clone.modules.user.publicapi.UserDiscoveryResponse;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentity;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentityQuery;
+import com.dauducbach.clone.modules.user.repository.UserFollowerRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
-import java.util.Optional;
-
 @Service
 @RequiredArgsConstructor
 public class UserDiscoveryHydrator {
-    private final UserDetailsService userDetailsService;
-    private final MediaForProfile mediaForProfile;
+    private final UserIdentityQuery userIdentityQuery;
     private final UserFollowerRepository followerRepository;
 
     public Mono<UserDiscoveryResponse> hydrate(String viewerId, String userId) {
-        Mono<Optional<Media>> avatar = mediaForProfile.getCurrentAvatar(userId, MediaDisplayType.AVATAR)
-                .map(Optional::of)
-                .defaultIfEmpty(Optional.empty())
-                .onErrorReturn(Optional.empty());
         Mono<Boolean> viewerFollows = follows(viewerId, userId);
         Mono<Boolean> followsViewer = follows(userId, viewerId);
 
-        return Mono.zip(userDetailsService.getUserDetailsById(userId), avatar, viewerFollows, followsViewer)
+        return Mono.zip(userIdentityQuery.findIdentity(userId), viewerFollows, followsViewer)
                 .map(tuple -> toResponse(
                         viewerId,
                         tuple.getT1(),
-                        tuple.getT2(),
-                        Boolean.TRUE.equals(tuple.getT3()),
-                        Boolean.TRUE.equals(tuple.getT4())
+                        Boolean.TRUE.equals(tuple.getT2()),
+                        Boolean.TRUE.equals(tuple.getT3())
                 ));
     }
 
@@ -46,14 +37,13 @@ public class UserDiscoveryHydrator {
     }
 
     private UserDiscoveryResponse toResponse(String viewerId,
-                                             UserDetails details,
-                                             Optional<Media> avatar,
+                                             UserIdentity identity,
                                              boolean viewerFollows,
                                              boolean followsViewer) {
-        String userId = details.getUserId();
-        String username = firstNonBlank(details.getUsername(), userId);
-        String fullName = firstNonBlank(details.getFullName(), username, userId);
-        String avatarUrl = avatar.map(value -> firstNonBlank(value.getSecureUrl(), value.getUrl())).orElse("");
+        String userId = identity.userId();
+        String username = firstNonBlank(identity.username(), userId);
+        String fullName = firstNonBlank(identity.fullName(), username, userId);
+        String avatarUrl = firstNonBlank(identity.avatarUrl());
         boolean friend = viewerFollows && followsViewer;
         String relationship = userId.equals(viewerId)
                 ? "SELF"

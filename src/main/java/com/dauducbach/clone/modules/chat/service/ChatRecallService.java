@@ -1,7 +1,7 @@
 package com.dauducbach.clone.modules.chat.service;
 
 import com.dauducbach.clone.modules.chat.constant.MessageType;
-import com.dauducbach.clone.modules.chat.dto.event.ChatEvent;
+import com.dauducbach.clone.modules.chat.publicapi.ChatEvent;
 import com.dauducbach.clone.modules.chat.dto.response.ChatMessageResponse;
 import com.dauducbach.clone.modules.chat.entity.ChatMessage;
 import com.dauducbach.clone.modules.chat.repository.ChatMessageActionsRepository;

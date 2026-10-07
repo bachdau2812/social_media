@@ -2,22 +2,18 @@ package com.dauducbach.clone.modules.feed.service;
 
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
-import com.dauducbach.clone.modules.feed.constant.FeedCacheKeys;
 import com.dauducbach.clone.modules.feed.dto.response.FeedItemResponse;
 import com.dauducbach.clone.modules.feed.dto.response.FeedResponse;
 import com.dauducbach.clone.modules.feed.dto.FeedVectorSnapshot;
 import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
-import com.dauducbach.clone.modules.post.service.post.PostFeedQueryService;
+import com.dauducbach.clone.modules.post.publicapi.PostFeedQuery;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -31,27 +27,15 @@ public class FeedService {
     private static final int MAX_LIMIT = 50;
     private static final int REFILL_THRESHOLD = 10;
     private static final int REFILL_BATCH_SIZE = 80;
-    private static final int SEEN_POST_LIMIT = 1000;
-    private static final Duration SEEN_POST_TTL = Duration.ofDays(5);
 
-    ReactiveRedisTemplate<String, String> redisTemplate;
-    PostFeedQueryService postFeedQueryService;
+    FeedSeenPostStore seenPosts;
+    PostFeedQuery postFeedQuery;
     FeedCandidatePipeline candidatePipeline;
     FeedItemHydrator itemHydrator;
     FeedVectorSnapshotService vectorSnapshots;
-    FeedQueueCommitService queue;
-
-    @lombok.experimental.NonFinal
+    FeedQueue queue;
     MixedFeedService mixedFeedService;
-    @lombok.experimental.NonFinal
     com.dauducbach.clone.configuration.PostPopularityProperties popularityProperties;
-
-    @org.springframework.beans.factory.annotation.Autowired
-    public void configureMixedFeed(MixedFeedService mixedFeedService,
-            com.dauducbach.clone.configuration.PostPopularityProperties popularityProperties) {
-        this.mixedFeedService = mixedFeedService;
-        this.popularityProperties = popularityProperties;
-    }
 
     public Mono<FeedResponse> getFeed(String userId, int limit) {
         return getFeed(userId, limit, MediaDisplayType.FEED);
@@ -92,22 +76,13 @@ public class FeedService {
         MediaDisplayType displayType = mediaType == null ? MediaDisplayType.FEED : mediaType;
         int offset = safePage * safeLimit;
 
-        return postFeedQueryService
-                .getRecentFriendFeedActivities(cleanUserId, safeLimit + 1, offset)
+        return postFeedQuery
+                .findRecentFriendFeedActivities(cleanUserId, safeLimit + 1, offset)
                 .collectList()
                 .flatMap(activities -> {
                     boolean hasMore = activities.size() > safeLimit;
-                    return Flux.fromIterable(activities.stream().limit(safeLimit).toList())
-                            .concatMap(activity -> itemHydrator
-                                    .hydrateFriendActivity(cleanUserId, activity, displayType)
-                                    .onErrorResume(error -> {
-                                        log.warn(
-                                                "|FeedService|getFriendsFeed|skipActivity|feedEntryId={}|postId={}|error={}",
-                                                activity.feedEntryId(), activity.postId(), error.getMessage()
-                                        );
-                                        return Mono.empty();
-                                    }))
-                            .collectList()
+                    return itemHydrator.hydrateFriendActivities(
+                                    cleanUserId, activities.stream().limit(safeLimit).toList(), displayType)
                             .map(items -> new FeedResponse(cleanUserId, safeLimit, items, hasMore));
                 });
     }
@@ -152,8 +127,8 @@ public class FeedService {
     private Mono<List<String>> recentFallback(int limit, Set<String> seen, List<String> cached) {
         Set<String> excluded = new LinkedHashSet<>(seen);
         excluded.addAll(cached);
-        return postFeedQueryService.getRecentApprovedPosts(limit - cached.size(), excluded)
-                .map(post -> post.getPostId()).collectList().map(recent -> {
+        return postFeedQuery.findRecentApprovedPostIds(limit - cached.size(), excluded)
+                .collectList().map(recent -> {
                     List<String> ids = new java.util.ArrayList<>(cached);
                     ids.addAll(recent);
                     return List.copyOf(ids);
@@ -188,14 +163,7 @@ public class FeedService {
             List<String> postIds,
             MediaDisplayType mediaType
     ) {
-        return Flux.fromIterable(postIds)
-                .concatMap(postId -> getFeedItemForViewer(userId, postId, mediaType)
-                        .onErrorResume(error -> {
-                            log.warn("|FeedService|hydrateFeedItems|skip post|userId={}|postId={}|error={}",
-                                    userId, postId, error.getMessage());
-                            return Mono.empty();
-                        }))
-                .collectList();
+        return itemHydrator.hydratePage(userId, postIds, mediaType);
     }
 
     public Mono<FeedItemResponse> getFeedItemForViewer(
@@ -206,43 +174,16 @@ public class FeedService {
         return itemHydrator.hydrate(userId, postId, mediaType);
     }
     private Mono<Set<String>> loadSeenPostIds(String userId) {
-        return redisTemplate.opsForList()
-                .range(FeedCacheKeys.seenPost(userId), 0, -1)
-                .filter(postId -> postId != null && !postId.isBlank())
-                .collectList()
-                .map(postIds -> (Set<String>) new LinkedHashSet<>(postIds))
-                .onErrorResume(error -> {
-                    log.warn("|FeedService|loadSeenPostIds|failed|userId={}|error={}", userId, error.getMessage());
-                    return Mono.just(new LinkedHashSet<>());
-                });
+        return seenPosts.load(userId);
     }
 
     private Mono<Void> clearSeenPosts(String userId) {
-        return redisTemplate.delete(FeedCacheKeys.seenPost(userId))
-                .then()
-                .doOnSuccess(unused -> log.info("|FeedService|clearSeenPosts|userId={}", userId))
-                .onErrorResume(error -> {
-                    log.warn("|FeedService|clearSeenPosts|failed|userId={}|error={}", userId, error.getMessage());
-                    return Mono.empty();
-                });
+        return seenPosts.clear(userId)
+                .doOnSuccess(unused -> log.info("|FeedService|clearSeenPosts|userId={}", userId));
     }
 
     private Mono<Void> markSeenPosts(String userId, List<String> postIds) {
-        if (postIds == null || postIds.isEmpty()) {
-            return Mono.empty();
-        }
-
-        String seenKey = FeedCacheKeys.seenPost(userId);
-        return Flux.fromIterable(postIds)
-                .concatMap(postId -> redisTemplate.opsForList().rightPush(seenKey, postId))
-                .then(redisTemplate.opsForList().trim(seenKey, -SEEN_POST_LIMIT, -1))
-                .then(redisTemplate.expire(seenKey, SEEN_POST_TTL))
-                .then()
-                .onErrorResume(error -> {
-                    log.warn("|FeedService|markSeenPosts|failed|userId={}|count={}|error={}",
-                            userId, postIds.size(), error.getMessage());
-                    return Mono.empty();
-                });
+        return seenPosts.mark(userId, postIds);
     }
 
     private Mono<Void> removeReturnedFeedIds(String userId, List<String> postIds) {
@@ -257,11 +198,7 @@ public class FeedService {
     }
 
     private Mono<Boolean> resolveHasMore(String userId) {
-        return redisTemplate.opsForZSet()
-                .size(FeedCacheKeys.userFeed(userId))
-                .map(size -> size != null && size > 0)
-                .defaultIfEmpty(false)
-                .onErrorReturn(false);
+        return queue.hasMore(userId);
     }
 
 

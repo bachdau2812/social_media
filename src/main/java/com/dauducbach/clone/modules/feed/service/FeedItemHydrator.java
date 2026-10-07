@@ -1,358 +1,258 @@
 package com.dauducbach.clone.modules.feed.service;
 
-import com.dauducbach.clone.commons.constant.EntityType;
 import com.dauducbach.clone.modules.feed.constant.FeedActivityType;
-import com.dauducbach.clone.modules.feed.constant.FeedCacheKeys;
-import com.dauducbach.clone.modules.feed.dto.cache.FeedPostDetailsCache;
-import com.dauducbach.clone.modules.feed.dto.response.FeedItemResponse;
 import com.dauducbach.clone.modules.feed.dto.response.FeedActorResponse;
+import com.dauducbach.clone.modules.feed.dto.response.FeedItemResponse;
 import com.dauducbach.clone.modules.feed.dto.response.FeedMediaResponse;
+import com.dauducbach.clone.modules.feed.hydration.FeedHydrationBatch;
 import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import com.dauducbach.clone.modules.media.constant.OwnerType;
-import com.dauducbach.clone.modules.media.entity.Media;
-import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
-import com.dauducbach.clone.modules.media.service.MediaService;
+import com.dauducbach.clone.modules.media.publicapi.MediaAssetView;
+import com.dauducbach.clone.modules.media.publicapi.MediaAssets;
+import com.dauducbach.clone.modules.media.publicapi.MediaCatalog;
+import com.dauducbach.clone.modules.media.publicapi.MusicCatalog;
+import com.dauducbach.clone.modules.media.publicapi.MusicTrackView;
 import com.dauducbach.clone.modules.post.constant.PostMediaRatio;
-import com.dauducbach.clone.modules.post.dto.response.PostDetailResponse;
 import com.dauducbach.clone.modules.post.dto.response.FriendFeedActivityResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostItemResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostMediaResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostMusicResponse;
-import com.dauducbach.clone.modules.post.entity.PostDetails;
-import com.dauducbach.clone.modules.post.service.comment.CommentService;
-import com.dauducbach.clone.modules.post.service.post.LikeService;
-import com.dauducbach.clone.modules.post.service.post.PostDetailQueryService;
-import com.dauducbach.clone.modules.post.service.post.PostFeedQueryService;
-import com.dauducbach.clone.modules.post.service.post.RepostService;
-import com.dauducbach.clone.modules.user.entity.UserDetails;
-import com.dauducbach.clone.modules.user.service.MediaForProfile;
-import com.dauducbach.clone.modules.user.service.UserDetailsService;
-import com.dauducbach.clone.utils.RedisUtil;
+import com.dauducbach.clone.modules.post.publicapi.PostInteractionQuery;
+import com.dauducbach.clone.modules.post.publicapi.PostQuery;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentity;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentityQuery;
 import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class FeedItemHydrator {
-    private static final Logger log = LoggerFactory.getLogger(FeedItemHydrator.class);
-    private static final int POST_DETAILS_CACHE_SCHEMA_VERSION = 6;
-    private static final Duration POST_DETAILS_TTL = Duration.ofDays(1);
     private static final String FEED_RANKING_VERSION = "feed-v1";
     private static final String FEED_SOURCE_TYPE = "hybrid";
     private static final String FEED_RECOMMENDATION_REASON = "recommended_for_you";
 
-    private final ReactiveRedisTemplate<String, String> redisTemplate;
-    private final PostFeedQueryService postFeedQueryService;
-    private final PostDetailQueryService postDetailQueryService;
-    private final MediaCompatibilityFacade mediaFacade;
-    private final MediaService mediaService;
-    private final MediaForProfile mediaForProfile;
-    private final UserDetailsService userDetailsService;
-    private final LikeService likeService;
-    private final CommentService commentService;
-    private final RepostService repostService;
+    private final PostQuery postQuery;
+    private final PostInteractionQuery postInteractionQuery;
+    private final MediaCatalog mediaCatalog;
+    private final MusicCatalog musicCatalog;
+    private final MediaAssets mediaAssets;
+    private final UserIdentityQuery userIdentityQuery;
 
-    public Mono<FeedItemResponse> hydrate(String userId, String postId, MediaDisplayType mediaType) {
+    public Mono<List<FeedItemResponse>> hydratePage(
+            String viewerId,
+            List<String> candidatePostIds,
+            MediaDisplayType mediaType) {
+        List<String> ids = cleanIds(candidatePostIds);
+        if (ids.isEmpty()) return Mono.just(List.of());
         MediaDisplayType displayType = mediaType == null ? MediaDisplayType.FEED : mediaType;
-        return postFeedQueryService.getApprovedPostById(postId)
-                .flatMap(post -> getCachedPostDetails(postId)
-                        .filter(cache -> Objects.equals(cache.getUpdatedAt(), post.getUpdatedAt()))
-                        .switchIfEmpty(Mono.defer(() -> buildAndCachePostDetails(post))))
-                .flatMap(cache -> Mono.zip(
-                                likeService.countLikes(postId, EntityType.POST.name()).onErrorReturn(0L),
-                                commentService.countCommentsByPostId(postId).onErrorReturn(0L),
-                                repostService.countReposts(postId).onErrorReturn(0L),
-                                likeService.hasLiked(userId, postId, EntityType.POST.name()).onErrorReturn(false),
-                                repostService.hasReposted(userId, postId).onErrorReturn(false),
-                                resolveFeedMusic(cache).map(Optional::of).defaultIfEmpty(Optional.empty())
-                        )
-                        .map(state -> toResponse(
-                                userId,
-                                cache,
-                                displayType,
-                                state.getT1(),
-                                state.getT2(),
-                                state.getT3(),
-                                state.getT4(),
-                                state.getT5(),
-                                state.getT6().orElse(null)
-                        )));
+        return loadBatch(viewerId, ids, List.of())
+                .map(batch -> ids.stream()
+                        .map(batch.postsById()::get)
+                        .filter(java.util.Objects::nonNull)
+                        .map(post -> toResponse(viewerId, post, batch, displayType))
+                        .toList());
+    }
+
+    public Mono<FeedItemResponse> hydrate(String viewerId, String postId, MediaDisplayType mediaType) {
+        if (!hasText(postId)) return Mono.empty();
+        return hydratePage(viewerId, List.of(postId), mediaType)
+                .flatMap(items -> items.isEmpty() ? Mono.empty() : Mono.just(items.get(0)));
+    }
+
+    public Mono<List<FeedItemResponse>> hydrateFriendActivities(
+            String viewerId,
+            List<FriendFeedActivityResponse> activities,
+            MediaDisplayType mediaType) {
+        List<FriendFeedActivityResponse> validActivities = activities == null ? List.of() : activities.stream()
+                .filter(activity -> activity != null && hasText(activity.postId()))
+                .toList();
+        if (validActivities.isEmpty()) return Mono.just(List.of());
+        List<String> postIds = cleanIds(validActivities.stream().map(FriendFeedActivityResponse::postId).toList());
+        List<String> actorIds = validActivities.stream()
+                .filter(activity -> parseActivityType(activity.activityType()) == FeedActivityType.REPOST)
+                .map(FriendFeedActivityResponse::actorId)
+                .toList();
+        MediaDisplayType displayType = mediaType == null ? MediaDisplayType.FEED : mediaType;
+        return loadBatch(viewerId, postIds, actorIds).map(batch -> validActivities.stream()
+                .map(activity -> {
+                    PostQuery.FeedPostSnapshot post = batch.postsById().get(activity.postId());
+                    if (post == null) return null;
+                    FeedItemResponse item = toResponse(viewerId, post, batch, displayType);
+                    FeedActivityType activityType = parseActivityType(activity.activityType());
+                    FeedActorResponse actor = activityType == FeedActivityType.REPOST
+                            ? toActor(activity.actorId(), batch.identitiesByUserId())
+                            : null;
+                    return item.withActivity(activity.feedEntryId(), activityType, activity.activityAt(), actor);
+                })
+                .filter(java.util.Objects::nonNull)
+                .toList());
     }
 
     public Mono<FeedItemResponse> hydrateFriendActivity(
-            String viewerUserId,
+            String viewerId,
             FriendFeedActivityResponse activity,
-            MediaDisplayType mediaType
-    ) {
-        if (activity == null || activity.postId() == null || activity.postId().isBlank()) {
-            return Mono.empty();
-        }
-
-        FeedActivityType activityType = parseActivityType(activity.activityType());
-        Mono<FeedItemResponse> hydratedPost = hydrate(viewerUserId, activity.postId(), mediaType);
-        if (activityType != FeedActivityType.REPOST) {
-            return hydratedPost.map(item -> item.withActivity(
-                    activity.feedEntryId(), activityType, activity.activityAt(), null));
-        }
-        return hydratedPost.flatMap(item -> resolveFeedActor(activity.actorId())
-                .map(actor -> item.withActivity(
-                        activity.feedEntryId(), activityType, activity.activityAt(), actor)));
+            MediaDisplayType mediaType) {
+        return hydrateFriendActivities(viewerId, List.of(activity), mediaType)
+                .flatMap(items -> items.isEmpty() ? Mono.empty() : Mono.just(items.get(0)));
     }
 
-    private Mono<FeedActorResponse> resolveFeedActor(String actorId) {
-        String cleanActorId = actorId == null ? "" : actorId.trim();
-        UserDetails fallback = UserDetails.builder()
-                .userId(cleanActorId)
-                .username(cleanActorId)
-                .fullName(cleanActorId)
-                .build();
-        Mono<UserDetails> details = userDetailsService.getUserDetailsById(cleanActorId)
-                .defaultIfEmpty(fallback)
-                .onErrorReturn(fallback);
-        Mono<String> avatar = mediaForProfile.getCurrentAvatar(cleanActorId, MediaDisplayType.AVATAR)
-                .map(media -> firstNonBlank(media.getSecureUrl(), media.getUrl()))
-                .defaultIfEmpty("")
-                .onErrorReturn("");
+    private Mono<FeedHydrationBatch> loadBatch(String viewerId, List<String> postIds, List<String> additionalIdentityIds) {
+        return postQuery.findApprovedFeedSnapshots(postIds).collectList().flatMap(posts -> {
+            Map<String, PostQuery.FeedPostSnapshot> postsById = posts.stream()
+                    .filter(post -> hasText(post.postId()))
+                    .collect(Collectors.toMap(PostQuery.FeedPostSnapshot::postId, post -> post, (first, ignored) -> first));
+            List<String> availablePostIds = cleanIds(posts.stream().map(PostQuery.FeedPostSnapshot::postId).toList());
+            List<String> identityIds = new ArrayList<>(posts.stream()
+                    .map(PostQuery.FeedPostSnapshot::ownerId).toList());
+            if (additionalIdentityIds != null) identityIds.addAll(additionalIdentityIds);
+            identityIds = cleanIds(identityIds);
+            List<String> assetIds = cleanIds(posts.stream().flatMap(post -> post.items().stream())
+                    .map(PostQuery.FeedItemSnapshot::mediaId).toList());
+            List<String> musicIds = cleanIds(posts.stream().flatMap(post -> {
+                List<String> ids = new ArrayList<>();
+                if (hasText(post.musicId())) ids.add(post.musicId());
+                else post.items().stream().map(PostQuery.FeedItemSnapshot::musicId).filter(this::hasText).forEach(ids::add);
+                return ids.stream();
+            }).toList());
 
-        return Mono.zip(details, avatar)
-                .map(result -> new FeedActorResponse(
-                        cleanActorId,
-                        firstNonBlank(result.getT1().getUsername(), cleanActorId),
-                        firstNonBlank(
-                                result.getT1().getFullName(),
-                                result.getT1().getUsername(),
-                                cleanActorId
-                        ),
-                        result.getT2()
-                ));
-    }
+            Mono<Map<String, PostInteractionQuery.Snapshot>> interactions = postInteractionQuery
+                    .findSnapshots(postIds, viewerId)
+                    .collectMap(PostInteractionQuery.SnapshotEntry::postId, PostInteractionQuery.SnapshotEntry::snapshot)
+                    .onErrorReturn(Map.of());
+            Mono<Map<String, UserIdentity>> identities = identityIds.isEmpty() ? Mono.just(Map.of())
+                    : userIdentityQuery.findIdentities(identityIds).collectMap(UserIdentity::userId).onErrorReturn(Map.of());
+            Mono<Map<String, MediaAssetView>> assets = assetIds.isEmpty() ? Mono.just(Map.of())
+                    : mediaCatalog.findByIds(assetIds).collectMap(MediaAssetView::assetId).onErrorReturn(Map.of());
+            Mono<Map<String, List<MediaAssetView>>> mediaByOwner = availablePostIds.isEmpty() ? Mono.just(Map.of())
+                    : mediaCatalog.findByOwnerIds(availablePostIds, OwnerType.POST)
+                    .collectMultimap(MediaAssetView::ownerId)
+                    .map(grouped -> grouped.entrySet().stream().collect(Collectors.toMap(
+                            Map.Entry::getKey, entry -> List.copyOf(entry.getValue()))))
+                    .onErrorReturn(Map.of());
+            Mono<Map<String, MusicTrackView>> music = musicIds.isEmpty() ? Mono.just(Map.of())
+                    : musicCatalog.findAllByIds(musicIds).collectMap(MusicTrackView::id).onErrorReturn(Map.of());
 
-    private FeedActivityType parseActivityType(String value) {
-        if (value == null || value.isBlank()) {
-            return FeedActivityType.ORIGINAL_POST;
-        }
-        try {
-            return FeedActivityType.valueOf(value.trim().toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException ignored) {
-            return FeedActivityType.ORIGINAL_POST;
-        }
-    }
-
-    private Mono<FeedPostDetailsCache> getCachedPostDetails(String postId) {
-        return redisTemplate.opsForValue()
-                .get(FeedCacheKeys.postDetails(postId))
-                .map(json -> RedisUtil.deserialize(json, FeedPostDetailsCache.class))
-                .filter(cache -> cache != null
-                        && cache.getSchemaVersion() == POST_DETAILS_CACHE_SCHEMA_VERSION
-                        && cache.getPostId() != null
-                        && !cache.getPostId().isBlank())
-                .onErrorResume(error -> {
-                    log.warn("|FeedItemHydrator|getCachedPostDetails|failed|postId={}|error={}",
-                            postId, error.getMessage());
-                    return Mono.empty();
-                });
-    }
-
-    private Mono<FeedPostDetailsCache> buildAndCachePostDetails(PostDetails post) {
-        return buildPostDetailsCache(post)
-                .flatMap(cache -> {
-                    String json = RedisUtil.serialize(cache);
-                    if (json == null) {
-                        return Mono.just(cache);
-                    }
-                    return redisTemplate.opsForValue()
-                            .set(FeedCacheKeys.postDetails(post.getPostId()), json, POST_DETAILS_TTL)
-                            .onErrorResume(error -> {
-                                log.warn("|FeedItemHydrator|buildAndCachePostDetails|cache write failed|postId={}|error={}",
-                                        post.getPostId(), error.getMessage());
-                                return Mono.empty();
-                            })
-                            .thenReturn(cache);
-                });
-    }
-
-    private Mono<FeedPostDetailsCache> buildPostDetailsCache(PostDetails post) {
-        UserDetails fallbackAuthor = UserDetails.builder()
-                .userId(post.getUserId())
-                .username(post.getUserId())
-                .fullName(post.getUserId())
-                .build();
-        Mono<UserDetails> authorDetails = userDetailsService.getUserDetailsById(post.getUserId())
-                .defaultIfEmpty(fallbackAuthor)
-                .onErrorReturn(fallbackAuthor);
-        Mono<String> authorAvatarUrl = mediaForProfile.getCurrentAvatar(post.getUserId(), MediaDisplayType.AVATAR)
-                .map(avatar -> firstNonBlank(avatar.getSecureUrl(), avatar.getUrl()))
-                .defaultIfEmpty("")
-                .onErrorReturn("");
-        Mono<List<FeedMediaResponse>> media = mediaService.getByOwnerId(post.getPostId(), OwnerType.POST)
-                .map(this::toMediaResponse)
-                .collectList()
-                .onErrorReturn(List.of());
-        Mono<PostDetailResponse> rawPostDetail = postDetailQueryService.getRawPostDetail(post);
-
-        return Mono.zip(authorDetails, authorAvatarUrl, media, rawPostDetail)
-                .map(tuple -> FeedPostDetailsCache.builder()
-                        .schemaVersion(POST_DETAILS_CACHE_SCHEMA_VERSION)
-                        .postId(post.getPostId())
-                        .userId(post.getUserId())
-                        .content(post.getContent())
-                        .hashtag(post.getHashtag())
-                        .hashtags(post.getHashtagList())
-                        .mediaRatio(PostMediaRatio.defaultIfMissing(post.getMediaRatio()))
-                        .createdAt(post.getCreatedAt())
-                        .updatedAt(post.getUpdatedAt())
-                        .validateStatus(post.getValidateStatus())
-                        .authorUsername(firstNonBlank(tuple.getT1().getUsername(), post.getUserId()))
-                        .authorFullName(firstNonBlank(
-                                tuple.getT1().getFullName(),
-                                tuple.getT1().getUsername(),
-                                post.getUserId()))
-                        .authorAvatarUrl(tuple.getT2())
-                        .media(tuple.getT3())
-                        .musicId(post.getMusicId())
-                        .musicStart(post.getMusicStart())
-                        .musicEnd(post.getMusicEnd())
-                        .music(tuple.getT4().music())
-                        .items(tuple.getT4().items())
-                        .build());
+            return Mono.zip(interactions, identities, assets, mediaByOwner, music)
+                    .map(result -> new FeedHydrationBatch(postsById, result.getT1(), result.getT2(), result.getT3(),
+                            result.getT4(), result.getT5()));
+        });
     }
 
     private FeedItemResponse toResponse(
-            String viewerUserId,
-            FeedPostDetailsCache cache,
-            MediaDisplayType mediaType,
-            long likeCount,
-            long commentCount,
-            long repostCount,
-            boolean likedByCurrentUser,
-            boolean repostedByCurrentUser,
-            PostMusicResponse music
-    ) {
-        List<FeedMediaResponse> media = cache.getMedia() == null
-                ? List.of()
-                : cache.getMedia().stream()
-                .map(item -> transformMediaForDisplay(item, mediaType))
+            String viewerId,
+            PostQuery.FeedPostSnapshot post,
+            FeedHydrationBatch batch,
+            MediaDisplayType displayType) {
+        UserIdentity author = identity(post.ownerId(), batch.identitiesByUserId());
+        List<MediaAssetView> ownerAssets = batch.mediaByOwnerId().getOrDefault(post.postId(), List.of()).stream()
+                .sorted(Comparator.comparing(MediaAssetView::createdAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(MediaAssetView::assetId, Comparator.nullsLast(Comparator.naturalOrder())))
                 .toList();
-        List<PostItemResponse> items = cache.getItems() == null
-                ? List.of()
-                : cache.getItems().stream()
-                .map(item -> transformItemForDisplay(item, mediaType))
+        List<FeedMediaResponse> media = ownerAssets.stream().map(asset -> toFeedMedia(asset, displayType)).toList();
+        List<PostItemResponse> items = post.items().stream()
+                .sorted(Comparator.comparing(PostQuery.FeedItemSnapshot::orderNumber,
+                        Comparator.nullsLast(Comparator.naturalOrder())))
+                .map(item -> toPostItem(post, item, batch, displayType))
+                .filter(java.util.Objects::nonNull)
                 .toList();
-
+        if (items.isEmpty() && post.items().isEmpty() && !ownerAssets.isEmpty()) {
+            MediaAssetView first = ownerAssets.get(0);
+            items = List.of(new PostItemResponse(first.assetId(), 1, null, toPostMedia(first, displayType), null));
+        }
+        PostInteractionQuery.Snapshot interaction = batch.interactionsByPostId().getOrDefault(post.postId(),
+                new PostInteractionQuery.Snapshot(0, 0, 0, false, false));
+        PostMusicResponse sharedMusic = resolveMusic(hasText(post.musicId())
+                ? batch.musicById().get(post.musicId()) : null, post.musicStart(), post.musicEnd());
         return new FeedItemResponse(
-                cache.getPostId(),
-                cache.getUserId(),
-                cache.getAuthorUsername(),
-                firstNonBlank(cache.getAuthorFullName(), cache.getAuthorUsername(), cache.getUserId()),
-                firstNonBlank(cache.getAuthorAvatarUrl()),
-                cache.getContent(),
-                cache.getHashtags() == null ? List.of() : cache.getHashtags(),
-                PostMediaRatio.defaultIfMissing(cache.getMediaRatio()),
-                media,
-                music,
-                items,
-                likeCount,
-                commentCount,
-                repostCount,
-                likedByCurrentUser,
-                repostedByCurrentUser,
-                cache.getCreatedAt(),
-                cache.getUpdatedAt(),
-                FEED_SOURCE_TYPE,
-                FEED_RECOMMENDATION_REASON,
-                FEED_RANKING_VERSION,
-                null,
-                buildImpressionToken(viewerUserId, cache.getPostId()),
-                null,
-                null,
-                null,
-                null
-        );
+                post.postId(), post.ownerId(), author.username(), firstNonBlank(author.fullName(), author.username(), post.ownerId()),
+                author.avatarUrl(), post.content(), post.hashtags(), PostMediaRatio.defaultIfMissing(post.mediaRatio()),
+                media, sharedMusic, items, interaction.likes(), interaction.comments(), interaction.reposts(),
+                interaction.likedByViewer(), interaction.repostedByViewer(), post.createdAt(), post.updatedAt(),
+                FEED_SOURCE_TYPE, FEED_RECOMMENDATION_REASON, FEED_RANKING_VERSION, null,
+                buildImpressionToken(viewerId, post.postId()), null, null, null, null);
     }
 
-    private Mono<PostMusicResponse> resolveFeedMusic(FeedPostDetailsCache cache) {
-        String musicId = cache.getMusicId();
-        if (musicId == null || musicId.isBlank()) {
-            return Mono.empty();
+    private PostItemResponse toPostItem(
+            PostQuery.FeedPostSnapshot post,
+            PostQuery.FeedItemSnapshot item,
+            FeedHydrationBatch batch,
+            MediaDisplayType displayType) {
+        MediaAssetView asset = hasText(item.mediaId()) ? batch.assetsById().get(item.mediaId()) : null;
+        if (asset == null) return null;
+        PostMusicResponse itemMusic = hasText(post.musicId()) ? null
+                : resolveMusic(hasText(item.musicId()) ? batch.musicById().get(item.musicId()) : null,
+                        item.musicStart(), item.musicEnd());
+        return new PostItemResponse(item.id(), item.orderNumber(), item.caption(), toPostMedia(asset, displayType), itemMusic);
+    }
+
+    private FeedMediaResponse toFeedMedia(MediaAssetView asset, MediaDisplayType displayType) {
+        return new FeedMediaResponse(asset.assetId(), asset.publicId(), asset.mediaFormat(), asset.resourceType(),
+                mediaAssets.transformDeliveryUrl(asset.url(), displayType),
+                mediaAssets.transformDeliveryUrl(asset.secureUrl(), displayType), asset.displayName());
+    }
+
+    private PostMediaResponse toPostMedia(MediaAssetView asset, MediaDisplayType displayType) {
+        return new PostMediaResponse(asset.assetId(), asset.publicId(), asset.mediaFormat(), asset.resourceType(),
+                mediaAssets.transformDeliveryUrl(asset.url(), displayType),
+                mediaAssets.transformDeliveryUrl(asset.secureUrl(), displayType), asset.displayName(),
+                asset.width(), asset.height());
+    }
+
+    private PostMusicResponse resolveMusic(MusicTrackView track, Long start, Long end) {
+        if (track == null) return null;
+        String playbackUrl = track.songUrl();
+        if (hasText(playbackUrl) && start != null && end != null && start >= 0 && end > start) {
+            playbackUrl = mediaAssets.transformMusicUrl(playbackUrl, start, end);
         }
-        return postDetailQueryService.getMusicResponse(musicId, cache.getMusicStart(), cache.getMusicEnd())
-                .switchIfEmpty(Mono.justOrEmpty(cache.getMusic()))
-                .onErrorResume(error -> Mono.justOrEmpty(cache.getMusic()));
+        return new PostMusicResponse(track.id(), track.displayName(), track.singleName(), track.displayImages(),
+                playbackUrl, start, end, track.duration());
     }
 
-    private FeedMediaResponse transformMediaForDisplay(FeedMediaResponse media, MediaDisplayType mediaType) {
-        return new FeedMediaResponse(
-                media.assetId(),
-                media.publicId(),
-                media.mediaFormat(),
-                media.resourceType(),
-                mediaFacade.transformDeliveryUrl(media.url(), mediaType),
-                mediaFacade.transformDeliveryUrl(media.secureUrl(), mediaType),
-                media.displayName()
-        );
+    private FeedActorResponse toActor(String actorId, Map<String, UserIdentity> identities) {
+        String cleanId = actorId == null ? "" : actorId.trim();
+        UserIdentity actor = identity(cleanId, identities);
+        return new FeedActorResponse(cleanId, actor.username(), firstNonBlank(actor.fullName(), actor.username(), cleanId),
+                actor.avatarUrl());
     }
 
-    private PostItemResponse transformItemForDisplay(PostItemResponse item, MediaDisplayType mediaType) {
-        PostMediaResponse media = item.media();
-        if (media == null) {
-            return item;
-        }
-        return new PostItemResponse(
-                item.id(),
-                item.orderNumber(),
-                item.caption(),
-                new PostMediaResponse(
-                        media.assetId(),
-                        media.publicId(),
-                        media.mediaFormat(),
-                        media.resourceType(),
-                        mediaFacade.transformDeliveryUrl(media.url(), mediaType),
-                        mediaFacade.transformDeliveryUrl(media.secureUrl(), mediaType),
-                        media.displayName(),
-                        media.width(),
-                        media.height()
-                ),
-                item.music()
-        );
+    private UserIdentity identity(String userId, Map<String, UserIdentity> identities) {
+        String cleanId = userId == null ? "" : userId.trim();
+        UserIdentity found = identities.get(cleanId);
+        return found == null ? new UserIdentity(cleanId, cleanId, cleanId, "") : found;
     }
 
-    private FeedMediaResponse toMediaResponse(Media media) {
-        return new FeedMediaResponse(
-                media.getAssetId(),
-                media.getPublicId(),
-                media.getMediaFormat(),
-                media.getResourceType(),
-                media.getUrl(),
-                media.getSecureUrl(),
-                media.getDisplayName()
-        );
+    private FeedActivityType parseActivityType(String value) {
+        if (value == null || value.isBlank()) return FeedActivityType.ORIGINAL_POST;
+        try { return FeedActivityType.valueOf(value.trim().toUpperCase(Locale.ROOT)); }
+        catch (IllegalArgumentException ignored) { return FeedActivityType.ORIGINAL_POST; }
     }
 
-    private String buildImpressionToken(String viewerUserId, String postId) {
-        String viewer = viewerUserId == null ? "" : viewerUserId.trim();
-        String post = postId == null ? "" : postId.trim();
-        String material = viewer + ":" + post + ":" + FEED_RANKING_VERSION;
+    private String buildImpressionToken(String viewerId, String postId) {
+        String material = (viewerId == null ? "" : viewerId.trim()) + ":" + postId + ":" + FEED_RANKING_VERSION;
         return FEED_RANKING_VERSION + ":" + UUID.nameUUIDFromBytes(material.getBytes(StandardCharsets.UTF_8));
     }
 
+    private List<String> cleanIds(Collection<String> values) {
+        return values == null ? List.of() : values.stream().filter(this::hasText).map(String::trim).distinct().toList();
+    }
+
     private String firstNonBlank(String... values) {
-        for (String value : values) {
-            if (value != null && !value.isBlank()) {
-                return value.trim();
-            }
-        }
+        for (String value : values) if (hasText(value)) return value.trim();
         return "";
     }
+
+    private boolean hasText(String value) { return value != null && !value.isBlank(); }
 }

@@ -1,17 +1,17 @@
 package com.dauducbach.clone.modules.post.service.post;
 
-import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
-
-import com.dauducbach.clone.modules.media.entity.Media;
+import com.dauducbach.clone.modules.media.publicapi.MediaAssetView;
+import com.dauducbach.clone.modules.media.publicapi.MediaAssets;
+import com.dauducbach.clone.modules.media.publicapi.MediaCatalog;
+import com.dauducbach.clone.modules.media.publicapi.MusicCatalog;
+import com.dauducbach.clone.modules.media.publicapi.MusicTrackView;
 import com.dauducbach.clone.modules.post.entity.PostDetails;
+import com.dauducbach.clone.modules.post.query.PostContentQueryService;
 import com.dauducbach.clone.modules.post.entity.PostItem;
 import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
-import com.dauducbach.clone.modules.media.service.MediaService;
-import com.dauducbach.clone.modules.post.repositoty.PostItemRepository;
-import com.dauducbach.clone.modules.media.entity.music.Musics;
-import com.dauducbach.clone.modules.user.entity.UserDetails;
-import com.dauducbach.clone.modules.media.service.music.MusicService;
-import com.dauducbach.clone.modules.user.service.UserDetailsService;
+import com.dauducbach.clone.modules.post.repository.PostItemRepository;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentity;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentityQuery;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -32,17 +32,17 @@ import static org.mockito.Mockito.when;
 class PostDetailQueryServiceTest {
 
     @Mock
-    PostService postService;
+    PostContentQueryService postContentQueryService;
     @Mock
     PostItemRepository postItemRepository;
     @Mock
-    MediaService mediaService;
+    MediaCatalog mediaCatalog;
     @Mock
-    MusicService musicService;
+    MusicCatalog musicCatalog;
     @Mock
-    UserDetailsService userDetailsService;
+    UserIdentityQuery userIdentityQuery;
     @Mock
-    MediaCompatibilityFacade cloudinaryMediaService;
+    MediaAssets mediaAssets;
 
     @InjectMocks
     PostDetailQueryService service;
@@ -75,47 +75,29 @@ class PostDetailQueryServiceTest {
                 .mediaId("media-1")
                 .caption("First caption")
                 .build();
-        Media firstMedia = Media.builder()
-                .assetId("media-1")
-                .publicId("public-1")
-                .resourceType("image")
-                .mediaFormat("jpg")
-                .secureUrl("https://media/first.jpg")
-                .width(1200)
-                .height(1500)
-                .build();
-        Media secondMedia = Media.builder()
-                .assetId("media-2")
-                .publicId("public-2")
-                .resourceType("video")
-                .mediaFormat("mp4")
-                .secureUrl("https://media/second.mp4")
-                .width(1080)
-                .height(1920)
-                .build();
-        Musics sharedMusic = Musics.builder()
-                .id("shared-music")
-                .displayName("Midnight Echo")
-                .singleName("North Avenue")
-                .songUrl("https://music/shared.mp3")
-                .duration(220L)
-                .build();
+        MediaAssetView firstMedia = media("media-1", "public-1", "image", "jpg",
+                "https://media/first.jpg", 1200, 1500);
+        MediaAssetView secondMedia = media("media-2", "public-2", "video", "mp4",
+                "https://media/second.mp4", 1080, 1920);
+        MusicTrackView sharedMusic = new MusicTrackView("shared-music", null, "Midnight Echo",
+                null, null, "North Avenue", "https://music/shared.mp3", 220L,
+                null, null, null, null, null);
 
-        when(postService.getPostById("post-1")).thenReturn(Mono.just(post));
+        when(postContentQueryService.findById("post-1")).thenReturn(Mono.just(post));
         when(postItemRepository.findByPostIdOrderByOrderNumberAsc("post-1"))
                 .thenReturn(Flux.just(second, first));
-        when(mediaService.getById("media-1")).thenReturn(Mono.just(firstMedia));
-        when(mediaService.getById("media-2")).thenReturn(Mono.just(secondMedia));
-        when(musicService.getMusicById("shared-music")).thenReturn(Mono.just(sharedMusic));
-        when(userDetailsService.getUserDetailsById("user-1"))
-                .thenReturn(Mono.just(UserDetails.builder().userId("user-1").username("bach").fullName("Bach").build()));
-        when(cloudinaryMediaService.transformMusicUrl("https://music/shared.mp3", 10L, 40L))
+        when(mediaCatalog.findById("media-1")).thenReturn(Mono.just(firstMedia));
+        when(mediaCatalog.findById("media-2")).thenReturn(Mono.just(secondMedia));
+        when(musicCatalog.findById("shared-music")).thenReturn(Mono.just(sharedMusic));
+        when(userIdentityQuery.resolveIdentity("user-1"))
+                .thenReturn(Mono.just(new UserIdentity("user-1", "bach", "Bach", "")));
+        when(mediaAssets.transformMusicUrl("https://music/shared.mp3", 10L, 40L))
                 .thenReturn("https://music/shared-transformed.mp3");
-        when(cloudinaryMediaService.transformDeliveryUrl(isNull(), eq(MediaDisplayType.POST)))
+        when(mediaAssets.transformDeliveryUrl(isNull(), eq(MediaDisplayType.POST)))
                 .thenReturn(null);
-        when(cloudinaryMediaService.transformDeliveryUrl("https://media/first.jpg", MediaDisplayType.POST))
+        when(mediaAssets.transformDeliveryUrl("https://media/first.jpg", MediaDisplayType.POST))
                 .thenReturn("https://media/first.jpg");
-        when(cloudinaryMediaService.transformDeliveryUrl("https://media/second.mp4", MediaDisplayType.POST))
+        when(mediaAssets.transformDeliveryUrl("https://media/second.mp4", MediaDisplayType.POST))
                 .thenReturn("https://media/second.mp4");
 
         StepVerifier.create(service.getPostDetail("post-1"))
@@ -130,5 +112,17 @@ class PostDetailQueryServiceTest {
                             response.items().getFirst().media().secureUrl());
                 })
                 .verifyComplete();
+    }
+
+    private MediaAssetView media(
+            String id,
+            String publicId,
+            String resourceType,
+            String format,
+            String secureUrl,
+            int width,
+            int height) {
+        return new MediaAssetView(id, publicId, width, height, format, resourceType, 0,
+                null, secureUrl, null, null, null, null, null, null, null);
     }
 }

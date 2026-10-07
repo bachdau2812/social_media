@@ -1,6 +1,6 @@
 package com.dauducbach.clone.modules.user.entity;
 
-import com.dauducbach.clone.utils.GsonUtils;
+import com.dauducbach.clone.commons.serialization.GsonUtils;
 import com.google.gson.reflect.TypeToken;
 import lombok.AllArgsConstructor;
 import lombok.Builder;

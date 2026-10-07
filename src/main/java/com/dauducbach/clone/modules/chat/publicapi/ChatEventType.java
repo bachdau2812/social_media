@@ -1,0 +1,15 @@
+package com.dauducbach.clone.modules.chat.publicapi;
+
+public enum ChatEventType {
+    MESSAGE_CREATED,
+    MESSAGE_REACTION_CHANGED,
+    CURSOR_UPDATED,
+    MESSAGE_UPDATED,
+    MESSAGE_DELETED,
+    PINS_CHANGED,
+    GROUP_CREATED,
+    MEMBER_REQUESTED,
+    MEMBER_ADDED,
+    MEMBER_REMOVED,
+    MEMBER_ROLE_CHANGED
+}

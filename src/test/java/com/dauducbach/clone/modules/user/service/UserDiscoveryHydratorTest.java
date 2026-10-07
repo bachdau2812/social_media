@@ -1,9 +1,8 @@
 package com.dauducbach.clone.modules.user.service;
 
-import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
-import com.dauducbach.clone.modules.media.entity.Media;
-import com.dauducbach.clone.modules.user.entity.UserDetails;
-import com.dauducbach.clone.modules.user.repositoty.UserFollowerRepository;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentity;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentityQuery;
+import com.dauducbach.clone.modules.user.repository.UserFollowerRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -17,30 +16,18 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class UserDiscoveryHydratorTest {
     @Mock
-    UserDetailsService userDetailsService;
-    @Mock
-    MediaForProfile mediaForProfile;
+    UserIdentityQuery userIdentityQuery;
     @Mock
     UserFollowerRepository followerRepository;
 
     @Test
     void hydratesAvatarAndMutualRelationship() {
         UserDiscoveryHydrator hydrator = new UserDiscoveryHydrator(
-                userDetailsService,
-                mediaForProfile,
+                userIdentityQuery,
                 followerRepository
         );
-        UserDetails details = UserDetails.builder()
-                .userId("target-1")
-                .username("bach")
-                .fullName("Dau Duc Bach")
-                .build();
-        Media avatar = Media.builder()
-                .secureUrl("https://cdn/avatar-transformed.jpg")
-                .build();
-
-        when(userDetailsService.getUserDetailsById("target-1")).thenReturn(Mono.just(details));
-        when(mediaForProfile.getCurrentAvatar("target-1", MediaDisplayType.AVATAR)).thenReturn(Mono.just(avatar));
+        when(userIdentityQuery.findIdentity("target-1")).thenReturn(Mono.just(new UserIdentity(
+                "target-1", "bach", "Dau Duc Bach", "https://cdn/avatar-transformed.jpg")));
         when(followerRepository.existsByFollowerIdAndFollowingId("viewer-1", "target-1"))
                 .thenReturn(Mono.just(true));
         when(followerRepository.existsByFollowerIdAndFollowingId("target-1", "viewer-1"))

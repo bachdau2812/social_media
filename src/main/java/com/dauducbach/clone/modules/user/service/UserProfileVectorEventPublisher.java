@@ -1,8 +1,8 @@
 package com.dauducbach.clone.modules.user.service;
 
-import com.dauducbach.clone.modules.user.constant.UserProfileVectorTopics;
+import com.dauducbach.clone.modules.user.publicapi.UserProfileVectorTopics;
 import com.dauducbach.clone.modules.user.entity.UserDetails;
-import com.dauducbach.clone.utils.GsonUtils;
+import com.dauducbach.clone.commons.serialization.GsonUtils;
 import com.google.gson.JsonObject;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;

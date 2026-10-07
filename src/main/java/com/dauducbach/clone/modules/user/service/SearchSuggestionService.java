@@ -5,21 +5,16 @@ import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.user.dto.response.SearchSuggestionResponse;
 import com.dauducbach.clone.modules.user.entity.SearchKeyword;
 import com.dauducbach.clone.modules.user.entity.UserSearchHistory;
-import com.dauducbach.clone.modules.user.repositoty.SearchKeywordRepository;
-import com.dauducbach.clone.modules.user.repositoty.UserSearchHistoryRepository;
-import com.dauducbach.clone.utils.GsonUtils;
-import com.google.gson.reflect.TypeToken;
+import com.dauducbach.clone.modules.user.repository.SearchKeywordRepository;
+import com.dauducbach.clone.modules.user.repository.UserSearchHistoryRepository;
+import com.dauducbach.clone.modules.user.search.application.SearchSuggestionCache;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
-import org.springframework.data.domain.Range;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.lang.reflect.Type;
 import java.text.Normalizer;
 import java.time.Duration;
 import java.time.Instant;
@@ -39,9 +34,6 @@ public class SearchSuggestionService {
     private static final String HISTORY_SOURCE = "HISTORY";
     private static final String GLOBAL_SOURCE = "GLOBAL";
     private static final String TRENDING_SOURCE = "TRENDING";
-    private static final String HISTORY_CACHE_PREFIX = "search:history:";
-    private static final String GLOBAL_PREFIX_CACHE_PREFIX = "search:suggest:global:";
-    private static final String TRENDING_CACHE_PREFIX = "search:trending:";
     private static final Duration HISTORY_CACHE_TTL = Duration.ofHours(3);
     private static final Duration GLOBAL_PREFIX_CACHE_TTL = Duration.ofMinutes(5);
     private static final Duration TRENDING_CACHE_TTL = Duration.ofDays(14);
@@ -55,7 +47,7 @@ public class SearchSuggestionService {
 
     UserSearchHistoryRepository userSearchHistoryRepository;
     SearchKeywordRepository searchKeywordRepository;
-    ReactiveRedisTemplate<String, String> redisTemplate;
+    SearchSuggestionCache suggestionCache;
 
     public Mono<List<SearchSuggestionResponse>> getSuggestions(String userId, String query, int limit) {
         int pageSize = normalizeLimit(limit);
@@ -125,12 +117,7 @@ public class SearchSuggestionService {
         String cleanUserId = validateUserId(userId);
 
         return userSearchHistoryRepository.deleteAllByUserId(cleanUserId)
-                .then(redisTemplate.delete(historyCacheKey(cleanUserId)).onErrorResume(error -> {
-                    log.warn("|SearchSuggestionService|clearHistory|cache delete failed|userId={}|error={}",
-                            cleanUserId, error.getMessage());
-                    return Mono.just(0L);
-                }))
-                .then()
+                .then(suggestionCache.clearHistory(cleanUserId))
                 .doOnSuccess(v -> log.info("|SearchSuggestionService|clearHistory|success|userId={}", cleanUserId))
                 .onErrorMap(error -> error instanceof AppException
                         ? error
@@ -195,16 +182,7 @@ public class SearchSuggestionService {
         }
 
         String cleanUserId = userId.trim();
-        String cacheKey = historyCacheKey(cleanUserId);
-
-        return redisTemplate.opsForZSet()
-                .reverseRange(cacheKey, Range.closed(0L, (long) HISTORY_CACHE_LOAD_LIMIT - 1))
-                .collectList()
-                .onErrorResume(error -> {
-                    log.warn("|SearchSuggestionService|getHistoryKeywords|cache read failed|userId={}|error={}",
-                            cleanUserId, error.getMessage());
-                    return Mono.just(List.of());
-                })
+        return suggestionCache.historyKeywords(cleanUserId, HISTORY_CACHE_LOAD_LIMIT)
                 .flatMap(cachedKeywords -> {
                     if (!cachedKeywords.isEmpty()) {
                         return Mono.just(cachedKeywords);
@@ -233,35 +211,20 @@ public class SearchSuggestionService {
             return Mono.empty();
         }
 
-        String cacheKey = historyCacheKey(userId);
-        return Flux.fromIterable(histories)
+        List<SearchSuggestionCache.HistoryKeyword> entries = histories.stream()
                 .filter(history -> history.getNormalizedKeyword() != null && !history.getNormalizedKeyword().isBlank())
-                .flatMap(history -> redisTemplate.opsForZSet().add(
-                        cacheKey,
-                        history.getNormalizedKeyword(),
-                        toEpochMilli(history.getLastSearchedAt())
-                ))
-                .then(redisTemplate.expire(cacheKey, HISTORY_CACHE_TTL))
-                .then()
-                .onErrorResume(error -> {
-                    log.warn("|SearchSuggestionService|cacheHistory|failed|userId={}|error={}", userId, error.getMessage());
-                    return Mono.empty();
-                });
+                .map(history -> new SearchSuggestionCache.HistoryKeyword(
+                        history.getNormalizedKeyword(), toEpochMilli(history.getLastSearchedAt())))
+                .toList();
+        return suggestionCache.putHistoryKeywords(userId, entries, HISTORY_CACHE_TTL);
     }
 
     private Mono<List<SearchSuggestionResponse>> getGlobalPrefixSuggestions(String prefix, int limit) {
-        String cacheKey = GLOBAL_PREFIX_CACHE_PREFIX + prefix + ":" + normalizeLimit(limit);
-
-        return redisTemplate.opsForValue().get(cacheKey)
-                .flatMap(cachedJson -> Mono.just(parseSuggestions(cachedJson)))
-                .filter(cachedSuggestions -> !cachedSuggestions.isEmpty())
-                .onErrorResume(error -> {
-                    log.warn("|SearchSuggestionService|getGlobalPrefixSuggestions|cache read failed|prefixLength={}|error={}",
-                            prefix.length(), error.getMessage());
-                    return Mono.empty();
-                })
-                .switchIfEmpty(loadGlobalPrefixFromDatabase(prefix, limit)
-                        .flatMap(suggestions -> cacheGlobalPrefix(cacheKey, suggestions).thenReturn(suggestions)));
+        return suggestionCache.globalPrefixSuggestions(prefix, normalizeLimit(limit))
+                .flatMap(cachedSuggestions -> !cachedSuggestions.isEmpty()
+                        ? Mono.just(cachedSuggestions)
+                        : loadGlobalPrefixFromDatabase(prefix, limit)
+                        .flatMap(suggestions -> cacheGlobalPrefix(prefix, limit, suggestions).thenReturn(suggestions)));
     }
 
     private Mono<List<SearchSuggestionResponse>> loadGlobalPrefixFromDatabase(String prefix, int limit) {
@@ -275,26 +238,15 @@ public class SearchSuggestionService {
                 });
     }
 
-    private Mono<Void> cacheGlobalPrefix(String cacheKey, List<SearchSuggestionResponse> suggestions) {
-        return redisTemplate.opsForValue()
-                .set(cacheKey, GsonUtils.getGson().toJson(suggestions), GLOBAL_PREFIX_CACHE_TTL)
-                .then()
-                .onErrorResume(error -> {
-                    log.warn("|SearchSuggestionService|cacheGlobalPrefix|failed|cacheKey={}|error={}", cacheKey, error.getMessage());
-                    return Mono.empty();
-                });
+    private Mono<Void> cacheGlobalPrefix(String prefix, int limit, List<SearchSuggestionResponse> suggestions) {
+        return suggestionCache.putGlobalPrefixSuggestions(prefix, normalizeLimit(limit), suggestions, GLOBAL_PREFIX_CACHE_TTL);
     }
 
     private Mono<List<SearchSuggestionResponse>> getTrendingSuggestions(int limit) {
-        String cacheKey = TRENDING_CACHE_PREFIX + LocalDate.now(ZoneOffset.UTC);
-        return redisTemplate.opsForZSet()
-                .reverseRange(cacheKey, Range.closed(0L, (long) normalizeLimit(limit) - 1))
-                .map(keyword -> toSuggestion(keyword, TRENDING_SOURCE, false))
-                .collectList()
-                .onErrorResume(error -> {
-                    log.warn("|SearchSuggestionService|getTrendingSuggestions|cache read failed|error={}", error.getMessage());
-                    return Mono.just(List.of());
-                });
+        return suggestionCache.trendingKeywords(LocalDate.now(ZoneOffset.UTC), normalizeLimit(limit))
+                .map(keywords -> keywords.stream()
+                        .map(keyword -> toSuggestion(keyword, TRENDING_SOURCE, false))
+                        .toList());
     }
 
     private Mono<List<SearchSuggestionResponse>> getGlobalPopularSuggestions(int limit) {
@@ -318,39 +270,15 @@ public class SearchSuggestionService {
     }
 
     private Mono<Void> updateTrending(String normalizedKeyword) {
-        String cacheKey = TRENDING_CACHE_PREFIX + LocalDate.now(ZoneOffset.UTC);
-        return redisTemplate.opsForZSet()
-                .incrementScore(cacheKey, normalizedKeyword, 1.0)
-                .then(redisTemplate.expire(cacheKey, TRENDING_CACHE_TTL))
-                .then()
-                .onErrorResume(error -> {
-                    log.warn("|SearchSuggestionService|updateTrending|failed|error={}", error.getMessage());
-                    return Mono.empty();
-                });
+        return suggestionCache.incrementTrending(LocalDate.now(ZoneOffset.UTC), normalizedKeyword, TRENDING_CACHE_TTL);
     }
 
     private Mono<Void> updateHistoryCache(String userId, String normalizedKeyword) {
-        String cacheKey = historyCacheKey(userId);
-        return redisTemplate.opsForZSet()
-                .add(cacheKey, normalizedKeyword, Instant.now().toEpochMilli())
-                .then(redisTemplate.expire(cacheKey, HISTORY_CACHE_TTL))
-                .then()
-                .onErrorResume(error -> {
-                    log.warn("|SearchSuggestionService|updateHistoryCache|failed|userId={}|error={}",
-                            userId, error.getMessage());
-                    return Mono.empty();
-                });
+        return suggestionCache.addHistoryKeyword(userId, normalizedKeyword, Instant.now().toEpochMilli(), HISTORY_CACHE_TTL);
     }
 
     private Mono<Void> removeHistoryCacheMember(String userId, String normalizedKeyword) {
-        return redisTemplate.opsForZSet()
-                .remove(historyCacheKey(userId), normalizedKeyword)
-                .then()
-                .onErrorResume(error -> {
-                    log.warn("|SearchSuggestionService|removeHistoryCacheMember|failed|userId={}|error={}",
-                            userId, error.getMessage());
-                    return Mono.empty();
-                });
+        return suggestionCache.removeHistoryKeyword(userId, normalizedKeyword);
     }
 
     private List<SearchSuggestionResponse> mergeSuggestions(int limit, List<SearchSuggestionResponse>... suggestionGroups) {
@@ -372,17 +300,6 @@ public class SearchSuggestionService {
     private SearchSuggestionResponse toSuggestion(String keyword, String source, boolean history) {
         String text = keyword == null ? "" : keyword.trim();
         return new SearchSuggestionResponse(text, source, history);
-    }
-
-    private List<SearchSuggestionResponse> parseSuggestions(String cachedJson) {
-        try {
-            Type type = new TypeToken<List<SearchSuggestionResponse>>() {}.getType();
-            List<SearchSuggestionResponse> suggestions = GsonUtils.getGson().fromJson(cachedJson, type);
-            return suggestions == null ? List.of() : suggestions;
-        } catch (Exception error) {
-            log.warn("|SearchSuggestionService|parseSuggestions|failed|error={}", error.getMessage());
-            return List.of();
-        }
     }
 
     private String validateUserId(String userId) {
@@ -417,10 +334,6 @@ public class SearchSuggestionService {
         String trimmed = value.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
         String normalized = Normalizer.normalize(trimmed, Normalizer.Form.NFD);
         return normalized.replaceAll("\\p{M}", "");
-    }
-
-    private String historyCacheKey(String userId) {
-        return HISTORY_CACHE_PREFIX + userId;
     }
 
     private double toEpochMilli(Instant instant) {

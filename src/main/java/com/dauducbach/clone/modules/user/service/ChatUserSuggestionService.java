@@ -3,7 +3,7 @@ package com.dauducbach.clone.modules.user.service;
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.user.dto.response.ChatUserSuggestionResponse;
-import com.dauducbach.clone.modules.user.repositoty.ChatUserSuggestionRepository;
+import com.dauducbach.clone.modules.user.repository.ChatUserSuggestionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;

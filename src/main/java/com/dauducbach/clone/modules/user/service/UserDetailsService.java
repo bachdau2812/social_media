@@ -2,29 +2,29 @@ package com.dauducbach.clone.modules.user.service;
 
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
-import com.dauducbach.clone.modules.audit.dto.AuditActionType;
-import com.dauducbach.clone.modules.audit.entity.AuditLogs;
-import com.dauducbach.clone.modules.audit.service.UserAuditService;
+import com.dauducbach.clone.modules.audit.publicapi.AuditActionType;
+import com.dauducbach.clone.modules.audit.publicapi.AuditEntry;
+import com.dauducbach.clone.modules.audit.publicapi.AuditRecorder;
 import com.dauducbach.clone.modules.user.dto.request.UserDetailsUpdateRequest;
 import com.dauducbach.clone.modules.user.entity.UserDetails;
-import com.dauducbach.clone.modules.user.repositoty.UserDetailsRepository;
-import com.dauducbach.clone.utils.GsonUtils;
-import com.dauducbach.clone.utils.KafkaUtils;
-import com.dauducbach.clone.utils.RedisUtil;
+import com.dauducbach.clone.modules.user.repository.UserDetailsRepository;
+import com.dauducbach.clone.modules.user.publicapi.UserDeletionCleanup;
+import com.dauducbach.clone.commons.serialization.GsonUtils;
+import com.dauducbach.clone.commons.serialization.JsonPayloadReader;
+import com.dauducbach.clone.modules.user.profile.application.ProfileCache;
 import com.google.gson.JsonObject;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
-import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
+import reactor.core.publisher.Flux;
 
-import java.time.Duration;
+import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
 
 @Service
@@ -34,14 +34,12 @@ import java.util.concurrent.CompletableFuture;
 public class UserDetailsService {
     UserDetailsRepository userDetailsRepository;
     R2dbcEntityTemplate r2dbcEntityTemplate;
-    ReactiveRedisTemplate<String, String> reactiveRedisStringTemplate;
-    UserAuditService userAuditService;
+    ProfileCache profileCache;
+    AuditRecorder auditRecorder;
     UserProfileVectorEventPublisher userProfileVectorEventPublisher;
-    UserVectorCleanupService vectorCleanup;
+    UserDeletionCleanup vectorCleanup;
 
     private static final Logger log = LoggerFactory.getLogger(UserDetailsService.class);
-    private static final String USER_DETAILS_CACHE_PREFIX = "user_details_info:";
-    private static final Duration CACHE_TTL = Duration.ofHours(24);
 
     /// Listen event and create profile for new user
     @KafkaListener(topics = "profile_creation_event", groupId = "user-service")
@@ -49,13 +47,13 @@ public class UserDetailsService {
         JsonObject payloadJson = GsonUtils.fromString(payload);
 
         var userDetails = UserDetails.builder()
-                .userId(KafkaUtils.extractString(payloadJson, "userId"))
-                .username(KafkaUtils.extractString(payloadJson, "username"))
-                .fullName(KafkaUtils.extractString(payloadJson, "fullName"))
-                .dob(KafkaUtils.extractLocalDate(payloadJson, "dob"))
-                .hometown(KafkaUtils.extractString(payloadJson, "hometown"))
-                .livingIn(KafkaUtils.extractString(payloadJson, "livingIn"))
-                .sex(KafkaUtils.extractString(payloadJson, "sex"))
+                .userId(JsonPayloadReader.extractString(payloadJson, "userId"))
+                .username(JsonPayloadReader.extractString(payloadJson, "username"))
+                .fullName(JsonPayloadReader.extractString(payloadJson, "fullName"))
+                .dob(JsonPayloadReader.extractLocalDate(payloadJson, "dob"))
+                .hometown(JsonPayloadReader.extractString(payloadJson, "hometown"))
+                .livingIn(JsonPayloadReader.extractString(payloadJson, "livingIn"))
+                .sex(JsonPayloadReader.extractString(payloadJson, "sex"))
                 .build();
         userDetails.setHobbyList(extractHobbyList(payloadJson));
         log.info("|UserDetailsService|createUserDetails|received|userId={}|username={}",
@@ -75,8 +73,6 @@ public class UserDetailsService {
     public Mono<UserDetails> insertUserDetails(UserDetails userDetails) {
         log.info("|UserDetailsService|insertUserDetails|saving userDetails to database|userId={}", userDetails.getUserId());
 
-        String cacheKey = USER_DETAILS_CACHE_PREFIX + userDetails.getUserId();
-
         return r2dbcEntityTemplate.insert(UserDetails.class)
                 .using(userDetails)
                 .onErrorMap(throwable -> new AppException(
@@ -84,17 +80,8 @@ public class UserDetailsService {
                         String.format("Save user details failed for userId=%s", userDetails.getUserId()),
                         throwable
                 ))
-                .doOnSuccess(savedUserDetails -> {
-                    log.info("|UserDetailsService|insertUserDetails|saved userDetails to database|userId={}", savedUserDetails.getUserId());
-                    // Cache the saved user details as JSON string
-                    String jsonString = RedisUtil.serialize(savedUserDetails);
-                    if (jsonString != null) {
-                        reactiveRedisStringTemplate.opsForValue().set(cacheKey, jsonString, CACHE_TTL)
-                                .doOnSuccess(v -> log.info("|UserDetailsService|insertUserDetails|cached userDetails|userId={}", savedUserDetails.getUserId()))
-                                .doOnError(error -> log.error("|UserDetailsService|insertUserDetails|failed to cache userDetails|userId={}|error={}", savedUserDetails.getUserId(), error.getMessage()))
-                                .subscribe();
-                    }
-                })
+                .doOnSuccess(saved -> log.info("|UserDetailsService|insertUserDetails|saved userDetails to database|userId={}", saved.getUserId()))
+                .flatMap(saved -> putProfileCacheBestEffort(saved).thenReturn(saved))
                 .flatMap(savedUserDetails -> publishProfileVectorRefreshForCreate(savedUserDetails)
                         .thenReturn(savedUserDetails))
                 .doOnError(error -> log.error("|UserDetailsService|insertUserDetails|failed to save userDetails to database|error={}", error.getMessage()));
@@ -103,8 +90,6 @@ public class UserDetailsService {
     /// Update UserDetails with partial field update
     public Mono<UserDetails> updateUserDetails(UserDetailsUpdateRequest request) {
         log.info("|UserDetailsService|updateUserDetails|updating userDetails|userId={}", request.getUserId());
-
-        String cacheKey = USER_DETAILS_CACHE_PREFIX + request.getUserId();
 
         // Check if user exists
         return userDetailsRepository.existsById(request.getUserId())
@@ -146,18 +131,8 @@ public class UserDetailsService {
 
                     return userDetailsRepository.save(existingUserDetails);
                 })
-                .publishOn(Schedulers.boundedElastic())
-                .doOnSuccess(updatedUserDetails -> {
-                    log.info("|UserDetailsService|updateUserDetails|updated userDetails successfully|userId={}", updatedUserDetails.getUserId());
-                    // Update cache as JSON string
-                    String jsonString = RedisUtil.serialize(updatedUserDetails);
-                    if (jsonString != null) {
-                        reactiveRedisStringTemplate.opsForValue().set(cacheKey, jsonString, CACHE_TTL)
-                                .doOnSuccess(v -> log.info("|UserDetailsService|updateUserDetails|updated cache|userId={}", updatedUserDetails.getUserId()))
-                                .doOnError(error -> log.error("|UserDetailsService|updateUserDetails|failed to update cache|userId={}|error={}", updatedUserDetails.getUserId(), error.getMessage()))
-                                .subscribe();
-                    }
-                })
+                .doOnSuccess(updated -> log.info("|UserDetailsService|updateUserDetails|updated userDetails successfully|userId={}", updated.getUserId()))
+                .flatMap(updated -> putProfileCacheBestEffort(updated).thenReturn(updated))
                 .flatMap(updated -> saveUpdateUserDetailsAudit(request, updated.getUserId()).thenReturn(updated))
                 .flatMap(updated -> publishProfileVectorRefresh(updated.getUserId(), "USER_DETAILS", "UPDATE", updated.getUserId())
                         .thenReturn(updated))
@@ -181,22 +156,16 @@ public class UserDetailsService {
         metadata.addProperty("sexChanged", request.getSex() != null && !request.getSex().isBlank());
         metadata.addProperty("hobbyChanged", request.getHobbieList() != null && !request.getHobbieList().isEmpty());
 
-        return userAuditService.save(AuditLogs.builder()
-                .actorId(userId)
-                .action(AuditActionType.UPDATE_USER_DETAILS)
-                .resourceType("USER_DETAILS")
-                .resourceId(userId)
-                .status("SUCCESS")
-                .metadata(metadata.toString())
-                .build());
+        return auditRecorder.record(new AuditEntry(userId, AuditActionType.UPDATE_USER_DETAILS,
+                "USER_DETAILS", userId, "SUCCESS", metadata.toString(), null));
     }
 
     private java.util.List<String> extractHobbyList(JsonObject payloadJson) {
-        java.util.List<String> hobbyList = KafkaUtils.extractStringList(payloadJson, "hobbyList");
+        java.util.List<String> hobbyList = JsonPayloadReader.extractStringList(payloadJson, "hobbyList");
         if (!hobbyList.isEmpty()) {
             return hobbyList;
         }
-        return KafkaUtils.extractStringList(payloadJson, "hobbieList");
+        return JsonPayloadReader.extractStringList(payloadJson, "hobbieList");
     }
 
     private Mono<Void> publishProfileVectorRefreshForCreate(UserDetails userDetails) {
@@ -216,25 +185,14 @@ public class UserDetailsService {
     public Mono<UserDetails> getUserDetailsById(String userId) {
         log.info("|UserDetailsService|getUserDetailsById|fetching userDetails|userId={}", userId);
 
-        String cacheKey = USER_DETAILS_CACHE_PREFIX + userId;
-
         // Try to get from cache firstA
-        return reactiveRedisStringTemplate.opsForValue().get(cacheKey)
+        return profileCache.find(userId)
                 .onErrorResume(error -> {
                     log.warn("|UserDetailsService|getUserDetailsById|cache read failed, fallback to database|userId={}|error={}", userId, error.getMessage());
                     return Mono.empty();
                 })
-                .flatMap(cachedJsonString -> {
-                    // Cache hit - deserialize JSON string to UserDetails
-                    UserDetails cachedUserDetails = RedisUtil.deserialize(cachedJsonString, UserDetails.class);
-                    if (cachedUserDetails != null) {
-                        log.info("|UserDetailsService|getUserDetailsById|found userDetails in cache|userId={}", userId);
-                        return Mono.just(cachedUserDetails);
-                    }
-                    return Mono.empty();
-                })
-                .switchIfEmpty(
-                        // Cache miss - fetch from database
+                .doOnNext(cached -> log.info("|UserDetailsService|getUserDetailsById|found userDetails in cache|userId={}", userId))
+                .switchIfEmpty(Mono.defer(() ->
                         userDetailsRepository.findById(userId)
                                 .switchIfEmpty(Mono.error(new AppException(
                                         ErrorCode.USER_DETAILS_NOT_FOUND,
@@ -247,36 +205,55 @@ public class UserDetailsService {
                                                 String.format("Fetch user details failed for userId=%s", userId),
                                                 throwable
                                         ))
-                                .doOnSuccess(userDetails -> {
-                                    log.info("|UserDetailsService|getUserDetailsById|found userDetails in database|userId={}", userId);
-                                    // Cache the result as JSON string
-                                    String jsonString = RedisUtil.serialize(userDetails);
-                                    if (jsonString != null) {
-                                        reactiveRedisStringTemplate.opsForValue().set(cacheKey, jsonString, CACHE_TTL)
-                                                .doOnSuccess(v -> log.info("|UserDetailsService|getUserDetailsById|cached userDetails|userId={}", userId))
-                                                .doOnError(error -> log.error("|UserDetailsService|getUserDetailsById|failed to cache userDetails|userId={}|error={}", userId, error.getMessage()))
-                                                .subscribe();
-                                    }
-                                })
-                                .doOnError(error -> log.error("|UserDetailsService|getUserDetailsById|failed to fetch userDetails|userId={}|error={}", userId, error.getMessage()))
-                );
+                                .flatMap(userDetails -> putProfileCacheBestEffort(userDetails).thenReturn(userDetails))
+                                .doOnNext(userDetails -> log.info("|UserDetailsService|getUserDetailsById|found userDetails in database|userId={}", userId))
+                ))
+                .doOnError(error -> log.error("|UserDetailsService|getUserDetailsById|failed to fetch userDetails|userId={}|error={}", userId, error.getMessage()));
+    }
+
+    public Mono<Boolean> userExists(String userId) {
+        if (userId == null || userId.isBlank()) {
+            return Mono.just(false);
+        }
+        return userDetailsRepository.existsById(userId.trim()).defaultIfEmpty(false);
+    }
+
+    public Flux<UserDetails> getUserDetailsByIds(Collection<String> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return Flux.empty();
+        }
+        return userDetailsRepository.findAllById(userIds);
     }
 
     /// Delete UserDetails by userId with cache eviction
     public Mono<Void> deleteUserDetails(String userId) {
         log.info("|UserDetailsService|deleteUserDetails|deleting userDetails|userId={}", userId);
 
-        String cacheKey = USER_DETAILS_CACHE_PREFIX + userId;
-
-        return vectorCleanup.deleteUser(userId, () -> reactiveRedisStringTemplate.opsForValue().delete(cacheKey)
-                        .onErrorResume(error -> {
-                            // Preserve the original best-effort details cache policy; vector fencing must still run.
-                            log.warn("|UserDetailsService|deleteUserDetails|cache delete failed, continue|userId={}|error={}", userId, error.getMessage());
-                            return Mono.empty();
-                        }).then())
+        return vectorCleanup.deleteUser(userId,
+                        () -> userDetailsRepository.deleteById(userId),
+                        () -> evictProfileCacheBestEffort(userId))
                 .then()
                 .onErrorMap(error -> error instanceof AppException ? error : new AppException(
                         ErrorCode.USER_DETAILS_DELETE_FAILED,
                         String.format("Delete user details failed for userId=%s", userId), error));
+    }
+
+    private Mono<Void> putProfileCacheBestEffort(UserDetails userDetails) {
+        return profileCache.put(userDetails)
+                .doOnSuccess(unused -> log.info("|UserDetailsService|profile cache updated|userId={}", userDetails.getUserId()))
+                .onErrorResume(error -> {
+                    log.warn("|UserDetailsService|profile cache write failed, continue|userId={}|error={}",
+                            userDetails.getUserId(), error.getMessage());
+                    return Mono.empty();
+                });
+    }
+
+    private Mono<Void> evictProfileCacheBestEffort(String userId) {
+        return profileCache.evict(userId)
+                .onErrorResume(error -> {
+                    log.warn("|UserDetailsService|profile cache delete failed, continue|userId={}|error={}",
+                            userId, error.getMessage());
+                    return Mono.empty();
+                });
     }
 }

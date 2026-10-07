@@ -1,7 +1,7 @@
 package com.dauducbach.clone.modules.media.configuration;
 
 import com.dauducbach.clone.modules.media.dto.music.internal.MusicArtifactDescriptor;
-import com.dauducbach.clone.modules.media.service.music.SpotifyMusicMetadata;
+import com.dauducbach.clone.modules.media.music.fetch.SpotifyMusicMetadata;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import jakarta.validation.Validation;

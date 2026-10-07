@@ -25,6 +25,7 @@ public class ChatMessage {
     String conversationId;
     long messageSeq;
     String clientMessageId;
+    String clientPayloadHash;
     String senderId;
     @Transient
     String senderDisplayName;

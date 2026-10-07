@@ -1,6 +1,6 @@
 package com.dauducbach.clone.modules.user.service;
 
-import com.dauducbach.clone.modules.user.repositoty.ChatUserSuggestionRepository;
+import com.dauducbach.clone.modules.user.repository.ChatUserSuggestionRepository;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;

@@ -4,12 +4,12 @@ import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.chat.constant.MessageType;
 import com.dauducbach.clone.modules.chat.constant.SystemMessageAction;
-import com.dauducbach.clone.modules.chat.dto.event.ChatEvent;
+import com.dauducbach.clone.modules.chat.publicapi.ChatEvent;
 import com.dauducbach.clone.modules.chat.dto.response.ChatMessageResponse;
 import com.dauducbach.clone.modules.chat.entity.ChatMessage;
 import com.dauducbach.clone.modules.chat.repository.ConversationMemberRepository;
 import com.dauducbach.clone.modules.chat.repository.ConversationRepository;
-import com.dauducbach.clone.modules.user.service.UserIdentityQueryService;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentityQuery;
 import com.google.gson.Gson;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
@@ -29,7 +29,7 @@ public class ChatSystemMessageService {
 
     private final ConversationRepository conversationRepository;
     private final ConversationMemberRepository memberRepository;
-    private final UserIdentityQueryService userIdentityQueryService;
+    private final UserIdentityQuery userIdentityQueryService;
     private final R2dbcEntityTemplate entityTemplate;
     private final ChatResponseMapper mapper;
     private final ChatEventPublisher eventPublisher;

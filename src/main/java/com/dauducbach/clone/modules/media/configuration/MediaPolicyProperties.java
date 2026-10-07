@@ -1,5 +1,6 @@
 package com.dauducbach.clone.modules.media.configuration;
 
+import com.dauducbach.clone.modules.media.publicapi.MediaUploadPolicy;
 import jakarta.annotation.PostConstruct;
 import lombok.Getter;
 import lombok.Setter;
@@ -9,7 +10,7 @@ import org.springframework.util.unit.DataSize;
 @Getter
 @Setter
 @ConfigurationProperties(prefix = "app.media.limits")
-public class MediaPolicyProperties {
+public class MediaPolicyProperties implements MediaUploadPolicy {
     private DataSize image = DataSize.ofMegabytes(100);
     private DataSize video = DataSize.ofMegabytes(100);
     private DataSize audio = DataSize.ofMegabytes(50);

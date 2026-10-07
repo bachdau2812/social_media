@@ -1,59 +1,60 @@
 package com.dauducbach.clone.modules.post.service.post;
 
-import com.dauducbach.clone.modules.post.service.comment.CommentService;
-import com.dauducbach.clone.commons.constant.EntityType;
 import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import com.dauducbach.clone.modules.post.constant.PostMediaRatio;
 import com.dauducbach.clone.modules.post.dto.response.PostItemResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostMusicResponse;
 import com.dauducbach.clone.modules.post.entity.PostDetails;
-import com.dauducbach.clone.modules.user.service.UserIdentityQueryService;
+import com.dauducbach.clone.modules.post.query.PostContentQueryService;
+import com.dauducbach.clone.modules.post.publicapi.PostInteractionQuery;
+import com.dauducbach.clone.modules.post.publicapi.PostPresentationSnapshot;
+import com.dauducbach.clone.modules.post.publicapi.PostProfileQuery;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentity;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentityQuery;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.time.Instant;
-import java.util.List;
 import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
-public class PostProfileQueryService {
-    private final PostService postService;
+public class PostProfileQueryService implements PostProfileQuery {
+    private final PostContentQueryService postContentQueryService;
     private final PostDetailQueryService postDetailQueryService;
-    private final LikeService likeService;
-    private final CommentService commentService;
     private final RepostService repostService;
-    private final UserIdentityQueryService userIdentityQueryService;
+    private final PostInteractionQuery postInteractionQuery;
+    private final UserIdentityQuery userIdentityQueryService;
 
-    public Flux<ProfilePostSnapshot> getRecentPosts(String viewerId, String userId, int limit) {
-        return postService.getPostsByUserId(userId, 0, limit)
+    @Override
+    public Flux<PostProfileQuery.ProfilePostSnapshot> getRecentPosts(String viewerId, String userId, int limit) {
+        return postContentQueryService.findByAuthorId(userId, 0, limit)
                 .concatMap(post -> hydrate(viewerId, post));
     }
 
-    public Flux<ProfilePostSnapshot> getRepostedPosts(String viewerId, String userId, int limit) {
+    @Override
+    public Flux<PostProfileQuery.ProfilePostSnapshot> getRepostedPosts(String viewerId, String userId, int limit) {
         return repostService.getRepostedPosts(userId, limit)
                 .concatMap(post -> hydrate(viewerId, post));
     }
 
-    private Mono<ProfilePostSnapshot> hydrate(String viewerId, PostDetails post) {
+    private Mono<PostProfileQuery.ProfilePostSnapshot> hydrate(String viewerId, PostDetails post) {
         String postId = post.getPostId();
-        Mono<UserIdentityQueryService.IdentitySnapshot> author =
+        Mono<UserIdentity> author =
                 userIdentityQueryService.resolveIdentity(post.getUserId());
-        Mono<Optional<PostItemResponse>> firstItem = postDetailQueryService
+        Mono<Optional<PostPresentationSnapshot.Item>> firstItem = postDetailQueryService
                 .getFirstItem(post, MediaDisplayType.POST)
+                .map(this::toSnapshotItem)
                 .map(Optional::of)
                 .defaultIfEmpty(Optional.empty())
                 .onErrorReturn(Optional.empty());
-        Mono<Long> likeCount = likeService.countLikes(postId, EntityType.POST.name()).onErrorReturn(0L);
-        Mono<Long> commentCount = commentService.countCommentsByPostId(postId).onErrorReturn(0L);
-        Mono<Long> repostCount = repostService.countReposts(postId).onErrorReturn(0L);
-        Mono<Boolean> liked = likeService.hasLiked(viewerId, postId, EntityType.POST.name()).onErrorReturn(false);
-        Mono<Boolean> reposted = repostService.hasReposted(viewerId, postId).onErrorReturn(false);
+        Mono<PostInteractionQuery.Snapshot> interactions = postInteractionQuery
+                .findSnapshot(postId, viewerId)
+                .onErrorReturn(new PostInteractionQuery.Snapshot(0, 0, 0, false, false));
 
-        return Mono.zip(author, firstItem, likeCount, commentCount, repostCount, liked, reposted)
-                .map(tuple -> new ProfilePostSnapshot(
+        return Mono.zip(author, firstItem, interactions)
+                .map(tuple -> new PostProfileQuery.ProfilePostSnapshot(
                         postId,
                         post.getUserId(),
                         tuple.getT1().username(),
@@ -64,37 +65,29 @@ public class PostProfileQueryService {
                         PostMediaRatio.defaultIfMissing(post.getMediaRatio()),
                         tuple.getT2().orElse(null),
                         null,
-                        tuple.getT3(),
-                        tuple.getT4(),
-                        tuple.getT5(),
-                        tuple.getT6(),
-                        tuple.getT7(),
+                        tuple.getT3().likes(),
+                        tuple.getT3().comments(),
+                        tuple.getT3().reposts(),
+                        tuple.getT3().likedByViewer(),
+                        tuple.getT3().repostedByViewer(),
                         post.getCreatedAt(),
                         post.getUpdatedAt()
                 ));
     }
 
-    public record ProfilePostSnapshot(
-            String postId,
-            String userId,
-            String authorUsername,
-            String authorFullName,
-            String authorAvatarUrl,
-            String content,
-            List<String> hashtags,
-            String mediaRatio,
-            PostItemResponse firstItem,
-            PostMusicResponse music,
-            long likeCount,
-            long commentCount,
-            long repostCount,
-            boolean likedByCurrentUser,
-            boolean repostedByCurrentUser,
-            Instant createdAt,
-            Instant updatedAt
-    ) {
-        public ProfilePostSnapshot {
-            hashtags = hashtags == null ? List.of() : List.copyOf(hashtags);
-        }
+    private PostPresentationSnapshot.Item toSnapshotItem(PostItemResponse item) {
+        return new PostPresentationSnapshot.Item(
+                item.id(), item.orderNumber(), item.caption(),
+                item.media() == null ? null : new PostPresentationSnapshot.Media(
+                        item.media().assetId(), item.media().publicId(), item.media().mediaFormat(),
+                        item.media().resourceType(), item.media().url(), item.media().secureUrl(),
+                        item.media().displayName(), item.media().width(), item.media().height()),
+                toSnapshotMusic(item.music()));
+    }
+
+    private PostPresentationSnapshot.Music toSnapshotMusic(PostMusicResponse music) {
+        return music == null ? null : new PostPresentationSnapshot.Music(
+                music.id(), music.displayName(), music.artist(), music.artworkUrl(), music.playbackUrl(),
+                music.segmentStart(), music.segmentEnd(), music.duration());
     }
 }

@@ -1,6 +1,6 @@
 package com.dauducbach.clone.modules.chat;
 
-import com.dauducbach.clone.modules.chat.dto.event.ChatEvent;
+import com.dauducbach.clone.modules.chat.publicapi.ChatEvent;
 import com.dauducbach.clone.modules.chat.dto.response.ChatMessageResponse;
 import org.junit.jupiter.api.Test;
 import java.nio.file.Files;

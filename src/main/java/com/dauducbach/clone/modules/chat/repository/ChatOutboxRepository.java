@@ -1,6 +1,6 @@
 package com.dauducbach.clone.modules.chat.repository;
 
-import com.dauducbach.clone.modules.chat.dto.event.ChatEvent;
+import com.dauducbach.clone.modules.chat.publicapi.ChatEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.r2dbc.core.DatabaseClient;

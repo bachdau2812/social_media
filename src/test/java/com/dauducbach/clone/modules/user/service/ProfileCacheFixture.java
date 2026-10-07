@@ -1,10 +1,12 @@
 package com.dauducbach.clone.modules.user.service;
 
-import com.dauducbach.clone.modules.audit.service.UserAuditService;
+import com.dauducbach.clone.modules.audit.publicapi.AuditRecorder;
+import com.dauducbach.clone.modules.user.profile.application.ProfileCache;
+import com.dauducbach.clone.modules.user.profile.application.ProfileDataCache;
 import com.dauducbach.clone.modules.user.dto.request.*;
 import com.dauducbach.clone.modules.user.entity.*;
-import com.dauducbach.clone.modules.user.repositoty.*;
-import com.dauducbach.clone.utils.RedisUtil;
+import com.dauducbach.clone.modules.user.repository.*;
+import com.dauducbach.clone.infrastructure.redis.RedisJsonCodec;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.data.redis.core.ReactiveValueOperations;
@@ -21,8 +23,55 @@ class ProfileCacheFixture {
     @SuppressWarnings("unchecked") final ReactiveValueOperations<String, String> values = mock(ReactiveValueOperations.class);
     final Map<String, String> cache = new ConcurrentHashMap<>();
     final Map<String, Duration> ttls = new ConcurrentHashMap<>();
+    final ProfileDataCache profileDataCache = new ProfileDataCache() {
+        @Override
+        public <T> Mono<T> find(String key, Class<T> recordType) {
+            return Mono.defer(() -> Mono.justOrEmpty(RedisJsonCodec.deserialize(cache.get(key), recordType)));
+        }
+
+        @Override
+        public <T> Mono<java.util.List<T>> findList(String key, Class<T> recordType) {
+            return Mono.defer(() -> Mono.justOrEmpty(cache.get(key)).map(json -> RedisJsonCodec.deserializeList(json, recordType)));
+        }
+
+        @Override
+        public Mono<Void> put(String key, Object value, Duration ttl) {
+            return Mono.fromRunnable(() -> {
+                String json = RedisJsonCodec.serialize(value);
+                if (json != null) { cache.put(key, json); ttls.put(key, ttl); }
+            });
+        }
+
+        @Override
+        public Mono<Void> evict(String key) {
+            return Mono.fromRunnable(() -> cache.remove(key));
+        }
+    };
+    final ProfileCache profileCache = new ProfileCache() {
+        @Override
+        public Mono<UserDetails> find(String userId) {
+            return Mono.defer(() -> Mono.justOrEmpty(cache.get("user_details_info:" + userId)))
+                    .flatMap(json -> Mono.justOrEmpty(RedisJsonCodec.deserialize(json, UserDetails.class)));
+        }
+
+        @Override
+        public Mono<Void> put(UserDetails userDetails) {
+            return Mono.fromRunnable(() -> {
+                String json = RedisJsonCodec.serialize(userDetails);
+                if (json != null) {
+                    cache.put("user_details_info:" + userDetails.getUserId(), json);
+                    ttls.put("user_details_info:" + userDetails.getUserId(), Duration.ofHours(24));
+                }
+            });
+        }
+
+        @Override
+        public Mono<Void> evict(String userId) {
+            return Mono.fromRunnable(() -> cache.remove("user_details_info:" + userId));
+        }
+    };
     final R2dbcEntityTemplate template = mock(R2dbcEntityTemplate.class, RETURNS_DEEP_STUBS);
-    final UserAuditService audit = mock(UserAuditService.class);
+    final AuditRecorder audit = mock(AuditRecorder.class);
     final UserProfileVectorEventPublisher publisher = mock(UserProfileVectorEventPublisher.class);
     final IllegalStateException publishFailure = new IllegalStateException("broker rejected refresh");
     Object sqlRow;
@@ -35,7 +84,7 @@ class ProfileCacheFixture {
             cache.put(call.getArgument(0), call.getArgument(1)); ttls.put(call.getArgument(0), call.getArgument(2)); return true;
         }));
         when(values.delete(anyString())).thenAnswer(call -> Mono.fromSupplier(() -> cache.remove(call.getArgument(0)) != null));
-        when(audit.save(any())).thenReturn(Mono.empty());
+        when(audit.record(any())).thenReturn(Mono.empty());
         when(publisher.publishRefreshEvent(anyString(), anyString(), anyString(), anyString())).thenReturn(Mono.error(publishFailure));
         when(publisher.publishRefreshEventForCreatedUser(anyString(), anyString(), anyString(), anyString(), any())).thenReturn(Mono.error(publishFailure));
     }
@@ -44,7 +93,7 @@ class ProfileCacheFixture {
             sqlRow = call.getArgument(0); sqlMutations++; return sqlRow;
         }));
     }
-    void seed(String key, Object row) { cache.put(key, RedisUtil.serialize(row)); }
+    void seed(String key, Object row) { cache.put(key, RedisJsonCodec.serialize(row)); }
     enum Component {
         JOB("user_job"), HIGH_SCHOOL("user_high_school"), UNIVERSITY("user_university");
         final String prefix;
@@ -60,7 +109,7 @@ class ProfileCacheFixture {
                 when(repository.findById("component")).thenAnswer(call -> Mono.justOrEmpty((UserJob) sqlRow));
                 when(repository.save(any())).thenAnswer(call -> Mono.fromSupplier(() -> { sqlRow = call.getArgument(0); sqlMutations++; return (UserJob) sqlRow; }));
                 when(repository.deleteById("component")).thenReturn(Mono.fromRunnable(() -> { sqlRow = null; sqlMutations++; }));
-                var service = new UserJobService(repository, template, redis, audit, publisher);
+                var service = new UserJobService(repository, template, profileDataCache, audit, publisher);
                 if (operation.equals("CREATE")) { insertion(UserJob.class); return service.createUserJob(UserJobRequest.builder().userId("u").companyName("After").build()); }
                 if (operation.equals("UPDATE")) return service.updateUserJob(UserJobUpdateRequest.builder().id("component").companyName("After").build());
                 return service.deleteUserJob("component");
@@ -73,7 +122,7 @@ class ProfileCacheFixture {
                 when(repository.findById("component")).thenAnswer(call -> Mono.justOrEmpty((UserHighSchool) sqlRow));
                 when(repository.save(any())).thenAnswer(call -> Mono.fromSupplier(() -> { sqlRow = call.getArgument(0); sqlMutations++; return (UserHighSchool) sqlRow; }));
                 when(repository.deleteById("component")).thenReturn(Mono.fromRunnable(() -> { sqlRow = null; sqlMutations++; }));
-                var service = new UserHighSchoolService(repository, template, redis, audit, publisher);
+                var service = new UserHighSchoolService(repository, template, profileDataCache, audit, publisher);
                 if (operation.equals("CREATE")) { insertion(UserHighSchool.class); return service.createUserHighSchool(UserHighSchoolRequest.builder().userId("u").schoolName("After").build()); }
                 if (operation.equals("UPDATE")) return service.updateUserHighSchool(UserHighSchoolRequest.builder().id("component").schoolName("After").build());
                 return service.deleteUserHighSchool("component");
@@ -86,7 +135,7 @@ class ProfileCacheFixture {
                 when(repository.findById("component")).thenAnswer(call -> Mono.justOrEmpty((UserUniversity) sqlRow));
                 when(repository.save(any())).thenAnswer(call -> Mono.fromSupplier(() -> { sqlRow = call.getArgument(0); sqlMutations++; return (UserUniversity) sqlRow; }));
                 when(repository.deleteById("component")).thenReturn(Mono.fromRunnable(() -> { sqlRow = null; sqlMutations++; }));
-                var service = new UserUniversityService(repository, template, redis, audit, publisher);
+                var service = new UserUniversityService(repository, template, profileDataCache, audit, publisher);
                 if (operation.equals("CREATE")) { insertion(UserUniversity.class); return service.createUserUniversity(UserUniversityRequest.builder().userId("u").schoolName("After").build()); }
                 if (operation.equals("UPDATE")) return service.updateUserUniversity(UserUniversityRequest.builder().id("component").schoolName("After").build());
                 return service.deleteUserUniversity("component");

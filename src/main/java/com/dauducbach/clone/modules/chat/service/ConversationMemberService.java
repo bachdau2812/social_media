@@ -8,7 +8,7 @@ import com.dauducbach.clone.modules.chat.constant.MemberRequestStatus;
 import com.dauducbach.clone.modules.chat.constant.MemberRole;
 import com.dauducbach.clone.modules.chat.constant.MemberStatus;
 import com.dauducbach.clone.modules.chat.constant.SystemMessageAction;
-import com.dauducbach.clone.modules.chat.dto.event.ChatEvent;
+import com.dauducbach.clone.modules.chat.publicapi.ChatEvent;
 import com.dauducbach.clone.modules.chat.dto.request.AddConversationMemberRequest;
 import com.dauducbach.clone.modules.chat.dto.request.ChangeMemberRoleRequest;
 import com.dauducbach.clone.modules.chat.dto.request.UpdateConversationNotificationRequest;
@@ -353,32 +353,45 @@ public class ConversationMemberService {
     public Mono<MemberMutationResponse> leaveConversation(String actorId, String conversationId) {
         String actor = requireIdentifier(actorId, "actorId");
         String id = requireIdentifier(conversationId, "conversationId");
-        Mono<MemberOutcome> work = accessService.requireActiveMember(id, actor)
-                .flatMap(actorMember -> conversationRepository.findByIdForUpdate(id)
-                        .switchIfEmpty(Mono.error(new AppException(ErrorCode.CONVERSATION_NOT_FOUND, "Conversation not found")))
-                        .flatMap(conversation -> {
-                            if (conversation.getConversationType() != ConversationType.GROUP) {
-                                return Mono.error(new AppException(ErrorCode.CHAT_REQUEST_INVALID, "Only group members can leave a conversation"));
-                            }
-                            Mono<Void> guard = conversation.isDissolved()
-                                    ? Mono.empty()
-                                    : ensureAdminCanExit(id, actorMember);
-                            if (conversation.isDissolved()) {
-                                return guard.then(memberRepository.markLeft(
-                                                id, actor, conversation.getLastMessageSeq(), Instant.now()))
-                                        .flatMap(updated -> updated > 0
-                                                ? Mono.just(MemberOutcome.plain(new MemberMutationResponse(id, actor, "LEFT", null)))
-                                                : Mono.error(new AppException(ErrorCode.CHAT_MEMBER_UPDATE_FAILED, "Leave group failed")));
-                            }
-                            return guard.then(systemMessageService.insert(
-                                            id, actor, SystemMessageAction.MEMBER_LEFT, actor, null))
-                                    .flatMap(system -> memberRepository.markLeft(
-                                                    id, actor, conversation.getLastMessageSeq() + 1L, Instant.now())
+        Mono<MemberOutcome> work = conversationRepository.findByIdForUpdate(id)
+                .switchIfEmpty(Mono.error(new AppException(ErrorCode.CONVERSATION_NOT_FOUND, "Conversation not found")))
+                .flatMap(conversation -> {
+                    if (conversation.getConversationType() != ConversationType.GROUP) {
+                        return Mono.error(new AppException(
+                                ErrorCode.CHAT_REQUEST_INVALID,
+                                "Only group members can leave a conversation"));
+                    }
+                    return memberRepository.findMembershipForUpdate(id, actor)
+                            .filter(member -> member.getMemberStatus() == MemberStatus.ACTIVE)
+                            .switchIfEmpty(Mono.error(new AppException(
+                                    ErrorCode.CONVERSATION_FORBIDDEN,
+                                    "Active chat membership is required")))
+                            .flatMap(actorMember -> {
+                                Mono<Void> guard = conversation.isDissolved()
+                                        ? Mono.empty()
+                                        : ensureAdminCanExit(id, actorMember);
+                                if (conversation.isDissolved()) {
+                                    return guard.then(memberRepository.markLeft(
+                                                    id, actor, conversation.getLastMessageSeq(), Instant.now()))
                                             .flatMap(updated -> updated > 0
-                                                    ? Mono.just(MemberOutcome.system(
-                                                            new MemberMutationResponse(id, actor, "LEFT", null), system))
-                                                    : Mono.error(new AppException(ErrorCode.CHAT_MEMBER_UPDATE_FAILED, "Leave group failed"))));
-                        }));
+                                                    ? Mono.just(MemberOutcome.plain(new MemberMutationResponse(
+                                                            id, actor, "LEFT", null)))
+                                                    : Mono.error(new AppException(
+                                                            ErrorCode.CHAT_MEMBER_UPDATE_FAILED,
+                                                            "Leave group failed")));
+                                }
+                                return guard.then(systemMessageService.insert(
+                                                id, actor, SystemMessageAction.MEMBER_LEFT, actor, null))
+                                        .flatMap(system -> memberRepository.markLeft(
+                                                        id, actor, conversation.getLastMessageSeq() + 1L, Instant.now())
+                                                .flatMap(updated -> updated > 0
+                                                        ? Mono.just(MemberOutcome.system(new MemberMutationResponse(
+                                                                id, actor, "LEFT", null), system))
+                                                        : Mono.error(new AppException(
+                                                                ErrorCode.CHAT_MEMBER_UPDATE_FAILED,
+                                                                "Leave group failed"))));
+                            });
+                });
         return transactionalOperator.transactional(work).flatMap(this::publishMemberOutcome);
     }
 

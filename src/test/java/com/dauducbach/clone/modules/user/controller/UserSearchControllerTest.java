@@ -3,7 +3,7 @@ package com.dauducbach.clone.modules.user.controller;
 import com.dauducbach.clone.commons.response.PageResponse;
 import com.dauducbach.clone.modules.user.dto.response.SearchSuggestionResponse;
 import com.dauducbach.clone.modules.user.service.SearchSuggestionService;
-import com.dauducbach.clone.modules.user.service.UserSearchService;
+import com.dauducbach.clone.modules.user.search.application.UserSearchService;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Mono;

@@ -1,24 +1,24 @@
 package com.dauducbach.clone.modules.post.service.post;
 
-import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
-import com.dauducbach.clone.modules.media.service.MediaService;
-
 import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import com.dauducbach.clone.modules.media.constant.OwnerType;
+import com.dauducbach.clone.modules.media.publicapi.MediaAssetView;
+import com.dauducbach.clone.modules.media.publicapi.MediaPlaybackUrls;
+import com.dauducbach.clone.modules.media.publicapi.MediaCatalog;
+import com.dauducbach.clone.modules.media.publicapi.MusicCatalog;
+import com.dauducbach.clone.modules.media.publicapi.MusicTrackView;
 import com.dauducbach.clone.modules.post.constant.PostMediaRatio;
 
 import com.dauducbach.clone.modules.post.dto.response.PostDetailResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostItemResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostMediaResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostMusicResponse;
-import com.dauducbach.clone.modules.media.entity.Media;
 import com.dauducbach.clone.modules.post.entity.PostDetails;
 import com.dauducbach.clone.modules.post.entity.PostItem;
-import com.dauducbach.clone.modules.post.repositoty.PostItemRepository;
-import com.dauducbach.clone.modules.media.entity.music.Musics;
-import com.dauducbach.clone.modules.user.entity.UserDetails;
-import com.dauducbach.clone.modules.media.service.music.MusicService;
-import com.dauducbach.clone.modules.user.service.UserDetailsService;
+import com.dauducbach.clone.modules.post.repository.PostItemRepository;
+import com.dauducbach.clone.modules.post.query.PostContentQueryService;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentity;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentityQuery;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
@@ -30,19 +30,19 @@ import java.util.Optional;
 @Service
 @RequiredArgsConstructor
 public class PostDetailQueryService {
-    private final PostService postService;
+    private final PostContentQueryService postContentQueryService;
     private final PostItemRepository postItemRepository;
-    private final MediaService mediaService;
-    private final MusicService musicService;
-    private final UserDetailsService userDetailsService;
-    private final MediaCompatibilityFacade cloudinaryMediaService;
+    private final MediaCatalog mediaCatalog;
+    private final MusicCatalog musicCatalog;
+    private final UserIdentityQuery userIdentityQuery;
+    private final MediaPlaybackUrls mediaAssets;
 
     public Mono<PostItemResponse> getFirstItem(PostDetails post, MediaDisplayType mediaType) {
         boolean sharedMusic = hasText(post.getMusicId());
         return postItemRepository.findByPostIdOrderByOrderNumberAsc(post.getPostId())
                 .sort(Comparator.comparing(PostItem::getOrderNumber, Comparator.nullsLast(Integer::compareTo)))
                 .next()
-                .flatMap(item -> mediaService.getById(item.getMediaId())
+                .flatMap(item -> mediaCatalog.findById(item.getMediaId())
                         .flatMap(media -> {
                             Mono<PostMusicResponse> music = sharedMusic
                                     ? Mono.empty()
@@ -50,7 +50,7 @@ public class PostDetailQueryService {
                             return music.map(value -> toItemResponse(item, media, value, mediaType))
                                     .defaultIfEmpty(toItemResponse(item, media, null, mediaType));
                         }))
-                .switchIfEmpty(mediaService.getFirstByOwnerIdAndOwnerType(post.getPostId(), OwnerType.POST)
+                .switchIfEmpty(mediaCatalog.findFirstByOwnerIdAndOwnerType(post.getPostId(), OwnerType.POST)
                         .map(media -> toLegacyItemResponse(media, mediaType)));
     }
 
@@ -60,7 +60,7 @@ public class PostDetailQueryService {
 
     public Mono<PostDetailResponse> getPostDetail(String postId, MediaDisplayType mediaType) {
         MediaDisplayType displayType = mediaType == null ? MediaDisplayType.POST : mediaType;
-        return postService.getPostById(postId)
+        return postContentQueryService.findById(postId)
                 .flatMap(post -> buildPostDetail(post, displayType));
     }
 
@@ -78,8 +78,9 @@ public class PostDetailQueryService {
                         resolveMusic(post.getMusicId(), post.getMusicStart(), post.getMusicEnd())
                                 .map(Optional::of)
                                 .defaultIfEmpty(Optional.empty()),
-                        userDetailsService.getUserDetailsById(post.getUserId())
-                                .defaultIfEmpty(UserDetails.builder().userId(post.getUserId()).username(post.getUserId()).fullName(post.getUserId()).build()))
+                        userIdentityQuery.resolveIdentity(post.getUserId())
+                                .onErrorReturn(new UserIdentity(
+                                        post.getUserId(), post.getUserId(), post.getUserId(), "")))
                 .map(tuple -> toResponse(
                         post,
                         tuple.getT1(),
@@ -91,7 +92,7 @@ public class PostDetailQueryService {
         boolean sharedMusic = hasText(post.getMusicId());
         return postItemRepository.findByPostIdOrderByOrderNumberAsc(post.getPostId())
                 .sort(Comparator.comparing(PostItem::getOrderNumber, Comparator.nullsLast(Integer::compareTo)))
-                .concatMap(item -> mediaService.getById(item.getMediaId())
+                .concatMap(item -> mediaCatalog.findById(item.getMediaId())
                         .flatMap(media -> {
                             Mono<PostMusicResponse> music = sharedMusic
                                     ? Mono.empty()
@@ -106,29 +107,29 @@ public class PostDetailQueryService {
         if (!hasText(musicId)) {
             return Mono.empty();
         }
-        return musicService.getMusicById(musicId.trim())
+        return musicCatalog.findById(musicId.trim())
                 .map(music -> toMusicResponse(music, start, end))
                 .onErrorResume(error -> Mono.empty());
     }
 
-    private PostMusicResponse toMusicResponse(Musics music, Long start, Long end) {
-        String playbackUrl = music.getSongUrl();
+    private PostMusicResponse toMusicResponse(MusicTrackView music, Long start, Long end) {
+        String playbackUrl = music.songUrl();
         if (hasText(playbackUrl) && start != null && end != null && start >= 0 && end > start) {
-            playbackUrl = cloudinaryMediaService.transformMusicUrl(playbackUrl, start, end);
+            playbackUrl = mediaAssets.transformMusicUrl(playbackUrl, start, end);
         }
         return new PostMusicResponse(
-                music.getId(),
-                music.getDisplayName(),
-                music.getSingleName(),
-                music.getDisplayImages(),
+                music.id(),
+                music.displayName(),
+                music.singleName(),
+                music.displayImages(),
                 playbackUrl,
                 start,
                 end,
-                music.getDuration()
+                music.duration()
         );
     }
 
-    private PostItemResponse toItemResponse(PostItem item, Media media, PostMusicResponse music, MediaDisplayType mediaType) {
+    private PostItemResponse toItemResponse(PostItem item, MediaAssetView media, PostMusicResponse music, MediaDisplayType mediaType) {
         return new PostItemResponse(
                 item.getId(),
                 item.getOrderNumber(),
@@ -138,9 +139,9 @@ public class PostDetailQueryService {
         );
     }
 
-    private PostItemResponse toLegacyItemResponse(Media media, MediaDisplayType mediaType) {
+    private PostItemResponse toLegacyItemResponse(MediaAssetView media, MediaDisplayType mediaType) {
         return new PostItemResponse(
-                media.getAssetId(),
+                media.assetId(),
                 1,
                 null,
                 toMediaResponse(media, mediaType),
@@ -148,26 +149,26 @@ public class PostDetailQueryService {
         );
     }
 
-    private PostMediaResponse toMediaResponse(Media media, MediaDisplayType mediaType) {
+    private PostMediaResponse toMediaResponse(MediaAssetView media, MediaDisplayType mediaType) {
         return new PostMediaResponse(
-                media.getAssetId(),
-                media.getPublicId(),
-                media.getMediaFormat(),
-                media.getResourceType(),
-                cloudinaryMediaService.transformDeliveryUrl(media.getUrl(), mediaType),
-                cloudinaryMediaService.transformDeliveryUrl(media.getSecureUrl(), mediaType),
-                media.getDisplayName(),
-                media.getWidth(),
-                media.getHeight()
+                media.assetId(),
+                media.publicId(),
+                media.mediaFormat(),
+                media.resourceType(),
+                mediaAssets.transformDeliveryUrl(media.url(), mediaType),
+                mediaAssets.transformDeliveryUrl(media.secureUrl(), mediaType),
+                media.displayName(),
+                media.width(),
+                media.height()
         );
     }
 
-    private PostDetailResponse toResponse(PostDetails post, List<PostItemResponse> items, PostMusicResponse music, UserDetails author) {
+    private PostDetailResponse toResponse(PostDetails post, List<PostItemResponse> items, PostMusicResponse music, UserIdentity author) {
         return new PostDetailResponse(
                 post.getPostId(),
                 post.getUserId(),
-                firstNonBlank(author.getUsername(), post.getUserId()),
-                firstNonBlank(author.getFullName(), author.getUsername(), post.getUserId()),
+                firstNonBlank(author.username(), post.getUserId()),
+                firstNonBlank(author.fullName(), author.username(), post.getUserId()),
                 post.getContent(),
                 post.getHashtag(),
                 post.getHashtagList(),

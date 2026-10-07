@@ -4,7 +4,7 @@ import com.dauducbach.clone.commons.exception.*;
 import com.dauducbach.clone.infrastructure.outbox.InteractionOutbox;
 import com.dauducbach.clone.modules.post.dto.request.PostInteractionRequest;
 import com.dauducbach.clone.modules.post.entity.*;
-import com.dauducbach.clone.modules.post.repositoty.PostInteractionReceiptRepository;
+import com.dauducbach.clone.modules.post.repository.PostInteractionReceiptRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DuplicateKeyException;

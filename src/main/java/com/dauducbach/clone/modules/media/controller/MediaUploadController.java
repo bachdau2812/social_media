@@ -4,7 +4,7 @@ import com.dauducbach.clone.commons.response.ApiResponse;
 import com.dauducbach.clone.modules.media.constant.OwnerType;
 import com.dauducbach.clone.modules.media.dto.response.MediaSignatureResponse;
 import com.dauducbach.clone.modules.media.entity.Media;
-import com.dauducbach.clone.modules.media.service.CloudinarySignatureService;
+import com.dauducbach.clone.modules.media.infrastructure.cloudinary.CloudinarySignatureService;
 import com.dauducbach.clone.modules.media.service.MediaService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;

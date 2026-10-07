@@ -1,8 +1,8 @@
 package com.dauducbach.clone.modules.post.service.post;
 
-import com.dauducbach.clone.modules.media.configuration.MediaPolicyProperties;
-import com.dauducbach.clone.modules.media.entity.Media;
-import com.dauducbach.clone.utils.MediaScanUtils;
+import com.dauducbach.clone.modules.media.publicapi.MediaAssetView;
+import com.dauducbach.clone.modules.media.publicapi.MediaInspection;
+import com.dauducbach.clone.modules.media.publicapi.MediaUploadPolicy;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,8 +16,8 @@ import java.util.Locale;
 public class MediaModerationProvider {
     private static final Logger log = LoggerFactory.getLogger(MediaModerationProvider.class);
 
-    private final MediaScanUtils mediaScanUtils;
-    private final MediaPolicyProperties mediaPolicy;
+    private final MediaInspection mediaInspection;
+    private final MediaUploadPolicy mediaPolicy;
 
     public Mono<Decision> scan(String mediaUrl, String publicId) {
         return scan(mediaUrl, publicId, null);
@@ -30,18 +30,18 @@ public class MediaModerationProvider {
                     publicId, declaredType);
             return Mono.just(Decision.APPROVED);
         }
-        return mediaScanUtils.scanMedia(mediaUrl, publicId)
-                .map(result -> result.isNsfw() ? Decision.REJECTED : Decision.APPROVED);
+        return mediaInspection.inspect(mediaUrl, publicId)
+                .map(result -> result.nsfw() ? Decision.REJECTED : Decision.APPROVED);
     }
 
-    public boolean isAllowedAsset(Media media) {
+    public boolean isAllowedAsset(MediaAssetView media) {
         if (media == null) {
             return false;
         }
-        String resourceType = media.getResourceType() == null
+        String resourceType = media.resourceType() == null
                 ? ""
-                : media.getResourceType().trim().toLowerCase();
-        long bytes = media.getBytes();
+                : media.resourceType().trim().toLowerCase();
+        long bytes = media.bytes();
         return switch (resourceType) {
             case "image" -> bytes <= mediaPolicy.imageMaxBytes();
             case "video" -> bytes <= mediaPolicy.videoMaxBytes();

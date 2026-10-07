@@ -1,6 +1,6 @@
 package com.dauducbach.clone.modules.post.dto.request;
 
-import com.dauducbach.clone.utils.GsonUtils;
+import com.dauducbach.clone.commons.serialization.GsonUtils;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

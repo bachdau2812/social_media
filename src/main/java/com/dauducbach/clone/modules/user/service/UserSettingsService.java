@@ -1,7 +1,7 @@
 package com.dauducbach.clone.modules.user.service;
 
 import com.dauducbach.clone.modules.user.entity.UserSettings;
-import com.dauducbach.clone.modules.user.repositoty.UserSettingsRepository;
+import com.dauducbach.clone.modules.user.repository.UserSettingsRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;

@@ -8,6 +8,7 @@ import com.dauducbach.clone.modules.media.dto.music.response.BulkMusicFetchItemR
 import com.dauducbach.clone.modules.media.dto.music.response.BulkMusicFetchResponse;
 import com.dauducbach.clone.modules.media.dto.music.response.MusicFetchAcceptedResponse;
 import com.dauducbach.clone.modules.media.repository.MusicsRepository;
+import com.dauducbach.clone.modules.media.music.fetch.FetchMusicUseCase;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,7 +32,7 @@ public class BulkMusicFetchService {
     private static final String SAFE_FAILURE_MESSAGE = "Music fetch failed";
 
     private final MusicsRepository musicsRepository;
-    private final SpotifyMusicFetchService spotifyMusicFetchService;
+    private final FetchMusicUseCase fetchMusicUseCase;
 
     public Mono<BulkMusicFetchResponse> triggerFetch(BulkMusicFetchRequest request) {
         return Mono.defer(() -> {
@@ -74,7 +75,7 @@ public class BulkMusicFetchService {
     }
 
     private Mono<BulkMusicFetchItemResponse> enqueue(String trackId) {
-        return Mono.defer(() -> spotifyMusicFetchService.requestFetchSilently(trackId))
+        return Mono.defer(() -> fetchMusicUseCase.requestFetchSilently(trackId))
                 .map(result -> new BulkMusicFetchItemResponse(
                         result.trackId(),
                         mapStatus(result.status()),

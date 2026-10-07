@@ -3,17 +3,20 @@ package com.dauducbach.clone.modules.chat.service;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Sinks;
 
+import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 public class ChatSessionRegistry {
+    private static final int OUTBOUND_CAPACITY = 256;
     private final Map<String, Map<String, SessionState>> sessions = new ConcurrentHashMap<>();
 
     public SessionState register(String userId, String sessionId) {
         SessionState state = new SessionState(
-                Sinks.many().unicast().onBackpressureBuffer(),
+                Sinks.many().unicast().onBackpressureBuffer(new ArrayBlockingQueue<>(OUTBOUND_CAPACITY)),
                 Instant.now());
         sessions.computeIfAbsent(userId, ignored -> new ConcurrentHashMap<>())
                 .put(sessionId, state);
@@ -37,7 +40,13 @@ public class ChatSessionRegistry {
         if (userSessions == null) {
             return;
         }
-        userSessions.values().forEach(state -> state.outbound.tryEmitNext(payload));
+        userSessions.values().forEach(state -> state.offer(payload));
+    }
+
+    public void closeAll(Throwable reason) {
+        IllegalStateException disconnect = new IllegalStateException(
+                "Chat realtime delivery is restarting; reconnect to synchronize", reason);
+        sessions.values().forEach(userSessions -> userSessions.values().forEach(state -> state.fail(disconnect)));
     }
 
     public boolean remove(String userId, String sessionId) {
@@ -72,6 +81,26 @@ public class ChatSessionRegistry {
 
         public Sinks.Many<String> outbound() {
             return outbound;
+        }
+
+        private void offer(String payload) {
+            Sinks.EmitResult result = outbound.tryEmitNext(payload);
+            if (result == Sinks.EmitResult.FAIL_NON_SERIALIZED) {
+                try {
+                    outbound.emitNext(payload, Sinks.EmitFailureHandler.busyLooping(Duration.ofMillis(10)));
+                    return;
+                } catch (RuntimeException error) {
+                    fail(error);
+                    return;
+                }
+            }
+            if (result.isFailure()) {
+                fail(new IllegalStateException("Chat session outbound queue is full: " + result));
+            }
+        }
+
+        private void fail(Throwable error) {
+            outbound.tryEmitError(error);
         }
     }
 }

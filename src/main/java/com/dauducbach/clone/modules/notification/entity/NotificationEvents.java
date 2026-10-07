@@ -26,5 +26,6 @@ public class NotificationEvents {
     String metadata;
     String deepLink;
     String dedupKey;
+    String sourceEventKey;
     Instant createdAt;
 }

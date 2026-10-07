@@ -1,7 +1,7 @@
 package com.dauducbach.clone.modules.chat.service;
 
 import com.dauducbach.clone.modules.chat.constant.ReactionType;
-import com.dauducbach.clone.modules.chat.dto.event.ChatEvent;
+import com.dauducbach.clone.modules.chat.publicapi.ChatEvent;
 import com.dauducbach.clone.modules.chat.dto.response.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;

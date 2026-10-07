@@ -4,7 +4,6 @@ import com.dauducbach.clone.modules.chat.constant.ConversationType;
 import com.dauducbach.clone.modules.chat.constant.MessageType;
 import com.dauducbach.clone.modules.chat.dto.request.ForwardMessageRequest;
 import com.dauducbach.clone.modules.chat.dto.response.ChatMessageResponse;
-import com.dauducbach.clone.modules.chat.dto.event.ChatEvent;
 import com.dauducbach.clone.modules.chat.entity.ChatMessage;
 import com.dauducbach.clone.modules.chat.entity.Conversation;
 import com.dauducbach.clone.modules.chat.repository.*;
@@ -27,16 +26,15 @@ public class ChatForwardService {
     private final ChatMessageActionsRepository actions;
     private final ChatMessageRepository messages;
     private final ChatMessageWriter writer;
-    private final ChatOutboxRepository outbox;
     private final ConversationMemberRepository members;
     private final ChatResponseMapper mapper;
     private final TransactionalOperator tx;
     private final ChatMessageQueryService hydration;
 
     public ChatForwardService(ChatMessageAccess access, ChatMessageActionsRepository actions,
-            ChatMessageRepository messages, ChatMessageWriter writer, ChatOutboxRepository outbox,
+            ChatMessageRepository messages, ChatMessageWriter writer,
             ConversationMemberRepository members, ChatResponseMapper mapper, TransactionalOperator tx) {
-        this(access, actions, messages, writer, outbox, members, mapper, tx, null);
+        this(access, actions, messages, writer, members, mapper, tx, null);
     }
 
     public Mono<ChatMessageResponse> forward(String actor, String destination, ForwardMessageRequest request) {
@@ -127,10 +125,9 @@ public class ChatForwardService {
                 : Mono.defer(() -> actions.referenceMedia(copy.getId(), original.getId()))
                         .flatMap(count -> count > 0 ? Mono.empty()
                                 : Mono.error(ChatMessageAccess.invalid("Source attachment is unavailable")));
-        return writer.write(copy, target.conversation(), attachments)
+        return writer.write(copy, target.conversation(), attachments,
+                        users.stream().filter(user -> !actor.equals(user)).distinct().toList())
                 .flatMap(saved -> actions.recordForward(saved.getId(), request.sourceConversationId(), original.getId())
-                        .then(Mono.defer(() -> outbox.append(ChatEvent.messageCreated(
-                                mapper.toChatMessageResponse(saved), users))))
                         .thenReturn(mapper.toChatMessageResponse(saved)));
     }
 }

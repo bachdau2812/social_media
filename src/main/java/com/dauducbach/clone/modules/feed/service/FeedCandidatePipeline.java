@@ -1,7 +1,6 @@
 package com.dauducbach.clone.modules.feed.service;
 
-import com.dauducbach.clone.modules.post.entity.PostDetails;
-import com.dauducbach.clone.modules.post.service.post.PostFeedQueryService;
+import com.dauducbach.clone.modules.post.publicapi.PostFeedQuery;
 import com.dauducbach.clone.modules.feed.dto.FeedVectorSnapshot;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -24,7 +23,7 @@ public class FeedCandidatePipeline {
     static final String RECENT_REASON = "recent_post";
 
     private final FeedVectorSnapshotService snapshots;
-    private final PostFeedQueryService postFeedQueryService;
+    private final PostFeedQuery postFeedQuery;
 
     public Mono<List<FeedCandidate>> select(
             String userId,
@@ -48,11 +47,10 @@ public class FeedCandidatePipeline {
         }
 
         Mono<List<String>> vectorCandidates = snapshot.queryVector().isEmpty() ? Mono.just(List.of())
-                : postFeedQueryService.searchRecommendedPostIds(snapshot.queryVector(), safeLimit, excludedPostIds);
+                : postFeedQuery.searchRecommendedPostIds(snapshot.queryVector(), safeLimit, excludedPostIds);
 
-        Mono<List<String>> recentCandidates = postFeedQueryService
-                .getRecentApprovedPosts(safeLimit, excludedPostIds)
-                .map(PostDetails::getPostId)
+        Mono<List<String>> recentCandidates = postFeedQuery
+                .findRecentApprovedPostIds(safeLimit, excludedPostIds)
                 .collectList();
 
         return Mono.zip(vectorCandidates, recentCandidates)

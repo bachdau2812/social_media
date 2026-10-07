@@ -3,14 +3,12 @@ package com.dauducbach.clone.modules.post.service.post;
 import com.dauducbach.clone.infrastructure.outbox.InteractionOutbox;
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
-import com.dauducbach.clone.modules.audit.entity.AuditLogs;
-import com.dauducbach.clone.modules.audit.service.UserAuditService;
 import com.dauducbach.clone.modules.post.dto.request.LikeRequest;
 import com.dauducbach.clone.modules.post.entity.Like;
 import com.dauducbach.clone.modules.post.entity.PostDetails;
-import com.dauducbach.clone.modules.post.repositoty.CommentRepository;
-import com.dauducbach.clone.modules.post.repositoty.LikeRepository;
-import com.dauducbach.clone.modules.post.repositoty.PostDetailsRepository;
+import com.dauducbach.clone.modules.post.repository.CommentRepository;
+import com.dauducbach.clone.modules.post.repository.LikeRepository;
+import com.dauducbach.clone.modules.post.repository.PostDetailsRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -56,7 +54,6 @@ class LikeServiceTest {
     @Mock
     ReactiveInsertOperation.ReactiveInsert<Like> likeInsertSpec;
     @Mock
-    UserAuditService userAuditService;
     private final java.util.concurrent.atomic.AtomicReference<String> lockToken = new java.util.concurrent.atomic.AtomicReference<>();
 
     @Test

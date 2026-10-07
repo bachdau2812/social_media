@@ -50,7 +50,6 @@ public class ChatWebSocketHandler implements WebSocketHandler {
                 .flatMap(tick -> session.close(CloseStatus.GOING_AWAY));
 
         return presenceService.refresh(userId, sessionId)
-                .then(cursorService.markPendingDeliveredOnConnect(userId))
                 .then(Mono.firstWithSignal(inbound, outbound, watchdog))
                 .doFinally(signal -> {
                     sessionRegistry.remove(userId, sessionId);

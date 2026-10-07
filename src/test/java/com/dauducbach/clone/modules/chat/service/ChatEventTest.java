@@ -1,8 +1,8 @@
 package com.dauducbach.clone.modules.chat.service;
 
-import com.dauducbach.clone.modules.chat.constant.ChatEventType;
+import com.dauducbach.clone.modules.chat.publicapi.ChatEventType;
 import com.dauducbach.clone.modules.chat.constant.MessageType;
-import com.dauducbach.clone.modules.chat.dto.event.ChatEvent;
+import com.dauducbach.clone.modules.chat.publicapi.ChatEvent;
 import com.dauducbach.clone.modules.chat.dto.response.ChatMessageResponse;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;

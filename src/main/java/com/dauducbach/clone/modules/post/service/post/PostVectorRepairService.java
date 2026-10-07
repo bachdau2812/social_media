@@ -1,6 +1,6 @@
 package com.dauducbach.clone.modules.post.service.post;
 
-import com.dauducbach.clone.infrastructure.vector.*;
+import com.dauducbach.clone.commons.vector.*;
 import com.dauducbach.clone.modules.post.elastic.PostVector;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;

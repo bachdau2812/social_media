@@ -2,22 +2,21 @@ package com.dauducbach.clone.modules.user.service;
 
 import com.dauducbach.clone.modules.user.entity.SearchKeyword;
 import com.dauducbach.clone.modules.user.entity.UserSearchHistory;
-import com.dauducbach.clone.modules.user.repositoty.SearchKeywordRepository;
-import com.dauducbach.clone.modules.user.repositoty.UserSearchHistoryRepository;
+import com.dauducbach.clone.modules.user.repository.SearchKeywordRepository;
+import com.dauducbach.clone.modules.user.repository.UserSearchHistoryRepository;
+import com.dauducbach.clone.modules.user.search.application.SearchSuggestionCache;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.domain.Range;
-import org.springframework.data.redis.core.ReactiveRedisTemplate;
-import org.springframework.data.redis.core.ReactiveValueOperations;
-import org.springframework.data.redis.core.ReactiveZSetOperations;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
-import java.time.Duration;
 import java.time.Instant;
+import java.time.Duration;
+import java.util.List;
+import java.time.LocalDate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -35,11 +34,7 @@ class SearchSuggestionServiceTest {
     @Mock
     SearchKeywordRepository searchKeywordRepository;
     @Mock
-    ReactiveRedisTemplate<String, String> redisTemplate;
-    @Mock
-    ReactiveZSetOperations<String, String> zSetOperations;
-    @Mock
-    ReactiveValueOperations<String, String> valueOperations;
+    SearchSuggestionCache suggestionCache;
 
     @Test
     void getSuggestionsReturnsEmptyWhenPrefixTooShort() {
@@ -61,13 +56,10 @@ class SearchSuggestionServiceTest {
                 .lastSearchedAt(Instant.parse("2026-06-20T00:00:00Z"))
                 .build();
 
-        when(redisTemplate.opsForZSet()).thenReturn(zSetOperations);
-        when(zSetOperations.reverseRange("search:history:user-1", Range.closed(0L, 199L))).thenReturn(Flux.empty());
+        when(suggestionCache.historyKeywords("user-1", 200)).thenReturn(Mono.just(List.of()));
+        when(suggestionCache.putHistoryKeywords(eq("user-1"), any(), eq(Duration.ofHours(3)))).thenReturn(Mono.empty());
         when(userSearchHistoryRepository.findRecentActiveByUserId("user-1", 200)).thenReturn(Flux.just(history));
-        when(zSetOperations.add(eq("search:history:user-1"), eq("spring webflux"), anyDouble())).thenReturn(Mono.just(true));
-        when(redisTemplate.expire(eq("search:history:user-1"), any(Duration.class))).thenReturn(Mono.just(true));
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get("search:suggest:global:spr:19")).thenReturn(Mono.empty());
+        when(suggestionCache.globalPrefixSuggestions("spr", 19)).thenReturn(Mono.just(List.of()));
         when(searchKeywordRepository.findPublicByPrefix("spr%", 3L, 19)).thenReturn(Flux.just(SearchKeyword.builder()
                 .id(1L)
                 .keyword("Spring Boot")
@@ -75,7 +67,8 @@ class SearchSuggestionServiceTest {
                 .searchCount(9L)
                 .userCount(4L)
                 .build()));
-        when(valueOperations.set(eq("search:suggest:global:spr:19"), anyString(), any(Duration.class))).thenReturn(Mono.just(true));
+        when(suggestionCache.putGlobalPrefixSuggestions(eq("spr"), eq(19), any(), eq(Duration.ofMinutes(5))))
+                .thenReturn(Mono.empty());
 
         StepVerifier.create(service.getSuggestions("user-1", "spr", 10))
                 .assertNext(items -> {
@@ -98,10 +91,10 @@ class SearchSuggestionServiceTest {
         when(userSearchHistoryRepository.insertHistory(anyString(), eq("user-1"), eq("Spring WebFlux"), eq("spring webflux")))
                 .thenReturn(Mono.just(1));
         when(searchKeywordRepository.upsertKeyword("Spring WebFlux", "spring webflux", 1)).thenReturn(Mono.just(1));
-        when(redisTemplate.opsForZSet()).thenReturn(zSetOperations);
-        when(zSetOperations.incrementScore(anyString(), eq("spring webflux"), eq(1.0))).thenReturn(Mono.just(1.0));
-        when(zSetOperations.add(eq("search:history:user-1"), eq("spring webflux"), anyDouble())).thenReturn(Mono.just(true));
-        when(redisTemplate.expire(anyString(), any(Duration.class))).thenReturn(Mono.just(true));
+        when(suggestionCache.incrementTrending(any(LocalDate.class), eq("spring webflux"), eq(Duration.ofDays(14))))
+                .thenReturn(Mono.empty());
+        when(suggestionCache.addHistoryKeyword(eq("user-1"), eq("spring webflux"), anyDouble(), eq(Duration.ofHours(3))))
+                .thenReturn(Mono.empty());
 
         StepVerifier.create(service.recordSubmittedSearch("user-1", "Spring WebFlux"))
                 .verifyComplete();
@@ -126,10 +119,10 @@ class SearchSuggestionServiceTest {
         when(userSearchHistoryRepository.incrementHistoryById("history-1", "Spring WebFlux"))
                 .thenReturn(Mono.just(1));
         when(searchKeywordRepository.upsertKeyword("Spring WebFlux", "spring webflux", 0)).thenReturn(Mono.just(1));
-        when(redisTemplate.opsForZSet()).thenReturn(zSetOperations);
-        when(zSetOperations.incrementScore(anyString(), eq("spring webflux"), eq(1.0))).thenReturn(Mono.just(1.0));
-        when(zSetOperations.add(eq("search:history:user-1"), eq("spring webflux"), anyDouble())).thenReturn(Mono.just(true));
-        when(redisTemplate.expire(anyString(), any(Duration.class))).thenReturn(Mono.just(true));
+        when(suggestionCache.incrementTrending(any(LocalDate.class), eq("spring webflux"), eq(Duration.ofDays(14))))
+                .thenReturn(Mono.empty());
+        when(suggestionCache.addHistoryKeyword(eq("user-1"), eq("spring webflux"), anyDouble(), eq(Duration.ofHours(3))))
+                .thenReturn(Mono.empty());
 
         StepVerifier.create(service.recordSubmittedSearch("user-1", "Spring WebFlux"))
                 .verifyComplete();
@@ -140,6 +133,6 @@ class SearchSuggestionServiceTest {
     }
 
     private SearchSuggestionService newService() {
-        return new SearchSuggestionService(userSearchHistoryRepository, searchKeywordRepository, redisTemplate);
+        return new SearchSuggestionService(userSearchHistoryRepository, searchKeywordRepository, suggestionCache);
     }
 }

@@ -8,7 +8,7 @@ import com.dauducbach.clone.modules.chat.constant.MessageType;
 import com.dauducbach.clone.modules.chat.dto.response.ChatMessageResponse;
 import com.dauducbach.clone.modules.chat.dto.response.PinCollectionResponse;
 import com.dauducbach.clone.modules.chat.dto.response.PinnedMessageResponse;
-import com.dauducbach.clone.modules.chat.dto.event.ChatEvent;
+import com.dauducbach.clone.modules.chat.publicapi.ChatEvent;
 import com.dauducbach.clone.modules.chat.repository.ChatMessageActionsRepository;
 import com.dauducbach.clone.modules.chat.repository.ChatOutboxRepository;
 import com.dauducbach.clone.modules.chat.repository.ChatReadRepository;

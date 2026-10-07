@@ -8,6 +8,8 @@ import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.util.Collection;
+
 @Repository
 public interface MediaRepository extends R2dbcRepository<Media, String> {
 
@@ -19,6 +21,9 @@ public interface MediaRepository extends R2dbcRepository<Media, String> {
      */
     Flux<Media> findByOwnerIdAndOwnerType(String ownerId, com.dauducbach.clone.modules.media.constant.OwnerType ownerType);
 
+    Flux<Media> findByOwnerIdInAndOwnerType(Collection<String> ownerIds,
+            com.dauducbach.clone.modules.media.constant.OwnerType ownerType);
+
     Flux<Media> findByOwnerIdAndOwnerTypeOrderByCreatedAtDesc(String ownerId, com.dauducbach.clone.modules.media.constant.OwnerType ownerType, Pageable pageable);
 
     Mono<Long> countByOwnerIdAndOwnerType(String ownerId, com.dauducbach.clone.modules.media.constant.OwnerType ownerType);
@@ -26,6 +31,22 @@ public interface MediaRepository extends R2dbcRepository<Media, String> {
     Mono<Media> findFirstByOwnerIdAndOwnerTypeOrderByCreatedAtDesc(String ownerId, com.dauducbach.clone.modules.media.constant.OwnerType ownerType);
 
     Mono<Media> findFirstByOwnerIdAndOwnerTypeOrderByCreatedAtAsc(String ownerId, com.dauducbach.clone.modules.media.constant.OwnerType ownerType);
+
+    @Query("""
+            SELECT avatar.*
+            FROM media avatar
+            WHERE avatar.owner_type = 'AVATAR'
+              AND avatar.owner_id IN (:ownerIds)
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM media newer
+                  WHERE newer.owner_id = avatar.owner_id
+                    AND newer.owner_type = 'AVATAR'
+                    AND (newer.created_at > avatar.created_at
+                      OR (newer.created_at = avatar.created_at AND newer.asset_id > avatar.asset_id))
+              )
+            """)
+    Flux<Media> findCurrentAvatarsByOwnerIds(Collection<String> ownerIds);
 
     @Query("""
             SELECT m.*

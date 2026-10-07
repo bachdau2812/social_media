@@ -4,14 +4,13 @@ import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.user.dto.request.UserPhoneRequest;
 import com.dauducbach.clone.modules.user.entity.UserPhone;
-import com.dauducbach.clone.modules.user.repositoty.UserPhoneRepository;
-import com.dauducbach.clone.utils.RedisUtil;
+import com.dauducbach.clone.modules.user.profile.application.ProfileDataCache;
+import com.dauducbach.clone.modules.user.repository.UserPhoneRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
-import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -26,7 +25,7 @@ import java.util.UUID;
 public class UserPhoneService {
     UserPhoneRepository userPhoneRepository;
     R2dbcEntityTemplate r2dbcEntityTemplate;
-    ReactiveRedisTemplate<String, String> reactiveRedisStringTemplate;
+    ProfileDataCache profileDataCache;
 
     private static final Logger log = LoggerFactory.getLogger(UserPhoneService.class);
     private static final String CACHE_PREFIX = "user_phone:";
@@ -55,14 +54,10 @@ public class UserPhoneService {
                         String.format("Save user phone failed for userId=%s", request.getUserId()),
                         throwable
                 ))
-                .doOnSuccess(savedPhone -> {
-                    log.info("|UserPhoneService|createUserPhone|created user phone|id={}", savedPhone.getId());
-                    String jsonString = RedisUtil.serialize(savedPhone);
-                    if (jsonString != null) {
-                        reactiveRedisStringTemplate.opsForValue().set(cacheKey, jsonString, CACHE_TTL).subscribe();
-                    }
-                    reactiveRedisStringTemplate.opsForValue().delete(listCacheKey).subscribe();
-                })
+                .flatMap(savedPhone -> profileDataCache.put(cacheKey, savedPhone, CACHE_TTL)
+                        .then(profileDataCache.evict(listCacheKey))
+                        .thenReturn(savedPhone))
+                .doOnSuccess(savedPhone -> log.info("|UserPhoneService|createUserPhone|created user phone|id={}", savedPhone.getId()))
                 .doOnError(error -> log.error("|UserPhoneService|createUserPhone|failed to create|error={}", error.getMessage()));
     }
 
@@ -72,19 +67,8 @@ public class UserPhoneService {
 
         String cacheKey = CACHE_PREFIX + id;
 
-        return reactiveRedisStringTemplate.opsForValue().get(cacheKey)
-                .onErrorResume(error -> {
-                    log.warn("|UserPhoneService|getUserPhoneById|cache read failed, fallback to database|id={}|error={}", id, error.getMessage());
-                    return Mono.empty();
-                })
-                .flatMap(cachedJsonString -> {
-                    UserPhone cached = RedisUtil.deserialize(cachedJsonString, UserPhone.class);
-                    if (cached != null) {
-                        log.info("|UserPhoneService|getUserPhoneById|found in cache|id={}", id);
-                        return Mono.just(cached);
-                    }
-                    return Mono.empty();
-                })
+        return profileDataCache.find(cacheKey, UserPhone.class)
+                .doOnNext(cached -> log.info("|UserPhoneService|getUserPhoneById|found in cache|id={}", id))
                 .switchIfEmpty(
                         userPhoneRepository.findById(id)
                                 .switchIfEmpty(Mono.error(new AppException(
@@ -98,13 +82,8 @@ public class UserPhoneService {
                                                 String.format("Fetch user phone failed for id=%s", id),
                                                 throwable
                                         ))
-                                .doOnSuccess(phone -> {
-                                    log.info("|UserPhoneService|getUserPhoneById|found in database|id={}", id);
-                                    String jsonString = RedisUtil.serialize(phone);
-                                    if (jsonString != null) {
-                                        reactiveRedisStringTemplate.opsForValue().set(cacheKey, jsonString, CACHE_TTL).subscribe();
-                                    }
-                                })
+                                .flatMap(phone -> profileDataCache.put(cacheKey, phone, CACHE_TTL).thenReturn(phone)
+                                        .doOnNext(ignored -> log.info("|UserPhoneService|getUserPhoneById|found in database|id={}", id)))
                                 .doOnError(error -> log.error("|UserPhoneService|getUserPhoneById|failed to fetch|id={}|error={}", id, error.getMessage()))
                 );
     }
@@ -115,15 +94,11 @@ public class UserPhoneService {
 
         String listCacheKey = LIST_CACHE_PREFIX + userId;
 
-        return reactiveRedisStringTemplate.opsForValue().get(listCacheKey)
-                .onErrorResume(error -> {
-                    log.warn("|UserPhoneService|getUserPhonesByUserId|cache read failed, fallback to database|userId={}|error={}", userId, error.getMessage());
-                    return Mono.empty();
-                })
+        return profileDataCache.findList(listCacheKey, UserPhone.class)
                 .flatMapMany(cachedJsonString -> {
                     if (cachedJsonString != null) {
                         log.info("|UserPhoneService|getUserPhonesByUserId|found list in cache|userId={}", userId);
-                        return Flux.fromIterable(RedisUtil.deserializeList(cachedJsonString, UserPhone.class));
+                        return Flux.fromIterable(cachedJsonString);
                     }
                     return Flux.empty();
                 })
@@ -137,12 +112,9 @@ public class UserPhoneService {
                                 ))
                                 .doOnNext(phoneList -> {
                                     log.info("|UserPhoneService|getUserPhonesByUserId|found {} items in database|userId={}", phoneList.size(), userId);
-                                    String jsonString = RedisUtil.serialize(phoneList);
-                                    if (jsonString != null) {
-                                        reactiveRedisStringTemplate.opsForValue().set(listCacheKey, jsonString, CACHE_TTL).subscribe();
-                                    }
                                 })
-                                .flatMapMany(Flux::fromIterable)
+                                .flatMapMany(phoneList -> profileDataCache.put(listCacheKey, phoneList, CACHE_TTL)
+                                        .thenMany(Flux.fromIterable(phoneList)))
                                 .doOnError(error -> log.error("|UserPhoneService|getUserPhonesByUserId|failed to fetch|userId={}|error={}", userId, error.getMessage()))
                 );
     }
@@ -161,9 +133,9 @@ public class UserPhoneService {
                 .flatMap(phone -> userPhoneRepository.deleteById(id)
                         .doOnSuccess(v -> {
                             log.info("|UserPhoneService|deleteUserPhone|deleted|id={}", id);
-                            reactiveRedisStringTemplate.opsForValue().delete(cacheKey).subscribe();
-                            reactiveRedisStringTemplate.opsForValue().delete(LIST_CACHE_PREFIX + phone.getUserId()).subscribe();
                         })
+                        .then(profileDataCache.evict(cacheKey))
+                        .then(profileDataCache.evict(LIST_CACHE_PREFIX + phone.getUserId()))
                         .doOnError(error -> log.error("|UserPhoneService|deleteUserPhone|failed to delete|id={}|error={}", id, error.getMessage()))
                         .onErrorMap(throwable -> throwable instanceof AppException
                                 ? throwable

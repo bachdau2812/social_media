@@ -2,10 +2,11 @@ package com.dauducbach.clone.modules.notification.service;
 
 import com.dauducbach.clone.commons.constant.UserActionType;
 import com.dauducbach.clone.modules.chat.constant.MessageType;
-import com.dauducbach.clone.modules.chat.dto.event.ChatEvent;
+import com.dauducbach.clone.modules.chat.publicapi.ChatEvent;
 import com.dauducbach.clone.modules.chat.dto.response.ChatMessageResponse;
 import com.dauducbach.clone.modules.chat.dto.response.StoryContextResponse;
-import com.dauducbach.clone.modules.chat.service.ChatNotificationQueryService;
+import com.dauducbach.clone.modules.chat.publicapi.ChatNotificationQuery;
+import com.dauducbach.clone.modules.notification.incoming.chat.message.ChatMessageNotificationListener;
 import com.dauducbach.clone.modules.notification.dto.NotificationForService;
 import com.dauducbach.clone.modules.notification.entity.NotificationTemplates;
 import com.dauducbach.clone.modules.notification.repository.NotificationTemplatesRepository;
@@ -18,6 +19,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -29,7 +31,7 @@ class ChatMessageNotificationListenerTest {
     void storyReplyUsesDedicatedBodyAndRetainsExactChatDestinationMetadata() throws Exception {
         NotificationTemplatesRepository templates = mock(NotificationTemplatesRepository.class);
         PushNotificationService push = mock(PushNotificationService.class);
-        ChatNotificationQueryService query = mock(ChatNotificationQueryService.class);
+        ChatNotificationQuery query = mock(ChatNotificationQuery.class);
         ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
         ChatMessageNotificationListener listener = new ChatMessageNotificationListener(
                 objectMapper, templates, push, query);
@@ -57,5 +59,28 @@ class ChatMessageNotificationListenerTest {
                 .containsEntry("CONVERSATION_ID", "conversation-1")
                 .containsEntry("MESSAGE_ID", "message-1")
                 .containsEntry("MESSAGE_SEQ", "7");
+    }
+
+    @Test
+    void persistenceFailureEscapesListenerSoKafkaCanRetry() throws Exception {
+        NotificationTemplatesRepository templates = mock(NotificationTemplatesRepository.class);
+        PushNotificationService push = mock(PushNotificationService.class);
+        ChatNotificationQuery query = mock(ChatNotificationQuery.class);
+        ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+        ChatMessageNotificationListener listener = new ChatMessageNotificationListener(
+                objectMapper, templates, push, query);
+        ChatMessageResponse message = new ChatMessageResponse(
+                "message-2", "conversation-1", 8L, "client-2",
+                "actor-1", "An", null, MessageType.TEXT, "hi", null,
+                null, null, Instant.parse("2026-08-01T00:00:00Z"), null, false,
+                null);
+        ChatEvent event = ChatEvent.messageCreated(message, List.of("owner-1"));
+        when(query.canReceiveMessageNotification(any(), any(), any())).thenReturn(Mono.just(true));
+        when(templates.findByActionType(UserActionType.SEND_MESSAGE)).thenReturn(Mono.empty());
+        when(push.sendPushNotification(any())).thenReturn(Mono.error(new IllegalStateException("database unavailable")));
+
+        assertThatThrownBy(() -> listener.handle(new ConsumerRecord<>(
+                "chat.message.created", 0, 1L, "conversation-1", objectMapper.writeValueAsString(event))).join())
+                .hasRootCauseMessage("database unavailable");
     }
 }

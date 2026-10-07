@@ -1,6 +1,6 @@
 package com.dauducbach.clone.modules.chat.service;
 
-import com.dauducbach.clone.modules.chat.dto.event.ChatEvent;
+import com.dauducbach.clone.modules.chat.publicapi.ChatEvent;
 import com.dauducbach.clone.modules.chat.repository.ChatOutboxRepository;
 import com.dauducbach.clone.modules.chat.repository.MessageReactionRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -23,11 +23,19 @@ public class ChatOutboxPublisher {
     private final MessageReactionRepository reactions;
     private final ObjectMapper mapper;
     private final com.dauducbach.clone.modules.chat.repository.ChatMessageRepository messages;
+    private final com.dauducbach.clone.modules.chat.repository.ChatReadRepository reads;
     private final ChatResponseMapper responseMapper;
 
     public ChatOutboxPublisher(ChatOutboxRepository repository,ChatEventPublisher kafka,
             MessageReactionRepository reactions,ObjectMapper mapper) {
-        this(repository,kafka,reactions,mapper,null,null);
+        this(repository,kafka,reactions,mapper,null,null,null);
+    }
+
+    public ChatOutboxPublisher(ChatOutboxRepository repository,ChatEventPublisher kafka,
+            MessageReactionRepository reactions,ObjectMapper mapper,
+            com.dauducbach.clone.modules.chat.repository.ChatMessageRepository messages,
+            ChatResponseMapper responseMapper) {
+        this(repository,kafka,reactions,mapper,messages,null,responseMapper);
     }
 
     @Scheduled(fixedDelayString = "${chat.outbox.poll-delay-ms:${chat.reactions.outbox.poll-delay-ms:1000}}")
@@ -57,18 +65,39 @@ public class ChatOutboxPublisher {
     }
 
     private Mono<ChatEvent> refreshCreatedMessage(ChatEvent event) {
-        if(messages==null || event.type()!=com.dauducbach.clone.modules.chat.constant.ChatEventType.MESSAGE_CREATED
+        if(messages==null || event.type()!=com.dauducbach.clone.modules.chat.publicapi.ChatEventType.MESSAGE_CREATED
                 || event.message()==null)return Mono.just(event);
-        // A creation can wait in the queue while its accepted copy is recalled. Never replay stale private content.
-        return messages.findById(event.message().id()).map(message -> {
-            // Keep the original coherent creation snapshot while live. A newer revision without its counts is false state.
-            if (message.getDeletedAt() == null) {
-                return event;
-            }
-            return new ChatEvent(com.dauducbach.clone.modules.chat.constant.ChatEventType.MESSAGE_DELETED,
-                    event.eventId(), event.conversationId(), event.actorId(), event.entityId(), event.targetUserId(),
-                    event.occurredAt(), event.recipientIds(), responseMapper.toChatMessageResponse(message).neutralReactions(),
-                    event.deliveredSeq(), event.readSeq(), event.reactionState(), event.pinVersion());
-        });
+        // The queued event contains only its accepted payload. Hydrate display/reply fields at delivery time.
+        // If recalled while waiting, publish the tombstone so a stale creation cannot restore its body.
+        return messages.findById(event.message().id())
+                .flatMap(message -> {
+                    if (reads == null) {
+                        if (message.getDeletedAt() == null) return Mono.just(event);
+                        return Mono.just(withMessage(event,
+                                com.dauducbach.clone.modules.chat.publicapi.ChatEventType.MESSAGE_DELETED,
+                                responseMapper.toChatMessageResponse(message).neutralReactions()));
+                    }
+                    return reads.findAfterSequence(event.conversationId(), 1L,
+                                    Math.max(0L, event.message().messageSeq() - 1L), 1)
+                            .next()
+                            .map(responseMapper::toChatMessageResponse)
+                            .map(response -> withMessage(event,
+                                    message.getDeletedAt() == null
+                                            ? com.dauducbach.clone.modules.chat.publicapi.ChatEventType.MESSAGE_CREATED
+                                            : com.dauducbach.clone.modules.chat.publicapi.ChatEventType.MESSAGE_DELETED,
+                                    response.neutralReactions()))
+                            .defaultIfEmpty(message.getDeletedAt() == null ? event : withMessage(event,
+                                    com.dauducbach.clone.modules.chat.publicapi.ChatEventType.MESSAGE_DELETED,
+                                    responseMapper.toChatMessageResponse(message).neutralReactions()));
+                })
+                .defaultIfEmpty(event);
+    }
+
+    private ChatEvent withMessage(ChatEvent event,
+            com.dauducbach.clone.modules.chat.publicapi.ChatEventType type,
+            com.dauducbach.clone.modules.chat.dto.response.ChatMessageResponse message) {
+        return new ChatEvent(type, event.eventId(), event.conversationId(), event.actorId(), event.entityId(),
+                event.targetUserId(), event.occurredAt(), event.recipientIds(), message, event.deliveredSeq(),
+                event.readSeq(), event.reactionState(), event.pinVersion());
     }
 }

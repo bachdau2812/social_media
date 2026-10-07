@@ -1,7 +1,7 @@
 package com.dauducbach.clone.modules.post.service.post;
 
-import com.dauducbach.clone.utils.GsonUtils;
-import com.dauducbach.clone.utils.KafkaUtils;
+import com.dauducbach.clone.commons.serialization.GsonUtils;
+import com.dauducbach.clone.commons.serialization.JsonPayloadReader;
 import com.google.gson.JsonObject;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -37,12 +37,12 @@ public class PostEventBroadcast {
     }
 
     private String resolveField(JsonObject payloadJson, String fieldName) {
-        String value = KafkaUtils.extractString(payloadJson, fieldName);
+        String value = JsonPayloadReader.extractString(payloadJson, fieldName);
         if (!value.isBlank()) {
             return value;
         }
         return "postId".equals(fieldName)
-                ? KafkaUtils.extractString(payloadJson, "post_id")
+                ? JsonPayloadReader.extractString(payloadJson, "post_id")
                 : value;
     }
 }

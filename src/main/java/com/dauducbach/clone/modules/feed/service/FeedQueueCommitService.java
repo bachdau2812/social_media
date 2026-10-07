@@ -1,8 +1,10 @@
 package com.dauducbach.clone.modules.feed.service;
 
-import com.dauducbach.clone.infrastructure.vector.*;
 import com.dauducbach.clone.modules.feed.constant.FeedCacheKeys;
-import com.dauducbach.clone.modules.user.service.UserVectorSnapshotService;
+import com.dauducbach.clone.modules.personalization.publicapi.PreferenceLeaseLostException;
+import com.dauducbach.clone.modules.personalization.publicapi.PreferenceQueueConsistency;
+import com.dauducbach.clone.modules.personalization.publicapi.PreferenceQueueLease;
+import com.dauducbach.clone.modules.personalization.publicapi.PreferenceSnapshot;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Range;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
@@ -18,35 +20,29 @@ import java.util.Set;
 
 /** Queue and source ownership change atomically; vector fences use the common user lease. */
 @Service
-public class FeedQueueCommitService {
+public class FeedQueueCommitService implements FeedQueue {
     private static final long TTL_MILLIS = Duration.ofDays(5).toMillis();
     private final ReactiveStringRedisTemplate redis;
-    private final UserVectorCoordinator coordinator;
-    private final UserVectorSnapshotService snapshots;
-    private final VectorRedisState vectors;
+    private final PreferenceQueueConsistency preferences;
     @Value("${vector.feed.recommendation.enabled:true}")
     private boolean recommendationEnabled;
 
-    public FeedQueueCommitService(ReactiveStringRedisTemplate redis, UserVectorCoordinator coordinator,
-                                  UserVectorSnapshotService snapshots, VectorRedisState vectors) {
-        this.redis = redis; this.coordinator = coordinator; this.snapshots = snapshots; this.vectors = vectors;
+    public FeedQueueCommitService(ReactiveStringRedisTemplate redis, PreferenceQueueConsistency preferences) {
+        this.redis = redis; this.preferences = preferences;
         if (redis.getConnectionFactory() instanceof LettuceConnectionFactory factory
                 && factory.getClusterConfiguration() != null)
             throw new IllegalStateException("Feed scripts require standalone Redis; migrate key slots first");
     }
 
-    public record QueueRead(List<String> postIds, boolean needsRefill, boolean legacy) {
-        public QueueRead { postIds = List.copyOf(postIds); }
-    }
-
     /** Task9 continuity/quarantine extends this owned-lease boundary. No ranking or hydration here. */
-    public Mono<Long> requirePreServeConsistency(VectorLease lease) {
-        return snapshots.load(lease).map(snapshot -> snapshot.version())
-                .switchIfEmpty(Mono.defer(() -> vectors.version(lease.userId())));
+    public Mono<Long> requirePreServeConsistency(PreferenceQueueLease lease) {
+        return preferences.load(lease).map(PreferenceSnapshot::version)
+                .switchIfEmpty(Mono.defer(() -> preferences.version(lease)));
     }
 
+    @Override
     public Mono<QueueRead> readForServe(String userId, int limit, Set<String> excluded) {
-        return coordinator.withSnapshotLock(userId, lease -> requirePreServeConsistency(lease)
+        return preferences.withSnapshotLease(userId, lease -> requirePreServeConsistency(lease)
                 .flatMap(version -> invalidate(lease, version))
                 .flatMap(state -> redis.opsForZSet().reverseRange(FeedCacheKeys.userFeed(userId),
                                 Range.closed(0L, 79L))
@@ -55,12 +51,13 @@ public class FeedQueueCommitService {
                         .map(ids -> new QueueRead(ids, state == 1, state == 2))));
     }
 
+    @Override
     public Mono<Boolean> commit(String userId, long vectorVersion, List<FeedCandidate> candidates) {
         List<FeedCandidate> batch = List.copyOf(candidates);
-        return coordinator.withSnapshotLock(userId, lease -> requirePreServeConsistency(lease)
+        return preferences.withSnapshotLease(userId, lease -> requirePreServeConsistency(lease)
                 .flatMap(current -> {
                     if (current != vectorVersion) return Mono.just(false);
-                    List<String> args = new ArrayList<>(List.of(lease.token(), Long.toString(vectorVersion),
+                    List<String> args = new ArrayList<>(List.of(lease.ownershipToken(), Long.toString(vectorVersion),
                             Long.toString(TTL_MILLIS), readMode()));
                     for (FeedCandidate candidate : batch) {
                         if (candidate.postId() == null || candidate.postId().isBlank()) continue;
@@ -91,11 +88,11 @@ public class FeedQueueCommitService {
                             redis.call('DEL',KEYS[3])
                             for i=4,7 do redis.call('PEXPIRE',KEYS[i],ARGV[3]) end
                             return 1
-                            """, keys(userId), args).flatMap(this::ownedResult).map(result -> result == 1);
+                            """, keys(lease), args).flatMap(this::ownedResult).map(result -> result == 1);
                 }));
     }
 
-    private Mono<Long> invalidate(VectorLease lease, long version) {
+    private Mono<Long> invalidate(PreferenceQueueLease lease, long version) {
         return eval("""
                 if redis.call('GET',KEYS[1]) ~= ARGV[1] then return -1 end
                 if (redis.call('GET',KEYS[2]) or '0') ~= ARGV[2] then return -1 end
@@ -113,10 +110,11 @@ public class FeedQueueCommitService {
                 redis.call('HSET',KEYS[7],'version','-1')
                 redis.call('SET',KEYS[3],ARGV[2])
                 return 1
-                """, keys(lease.userId()), List.of(lease.token(), Long.toString(version), readMode()))
+                """, keys(lease), List.of(lease.ownershipToken(), Long.toString(version), readMode()))
                 .flatMap(this::ownedResult);
     }
 
+    @Override
     public Mono<Void> appendFanout(String userId, String postId, Instant time) {
         double score = (time == null ? Instant.now() : time).toEpochMilli();
         return eval("""
@@ -135,6 +133,7 @@ public class FeedQueueCommitService {
                 List.of(postId, Double.toString(score), Long.toString(TTL_MILLIS))).then();
     }
 
+    @Override
     public Mono<Void> removeReturned(String userId, List<String> postIds) {
         if (postIds.isEmpty()) return Mono.empty();
         return eval("""
@@ -148,14 +147,22 @@ public class FeedQueueCommitService {
                         FeedCacheKeys.fanout(userId)), postIds).then();
     }
 
-    private List<String> keys(String userId) {
-        return List.of(VectorCacheKeys.lock(userId), VectorCacheKeys.version(userId), VectorCacheKeys.dirty(userId),
-                FeedCacheKeys.userFeed(userId), FeedCacheKeys.recommendations(userId),
-                FeedCacheKeys.fanout(userId), FeedCacheKeys.metadata(userId));
+    @Override
+    public Mono<Boolean> hasMore(String userId) {
+        return redis.opsForZSet().size(FeedCacheKeys.userFeed(userId))
+                .map(size -> size != null && size > 0)
+                .defaultIfEmpty(false)
+                .onErrorReturn(false);
+    }
+
+    private List<String> keys(PreferenceQueueLease lease) {
+        return List.of(lease.lockKey(), lease.versionKey(), lease.dirtyKey(),
+                FeedCacheKeys.userFeed(lease.userId()), FeedCacheKeys.recommendations(lease.userId()),
+                FeedCacheKeys.fanout(lease.userId()), FeedCacheKeys.metadata(lease.userId()));
     }
     private String readMode() { return recommendationEnabled ? "recommendation" : "content"; }
     private Mono<Long> ownedResult(long result) {
-        return result < 0 ? Mono.error(new UserVectorCoordinator.LeaseLostException()) : Mono.just(result);
+        return result < 0 ? Mono.error(new PreferenceLeaseLostException()) : Mono.just(result);
     }
     private Mono<Long> eval(String script, List<String> keys, List<String> args) {
         return redis.execute(RedisScript.of(script, Long.class), keys, args).single();

@@ -4,19 +4,19 @@ import com.dauducbach.clone.modules.chat.constant.MessageType;
 import com.dauducbach.clone.modules.chat.dto.request.CreateDirectConversationRequest;
 import com.dauducbach.clone.modules.chat.dto.request.SendMessageRequest;
 import com.dauducbach.clone.modules.chat.dto.request.StoryContextRequest;
-import com.dauducbach.clone.modules.chat.dto.response.ChatMessageResponse;
+import com.dauducbach.clone.modules.chat.publicapi.StoryReplySender;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
 @Service
 @RequiredArgsConstructor
-public class ChatStoryReplyService implements StoryReplyMessaging {
+public class ChatStoryReplyService implements StoryReplySender {
     private final ConversationService conversationService;
     private final SendMessageService sendMessageService;
 
     @Override
-    public Mono<ChatMessageResponse> send(StoryReplyCommand command) {
+    public Mono<StoryReplyMessage> send(StoryReplyCommand command) {
         return conversationService.createDirect(
                         command.senderId(),
                         new CreateDirectConversationRequest(command.ownerId()))
@@ -36,6 +36,8 @@ public class ChatStoryReplyService implements StoryReplyMessaging {
                                         command.ownerId(),
                                         command.mediaType(),
                                         command.previewAtMs(),
-                                        command.expiresAt()))));
+                                        command.expiresAt())))
+                        .map(message -> new StoryReplyMessage(
+                                message.conversationId(), message.id(), message.messageSeq())));
     }
 }

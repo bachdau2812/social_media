@@ -12,6 +12,10 @@ import org.springframework.data.redis.serializer.RedisSerializationContext;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 import org.springframework.stereotype.Component;
 import reactor.core.Disposable;
+import reactor.util.retry.Retry;
+
+import java.time.Duration;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Component
 @RequiredArgsConstructor
@@ -20,6 +24,8 @@ public class ChatRealtimeRedisSubscriber {
 
     private final ReactiveRedisMessageListenerContainer listenerContainer;
     private final ChatRealtimeLocalDispatcher localDispatcher;
+    private final ChatSessionRegistry sessionRegistry;
+    private final AtomicBoolean recovering = new AtomicBoolean();
     private Disposable subscription;
 
     @PostConstruct
@@ -31,12 +37,20 @@ public class ChatRealtimeRedisSubscriber {
                         java.util.List.of(ChannelTopic.of(ChatRealtimeFanoutPublisher.CHANNEL)),
                         stringPair,
                         stringPair)
+                .doOnSubscribe(ignored -> {
+                    if (recovering.compareAndSet(true, false)) {
+                        // Sessions opened while Redis was unavailable also need a sync after recovery.
+                        sessionRegistry.closeAll(null);
+                    }
+                })
                 .map(ReactiveSubscription.Message::getMessage)
                 .concatMap(localDispatcher::dispatch)
-                .doOnError(error -> log.error(
-                        "|ChatRealtimeRedisSubscriber|subscribe|failed|error={}",
-                        error.getMessage()))
-                .retry()
+                .doOnError(error -> {
+                    recovering.set(true);
+                    sessionRegistry.closeAll(error);
+                    log.error("|ChatRealtimeRedisSubscriber|subscribe|failed|error={}", error.getMessage());
+                })
+                .retryWhen(Retry.backoff(Long.MAX_VALUE, Duration.ofMillis(250)).maxBackoff(Duration.ofSeconds(30)))
                 .subscribe();
     }
 

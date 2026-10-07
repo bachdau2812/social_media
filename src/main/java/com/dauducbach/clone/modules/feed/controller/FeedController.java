@@ -4,7 +4,7 @@ import com.dauducbach.clone.commons.response.ApiResponse;
 import com.dauducbach.clone.commons.security.ActorIdentity;
 import com.dauducbach.clone.modules.feed.dto.response.FeedLongTermVectorRefreshResponse;
 import com.dauducbach.clone.modules.feed.dto.response.FeedResponse;
-import com.dauducbach.clone.modules.feed.service.FeedLongTermVectorService;
+import com.dauducbach.clone.modules.personalization.publicapi.LongTermPreferenceRefresh;
 import com.dauducbach.clone.modules.feed.service.FeedService;
 import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +21,7 @@ import reactor.core.publisher.Mono;
 @RequestMapping("/feed")
 public class FeedController {
     private final FeedService feedService;
-    private final FeedLongTermVectorService feedLongTermVectorService;
+    private final LongTermPreferenceRefresh longTermPreferenceRefresh;
 
     @GetMapping
     public Mono<ApiResponse<FeedResponse>> getFeed(@RequestParam String userId,
@@ -42,7 +42,9 @@ public class FeedController {
             @RequestParam(required = false) String to,
             @RequestParam(required = false) String userId
     ) {
-        return feedLongTermVectorService.refreshLongTermVectors(from, to, userId)
+        return longTermPreferenceRefresh.refreshLongTermVectors(from, to, userId)
+                .map(result -> new FeedLongTermVectorRefreshResponse(result.userId(), result.from(), result.to(),
+                        result.refreshedAt(), result.status()))
                 .map(response -> ApiResponse.<FeedLongTermVectorRefreshResponse>builder()
                         .message("Feed long term vectors refreshed successfully")
                         .result(response)

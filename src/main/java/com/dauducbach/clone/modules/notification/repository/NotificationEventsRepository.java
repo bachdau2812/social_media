@@ -8,4 +8,6 @@ import reactor.core.publisher.Mono;
 @Repository
 public interface NotificationEventsRepository extends ReactiveCrudRepository<NotificationEvents, String> {
     Mono<NotificationEvents> findByDedupKey(String dedupKey);
+
+    Mono<NotificationEvents> findBySourceEventKey(String sourceEventKey);
 }

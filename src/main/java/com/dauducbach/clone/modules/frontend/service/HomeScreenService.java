@@ -1,12 +1,11 @@
 package com.dauducbach.clone.modules.frontend.service;
 
-import com.dauducbach.clone.modules.feed.dto.response.FeedResponse;
-import com.dauducbach.clone.modules.feed.service.FeedService;
+import com.dauducbach.clone.modules.feed.publicapi.FeedScreenQuery;
+import com.dauducbach.clone.modules.feed.publicapi.FeedScreenQuery.FeedSnapshot;
 import com.dauducbach.clone.modules.frontend.dto.HomeScreenResponse;
 import com.dauducbach.clone.modules.frontend.dto.StoryTrayItemResponse;
 import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
-import com.dauducbach.clone.modules.post.dto.story.response.StoryTrayResponse;
-import com.dauducbach.clone.modules.post.service.story.StoryTrayQueryService;
+import com.dauducbach.clone.modules.post.publicapi.StoryTrayQuery;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.springframework.stereotype.Service;
@@ -18,18 +17,8 @@ import java.util.List;
 @RequiredArgsConstructor
 @FieldDefaults(level = lombok.AccessLevel.PRIVATE, makeFinal = true)
 public class HomeScreenService {
-    FeedService feedService;
-    StoryTrayQueryService storyTrayQueryService;
-
-    public Mono<HomeScreenResponse> getHome(
-            String userId,
-            String tab,
-            int limit,
-            int page,
-            MediaDisplayType mediaType
-    ) {
-        return getHome(userId, tab, limit, page, mediaType, null);
-    }
+    FeedScreenQuery feedQuery;
+    StoryTrayQuery storyTrayQuery;
 
     public Mono<HomeScreenResponse> getHome(String userId, String tab, int limit, int page,
             MediaDisplayType mediaType, String cursor) {
@@ -37,11 +26,11 @@ public class HomeScreenService {
         int safeLimit = limit <= 0 ? 20 : Math.min(limit, 50);
         int safePage = Math.max(0, page);
         MediaDisplayType displayType = mediaType == null ? MediaDisplayType.FEED : mediaType;
-        Mono<FeedResponse> feed = "FRIENDS".equals(activeTab)
-                ? feedService.getFriendsFeed(userId, safeLimit, safePage, displayType)
-                : feedService.getFeed(userId, safeLimit, displayType, cursor);
+        Mono<FeedSnapshot> feed = "FRIENDS".equals(activeTab)
+                ? feedQuery.getFriendsFeed(userId, safeLimit, safePage, displayType)
+                : feedQuery.getDiscoverFeed(userId, safeLimit, displayType, cursor);
 
-        return Mono.zip(storyTrayQueryService.getHomeStoryTray(userId), feed)
+        return Mono.zip(storyTrayQuery.getHomeStoryTray(userId), feed)
                 .map(tuple -> new HomeScreenResponse(
                         activeTab,
                         List.of(
@@ -54,7 +43,7 @@ public class HomeScreenService {
                 ));
     }
 
-    private StoryTrayItemResponse toStoryTrayItem(StoryTrayResponse story) {
+    private StoryTrayItemResponse toStoryTrayItem(StoryTrayQuery.StoryTraySnapshot story) {
         return new StoryTrayItemResponse(
                 story.storyId(),
                 story.userId(),

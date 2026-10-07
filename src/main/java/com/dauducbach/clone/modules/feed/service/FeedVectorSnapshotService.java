@@ -1,9 +1,9 @@
 package com.dauducbach.clone.modules.feed.service;
 
-import com.dauducbach.clone.infrastructure.vector.VectorMath;
+import com.dauducbach.clone.commons.vector.VectorMath;
 import com.dauducbach.clone.modules.feed.dto.FeedVectorSnapshot;
-import com.dauducbach.clone.modules.user.dto.UserVectorSnapshot;
-import com.dauducbach.clone.modules.user.service.UserVectorSnapshotService;
+import com.dauducbach.clone.modules.personalization.publicapi.PreferenceQuery;
+import com.dauducbach.clone.modules.personalization.publicapi.PreferenceSnapshot;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
@@ -12,13 +12,13 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class FeedVectorSnapshotService {
-    private final UserVectorSnapshotService snapshots;
+    private final PreferenceQuery snapshots;
 
     public Mono<FeedVectorSnapshot> load(String userId) {
         return snapshots.load(userId).map(snapshot -> new FeedVectorSnapshot(snapshot.version(), queryVector(snapshot)));
     }
 
-    private List<Double> queryVector(UserVectorSnapshot snapshot) {
+    private List<Double> queryVector(PreferenceSnapshot snapshot) {
         List<Double> longTerm = snapshot.longTerm().isEmpty() ? snapshot.profile() : snapshot.longTerm();
         List<Double> shortTerm = snapshot.shortTerm().isEmpty() ? snapshot.profile() : snapshot.shortTerm();
         if (longTerm.isEmpty()) return shortTerm;

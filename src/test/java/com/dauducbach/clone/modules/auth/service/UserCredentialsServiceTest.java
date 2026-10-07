@@ -2,115 +2,64 @@ package com.dauducbach.clone.modules.auth.service;
 
 import com.dauducbach.clone.modules.auth.dto.request.CreateUserRequest;
 import com.dauducbach.clone.modules.auth.dto.request.EmailVerifyRequest;
-import com.dauducbach.clone.modules.auth.entity.UserCredentials;
-import com.dauducbach.clone.modules.auth.repository.UserCredentialsRepository;
-import com.dauducbach.clone.modules.audit.service.UserAuditService;
-import com.dauducbach.clone.utils.GsonUtils;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.gson.JsonObject;
-import org.apache.kafka.clients.producer.ProducerRecord;
+import com.dauducbach.clone.modules.auth.recovery.CredentialRecoveryUseCase;
+import com.dauducbach.clone.modules.auth.registration.RegistrationDraft;
+import com.dauducbach.clone.modules.auth.registration.RegistrationUseCase;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.reactivestreams.Publisher;
-import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
-import org.springframework.data.r2dbc.core.ReactiveInsertOperation;
-import org.springframework.data.redis.core.ReactiveRedisTemplate;
-import org.springframework.data.redis.core.ReactiveValueOperations;
-import org.springframework.security.crypto.password.PasswordEncoder;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.kafka.sender.KafkaSender;
-import reactor.kafka.sender.SenderRecord;
 import reactor.test.StepVerifier;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class UserCredentialsServiceTest {
-    @Mock
-    R2dbcEntityTemplate r2dbcEntityTemplate;
-    @Mock
-    PasswordEncoder passwordEncoder;
-    @Mock
-    ReactiveRedisTemplate<String, Object> reactiveRedisTemplate;
-    @Mock
-    ReactiveValueOperations<String, Object> valueOperations;
-    @Mock
-    KafkaSender<String, String> kafkaSender;
-    @Mock
-    UserCredentialsRepository userCredentialsRepository;
-    @Mock
-    ReactiveInsertOperation.ReactiveInsert<UserCredentials> insertSpec;
-    @Mock
-    UserAuditService userAuditService;
+    @Mock RegistrationUseCase registrationUseCase;
+    @Mock CredentialRecoveryUseCase credentialRecoveryUseCase;
 
     @Test
-    void emailVerifyAndCreateUserPublishesProfileEventWithInsertedUserId() {
-        UserCredentialsService service = newService();
-        CreateUserRequest userRequest = CreateUserRequest.builder()
-                .username("bach")
-                .password("password")
-                .email("bach@example.com")
-                .hobbyList(List.of("music", "backend"))
-                .role("USER")
-                .build();
-        UserCredentials createdUser = UserCredentials.builder()
-                .userId("credential-user-id")
-                .username("bach")
-                .email("bach@example.com")
-                .userPassword("encoded")
-                .userRole("USER")
+    void registrationFacadeMapsHttpRequestToFeatureInput() {
+        when(registrationUseCase.preRegister(any())).thenReturn(Mono.empty());
+        UserCredentialsService service = new UserCredentialsService(registrationUseCase, credentialRecoveryUseCase);
+        CreateUserRequest request = CreateUserRequest.builder()
+                .fullName("Alice Example")
+                .username("alice")
+                .password("secret")
+                .email("alice@example.com")
+                .hobbyList(List.of("music"))
                 .build();
 
-        when(reactiveRedisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get("user_registration:bach@example.com")).thenReturn(Mono.just(userRequest));
-        when(valueOperations.get("registration_verify:bach@example.com")).thenReturn(Mono.just("123456"));
-        when(passwordEncoder.encode("password")).thenReturn("encoded");
-        when(r2dbcEntityTemplate.insert(UserCredentials.class)).thenReturn(insertSpec);
-        when(insertSpec.using(any(UserCredentials.class))).thenReturn(Mono.just(createdUser));
-        when(kafkaSender.send(any(Publisher.class))).thenAnswer(invocation -> {
-            Publisher<SenderRecord<String, String, String>> publisher = invocation.getArgument(0);
-            StepVerifier.create(Flux.from(publisher))
-                    .assertNext(record -> assertProfileCreationRecord(record, "credential-user-id"))
-                    .verifyComplete();
-            return Flux.empty();
-        });
+        StepVerifier.create(service.preRegister(request)).verifyComplete();
 
-        StepVerifier.create(service.emailVerifyAndCreateUser(EmailVerifyRequest.builder()
-                        .email("bach@example.com")
-                        .code("123456")
+        ArgumentCaptor<RegistrationDraft> draft = ArgumentCaptor.forClass(RegistrationDraft.class);
+        verify(registrationUseCase).preRegister(draft.capture());
+        assertThat(draft.getValue().username()).isEqualTo("alice");
+        assertThat(draft.getValue().password()).isEqualTo("secret");
+        assertThat(draft.getValue().role()).isEqualTo("USER");
+        assertThat(draft.getValue().hobbyList()).containsExactly("music");
+    }
+
+    @Test
+    void credentialRecoveryFacadePassesOnlyTheRequestedValues() {
+        when(credentialRecoveryUseCase.resetPassword("alice@example.com", "654321"))
+                .thenReturn(Mono.just("reset"));
+        UserCredentialsService service = new UserCredentialsService(registrationUseCase, credentialRecoveryUseCase);
+
+        StepVerifier.create(service.verifyAndSendNewPasswordToUser(EmailVerifyRequest.builder()
+                        .email("alice@example.com")
+                        .code("654321")
                         .build()))
-                .expectNext("Register success")
+                .expectNext("reset")
                 .verifyComplete();
-    }
 
-    private void assertProfileCreationRecord(SenderRecord<String, String, String> record, String expectedUserId) {
-        assertThat(record.topic()).isEqualTo("profile_creation_event");
-        assertThat(record.key()).isEqualTo(expectedUserId);
-
-        ProducerRecord<String, String> producerRecord = record;
-        JsonObject payload = GsonUtils.fromString(producerRecord.value());
-        assertThat(payload.get("userId").getAsString()).isEqualTo(expectedUserId);
-        assertThat(payload.get("username").getAsString()).isEqualTo("bach");
-        assertThat(payload.getAsJsonArray("hobbyList")).hasSize(2);
-    }
-
-    private UserCredentialsService newService() {
-        return new UserCredentialsService(
-                r2dbcEntityTemplate,
-                passwordEncoder,
-                reactiveRedisTemplate,
-                kafkaSender,
-                userCredentialsRepository,
-                new ObjectMapper(),
-                userAuditService
-        );
+        verify(credentialRecoveryUseCase).resetPassword("alice@example.com", "654321");
     }
 }

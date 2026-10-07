@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS messages (
     conversation_id VARCHAR(36) NOT NULL,
     message_seq BIGINT UNSIGNED NOT NULL,
     client_message_id VARCHAR(36) NOT NULL,
+    client_payload_hash CHAR(64) NULL,
     sender_id VARCHAR(64) NOT NULL,
     message_type VARCHAR(16) NOT NULL,
     content TEXT NULL,

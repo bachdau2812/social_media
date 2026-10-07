@@ -15,6 +15,8 @@ import com.dauducbach.clone.modules.post.entity.PostDetails;
 import com.dauducbach.clone.modules.post.service.post.PostSearchService;
 import com.dauducbach.clone.modules.post.service.post.PostDetailQueryService;
 import com.dauducbach.clone.modules.post.service.post.PostService;
+import com.dauducbach.clone.modules.post.service.post.PostInteractionService;
+import com.dauducbach.clone.modules.post.query.PostContentQueryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -27,14 +29,16 @@ import reactor.core.publisher.Mono;
 @RequestMapping("/posts")
 public class PostController {
     private final PostService postService;
+    private final PostContentQueryService postContentQueryService;
     private final PostSearchService postSearchService;
     private final PostDetailQueryService postDetailQueryService;
+    private final PostInteractionService postInteractionService;
 
     @PostMapping("/interaction")
     public Mono<ResponseEntity<ApiResponse<PostInteractionAcceptedResponse>>> interact(
             @RequestBody PostInteractionRequest request,
             Authentication authentication) {
-        return postService.interact(authentication.getName(), request)
+        return postInteractionService.accept(authentication.getName(), request)
                 .map(result -> ResponseEntity.accepted().body(ApiResponse
                         .<PostInteractionAcceptedResponse>builder()
                         .message("Post interaction accepted").result(result).build()));
@@ -88,7 +92,7 @@ public class PostController {
     public Flux<PostDetails> getPostsByUserId(@PathVariable String userId,
                                               @RequestParam(defaultValue = "0") int page,
                                               @RequestParam(defaultValue = "10") int size) {
-        return postService.getPostsByUserId(userId, page, size);
+        return postContentQueryService.findByAuthorId(userId, page, size);
     }
 
     @PostMapping("/{postId}/notifications/mute/users/{userId}")

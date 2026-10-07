@@ -1,7 +1,7 @@
 package com.dauducbach.clone.modules.post.service.post;
 
-import com.dauducbach.clone.infrastructure.SemanticVectorSearchService;
-import com.dauducbach.clone.modules.post.repositoty.PostDetailsRepository;
+import com.dauducbach.clone.modules.semanticsearch.publicapi.SemanticVectorSearch;
+import com.dauducbach.clone.modules.post.repository.PostDetailsRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -25,7 +25,7 @@ class PostSearchServiceTest {
     @Mock
     PostDetailsRepository postDetailsRepository;
     @Mock
-    SemanticVectorSearchService semanticVectorSearchService;
+    SemanticVectorSearch semanticVectorSearchService;
 
     @Test
     void searchPostsFillsSparseDbPageBySemanticSearch() {

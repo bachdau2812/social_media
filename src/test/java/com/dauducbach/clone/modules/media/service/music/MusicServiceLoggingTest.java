@@ -2,6 +2,7 @@ package com.dauducbach.clone.modules.media.service.music;
 
 import com.dauducbach.clone.modules.media.dto.music.response.MusicFetchAcceptedResponse;
 import com.dauducbach.clone.modules.media.repository.MusicsRepository;
+import com.dauducbach.clone.modules.media.music.fetch.FetchMusicUseCase;
 import com.dauducbach.clone.testsupport.TestLogCapture;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
@@ -17,7 +18,7 @@ class MusicServiceLoggingTest {
     @Test
     void logsDelegationAndAcceptedStatus() {
         MusicsRepository repository = mock(MusicsRepository.class);
-        SpotifyMusicFetchService fetchService = mock(SpotifyMusicFetchService.class);
+        FetchMusicUseCase fetchService = mock(FetchMusicUseCase.class);
         MusicFetchAcceptedResponse accepted = new MusicFetchAcceptedResponse(
                 TRACK_ID, MusicFetchAcceptedResponse.Status.STARTED);
         when(fetchService.requestFetch(TRACK_ID, "user-1")).thenReturn(Mono.just(accepted));

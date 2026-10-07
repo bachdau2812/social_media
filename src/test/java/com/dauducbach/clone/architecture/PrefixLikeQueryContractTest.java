@@ -13,11 +13,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 class PrefixLikeQueryContractTest {
     private static final Path MAIN_SOURCE = Path.of("src/main/java/com/dauducbach/clone");
     private static final List<Path> SEARCH_REPOSITORIES = List.of(
-            MAIN_SOURCE.resolve("modules/media/repositoty/music/MusicsRepository.java"),
-            MAIN_SOURCE.resolve("modules/post/repositoty/PostDetailsRepository.java"),
-            MAIN_SOURCE.resolve("modules/user/repositoty/UserDetailsRepository.java"),
-            MAIN_SOURCE.resolve("modules/user/repositoty/SearchKeywordRepository.java"),
-            MAIN_SOURCE.resolve("modules/user/repositoty/ChatUserSuggestionRepository.java")
+            MAIN_SOURCE.resolve("modules/media/repository/MusicsRepository.java"),
+            MAIN_SOURCE.resolve("modules/post/repository/PostDetailsRepository.java"),
+            MAIN_SOURCE.resolve("modules/user/repository/UserDetailsRepository.java"),
+            MAIN_SOURCE.resolve("modules/user/repository/SearchKeywordRepository.java"),
+            MAIN_SOURCE.resolve("modules/user/repository/ChatUserSuggestionRepository.java")
     );
     private static final Pattern SQL_SIDE_WILDCARD = Pattern.compile(
             "LIKE\\s+CONCAT\\s*\\(", Pattern.CASE_INSENSITIVE);

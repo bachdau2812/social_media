@@ -57,15 +57,9 @@ public class NotificationService {
 
                                 return routeNotification(request, recipientEmail);
                             })
-                            .onErrorResume(throwable -> {
-                                logger.error("|NotificationService|sendNotification|recipientEmail={}|error={}", recipientEmail, throwable.getMessage());
-                                // Profile media Kafka listeners must retry failed persistence/settings lookups.
-                                if (request.getActionType() == UserActionType.AVATAR_UPDATE
-                                        || request.getActionType() == UserActionType.UP_STORY) {
-                                    return Mono.error(throwable);
-                                }
-                                return Mono.empty();
-                            })
+                            .doOnError(throwable -> logger.error(
+                                    "|NotificationService|sendNotification|recipientId={}|error={}",
+                                    recipientEmail, throwable.getMessage()))
                             .then()
             );
         }

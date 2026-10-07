@@ -1,12 +1,13 @@
 package com.dauducbach.clone.modules.user.service;
 
-import com.dauducbach.clone.infrastructure.SemanticVectorSearchService;
-import com.dauducbach.clone.modules.user.repositoty.UserDetailsRepository;
+import com.dauducbach.clone.modules.user.search.application.SemanticUserSearch;
+import com.dauducbach.clone.modules.user.search.application.UserSearchCriteria;
+import com.dauducbach.clone.modules.user.search.application.UserSearchIndex;
+import com.dauducbach.clone.modules.user.search.application.UserSearchService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.domain.Pageable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -23,18 +24,19 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class UserSearchServiceTest {
     @Mock
-    UserDetailsRepository userDetailsRepository;
+    UserSearchIndex userSearchIndex;
     @Mock
-    SemanticVectorSearchService semanticVectorSearchService;
+    SemanticUserSearch semanticUserSearch;
 
     @Test
     void searchUsersParsesWhitelistedFiltersAndFillsBySemanticSearch() {
-        UserSearchService service = new UserSearchService(userDetailsRepository, semanticVectorSearchService);
+        UserSearchService service = new UserSearchService(userSearchIndex, semanticUserSearch);
 
-        when(userDetailsRepository.countSearchUserIds("bach%", 1, 1, 1, 0)).thenReturn(Mono.just(1L));
-        when(userDetailsRepository.searchUserIds(eq("bach%"), eq(1), eq(1), eq(1), eq(0), any(Pageable.class)))
+        UserSearchCriteria criteria = new UserSearchCriteria("bach%", true, true, true, false, 0, 20);
+        when(userSearchIndex.count(criteria)).thenReturn(Mono.just(1L));
+        when(userSearchIndex.findIds(criteria))
                 .thenReturn(Flux.just("user-db-1"));
-        when(semanticVectorSearchService.searchUserIds(
+        when(semanticUserSearch.searchUserIds(
                 "bach",
                 19,
                 new LinkedHashSet<>(List.of("user-db-1"))
@@ -48,6 +50,6 @@ class UserSearchServiceTest {
                 })
                 .verifyComplete();
 
-        verify(userDetailsRepository).searchUserIds(eq("bach%"), eq(1), eq(1), eq(1), eq(0), any(Pageable.class));
+        verify(userSearchIndex).findIds(criteria);
     }
 }

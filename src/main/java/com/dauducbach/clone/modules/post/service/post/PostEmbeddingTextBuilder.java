@@ -1,8 +1,8 @@
 package com.dauducbach.clone.modules.post.service.post;
 
-import com.dauducbach.clone.infrastructure.vector.VectorMath;
+import com.dauducbach.clone.commons.vector.VectorMath;
 import com.dauducbach.clone.modules.post.entity.*;
-import com.dauducbach.clone.utils.GsonUtils;
+import com.dauducbach.clone.commons.serialization.GsonUtils;
 import org.jsoup.Jsoup;
 import org.springframework.stereotype.Component;
 import java.nio.charset.StandardCharsets;

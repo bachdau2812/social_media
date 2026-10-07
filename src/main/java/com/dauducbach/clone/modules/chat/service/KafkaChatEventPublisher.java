@@ -2,7 +2,8 @@ package com.dauducbach.clone.modules.chat.service;
 
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
-import com.dauducbach.clone.modules.chat.dto.event.ChatEvent;
+import com.dauducbach.clone.modules.chat.publicapi.ChatEvent;
+import com.dauducbach.clone.modules.chat.publicapi.ChatEventTopics;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -20,12 +21,12 @@ import reactor.kafka.sender.SenderRecord;
 @FieldDefaults(level = lombok.AccessLevel.PRIVATE, makeFinal = true)
 public class KafkaChatEventPublisher implements ChatEventPublisher {
     private static final Logger log = LoggerFactory.getLogger(KafkaChatEventPublisher.class);
-    public static final String MESSAGE_CREATED_TOPIC = "chat.message.created";
-    public static final String MESSAGE_REACTION_CHANGED_TOPIC = "chat.message.reaction.changed";
-    public static final String MESSAGE_MUTATION_TOPIC = "chat.message.mutation";
-    public static final String CURSOR_UPDATED_TOPIC = "chat.cursor.updated";
-    public static final String MEMBER_REQUESTED_TOPIC = "chat.member.requested";
-    public static final String MEMBERSHIP_CHANGED_TOPIC = "chat.membership.changed";
+    public static final String MESSAGE_CREATED_TOPIC = ChatEventTopics.MESSAGE_CREATED;
+    public static final String MESSAGE_REACTION_CHANGED_TOPIC = ChatEventTopics.MESSAGE_REACTION_CHANGED;
+    public static final String MESSAGE_MUTATION_TOPIC = ChatEventTopics.MESSAGE_MUTATION;
+    public static final String CURSOR_UPDATED_TOPIC = ChatEventTopics.CURSOR_UPDATED;
+    public static final String MEMBER_REQUESTED_TOPIC = ChatEventTopics.MEMBER_REQUESTED;
+    public static final String MEMBERSHIP_CHANGED_TOPIC = ChatEventTopics.MEMBERSHIP_CHANGED;
 
     KafkaSender<String, String> kafkaSender;
     ObjectMapper objectMapper;

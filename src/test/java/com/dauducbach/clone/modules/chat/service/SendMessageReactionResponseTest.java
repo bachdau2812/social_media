@@ -6,9 +6,8 @@ import com.dauducbach.clone.modules.chat.dto.response.*;
 import com.dauducbach.clone.modules.chat.entity.*;
 import com.dauducbach.clone.modules.chat.repository.*;
 import com.dauducbach.clone.modules.media.configuration.MediaPolicyProperties;
-import com.dauducbach.clone.modules.media.service.*;
+import com.dauducbach.clone.modules.media.publicapi.MediaAssets;
 import org.junit.jupiter.api.Test;
-import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
 import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -23,12 +22,11 @@ class SendMessageReactionResponseTest {
         ChatReadRepository reads = mock(ChatReadRepository.class);
         ConversationMemberRepository members = mock(ConversationMemberRepository.class);
         ChatAccessService access = mock(ChatAccessService.class);
-        ChatEventPublisher publisher = mock(ChatEventPublisher.class);
         MessageReactionService reactions = mock(MessageReactionService.class);
         SendMessageService service = new SendMessageService(messages, reads, mock(ConversationRepository.class),
                 members, access, new ChatMessageValidator(new MediaPolicyProperties()), new ChatResponseMapper(),
-                publisher, mock(TransactionalOperator.class), mock(R2dbcEntityTemplate.class),
-                mock(MediaCompatibilityFacade.class), mock(MediaService.class), reactions);
+                mock(TransactionalOperator.class), mock(ChatMessageWriter.class),
+                mock(MediaAssets.class), reactions);
         String clientId = "123e4567-e89b-12d3-a456-426614174000";
         ChatMessage message = ChatMessage.builder().id("m").conversationId("c").messageSeq(5)
                 .senderId("me").clientMessageId(clientId).messageType(MessageType.TEXT).content("hello").build();
@@ -44,6 +42,5 @@ class SendMessageReactionResponseTest {
             assertThat(response.likeCount()).isEqualTo(3);
             assertThat(response.reactionVersion()).isEqualTo(8);
         }).verifyComplete();
-        verifyNoInteractions(publisher);
     }
 }

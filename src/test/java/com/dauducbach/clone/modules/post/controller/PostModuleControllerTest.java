@@ -15,17 +15,21 @@ import com.dauducbach.clone.modules.post.dto.response.PostCreateResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostDetailResponse;
 import com.dauducbach.clone.modules.post.dto.response.PostNotificationMuteResponse;
 import com.dauducbach.clone.modules.post.entity.Comment;
+import com.dauducbach.clone.modules.post.comments.query.CommentReadService;
 import com.dauducbach.clone.modules.media.entity.Media;
 import com.dauducbach.clone.modules.post.entity.PostDetails;
 import com.dauducbach.clone.modules.media.controller.MediaUploadController;
-import com.dauducbach.clone.modules.media.service.CloudinarySignatureService;
-import com.dauducbach.clone.modules.post.service.comment.CommentService;
+import com.dauducbach.clone.modules.media.infrastructure.cloudinary.CloudinarySignatureService;
+import com.dauducbach.clone.modules.post.comments.application.CommentWriteService;
+import com.dauducbach.clone.modules.post.comments.http.CommentController;
 import com.dauducbach.clone.modules.post.service.post.LikeService;
 import com.dauducbach.clone.modules.media.service.MediaService;
+import com.dauducbach.clone.infrastructure.realtime.AccountSseHub;
 import com.dauducbach.clone.modules.post.service.post.PostSearchService;
 import com.dauducbach.clone.modules.post.service.post.PostDetailQueryService;
+import com.dauducbach.clone.modules.post.service.post.PostInteractionService;
 import com.dauducbach.clone.modules.post.service.post.PostService;
-import com.dauducbach.clone.modules.post.service.post.PostSseService;
+import com.dauducbach.clone.modules.post.query.PostContentQueryService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.codec.ServerSentEvent;
@@ -40,37 +44,45 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.mockAuthentication;
 
 class PostModuleControllerTest {
     PostService postService;
-    CommentService commentService;
+    PostContentQueryService postContentQueryService;
+    CommentWriteService commentWriteService;
+    CommentReadService commentReadService;
     LikeService likeService;
     CloudinarySignatureService cloudinarySignatureService;
     MediaService mediaService;
-    PostSseService postSseService;
+    AccountSseHub accountSseHub;
     PostSearchService postSearchService;
     PostDetailQueryService postDetailQueryService;
+    PostInteractionService postInteractionService;
     WebTestClient client;
 
     @BeforeEach
     void setUp() {
         postService = mock(PostService.class);
-        commentService = mock(CommentService.class);
+        postContentQueryService = mock(PostContentQueryService.class);
+        commentWriteService = mock(CommentWriteService.class);
+        commentReadService = mock(CommentReadService.class);
         likeService = mock(LikeService.class);
         cloudinarySignatureService = mock(CloudinarySignatureService.class);
         mediaService = mock(MediaService.class);
-        postSseService = mock(PostSseService.class);
+        accountSseHub = mock(AccountSseHub.class);
         postSearchService = mock(PostSearchService.class);
         postDetailQueryService = mock(PostDetailQueryService.class);
+        postInteractionService = mock(PostInteractionService.class);
 
         client = WebTestClient.bindToController(
-                        new PostController(postService, postSearchService, postDetailQueryService),
-                        new CommentController(commentService),
+                        new PostController(postService, postContentQueryService, postSearchService, postDetailQueryService, postInteractionService),
+                        new CommentController(commentWriteService, commentReadService),
                         new LikeController(likeService),
                         new MediaUploadController(cloudinarySignatureService, mediaService),
-                        new PostSseController(postSseService)
+                        new PostSseController(accountSseHub)
                 )
                 .webFilter((exchange, chain) -> chain.filter(exchange.mutate()
                         .principal(Mono.just(new TestingAuthenticationToken("user-1", "n/a")))
@@ -139,7 +151,7 @@ class PostModuleControllerTest {
 
     @Test
     void getPostsByUserIdReturnsFlux() {
-        when(postService.getPostsByUserId("user-1", 0, 10))
+        when(postContentQueryService.findByAuthorId("user-1", 0, 10))
                 .thenReturn(Flux.just(post("post-1", "user-1"), post("post-2", "user-1")));
 
         client.get()
@@ -192,7 +204,7 @@ class PostModuleControllerTest {
 
     @Test
     void createCommentReturnsAcceptedApiResponse() {
-        when(commentService.createComment(any(CommentCreateRequest.class)))
+        when(commentWriteService.createComment(any(CommentCreateRequest.class)))
                 .thenReturn(Mono.just(CommentCreateResponse.builder()
                         .commentId("comment-1")
                         .message("Comment created")
@@ -210,7 +222,7 @@ class PostModuleControllerTest {
     @Test
     void updateCommentReturnsUpdatedComment() {
         Comment comment = comment("comment-1", "post-1", "user-1", null);
-        when(commentService.updateComment(any(CommentUpdateRequest.class))).thenReturn(Mono.just(comment));
+        when(commentWriteService.updateComment(any(CommentUpdateRequest.class))).thenReturn(Mono.just(comment));
 
         client.put()
                 .uri("/comments")
@@ -223,7 +235,7 @@ class PostModuleControllerTest {
 
     @Test
     void getCommentByIdReturnsComment() {
-        when(commentService.getCommentById("comment-1"))
+        when(commentReadService.getCommentById("comment-1"))
                 .thenReturn(Mono.just(comment("comment-1", "post-1", "user-1", null)));
 
         client.get()
@@ -236,7 +248,7 @@ class PostModuleControllerTest {
 
     @Test
     void deleteCommentReturnsDeletedMessage() {
-        when(commentService.deleteComment("comment-1", "user-1")).thenReturn(Mono.empty());
+        when(commentWriteService.deleteComment("comment-1", "user-1")).thenReturn(Mono.empty());
 
         client.delete()
                 .uri("/comments/comment-1")
@@ -248,9 +260,9 @@ class PostModuleControllerTest {
 
     @Test
     void getRootAndChildCommentsReturnFlux() {
-        when(commentService.getRootComments("post-1", 0, 10))
+        when(commentReadService.getRootComments("post-1", 0, 10))
                 .thenReturn(Flux.just(comment("comment-1", "post-1", "user-1", null)));
-        when(commentService.getChildComments("comment-1", 0, 10))
+        when(commentReadService.getChildComments("comment-1", 0, 10))
                 .thenReturn(Flux.just(comment("comment-2", "post-1", "user-2", "comment-1")));
 
         client.get()
@@ -273,10 +285,10 @@ class PostModuleControllerTest {
         PageResponse<String> postIds = PageResponse.of(List.of("post-2", "post-1"), 0, 2, 10);
         PageResponse<Comment> comments = PageResponse.of(List.of(comment("comment-1", "post-1", "user-1", null)), 0, 1, 10);
 
-        when(commentService.getCommentedPostIdsByUserId("user-1", 0, 10)).thenReturn(Mono.just(postIds));
-        when(commentService.getCommentsByUserId("user-1", 0, 10)).thenReturn(Mono.just(comments));
-        when(commentService.countCommentsByPostId("post-1")).thenReturn(Mono.just(5L));
-        when(commentService.countRepliesByParentId("comment-1")).thenReturn(Mono.just(2L));
+        when(commentReadService.getCommentedPostIdsByUserId("user-1", 0, 10)).thenReturn(Mono.just(postIds));
+        when(commentReadService.getCommentsByUserId("user-1", 0, 10)).thenReturn(Mono.just(comments));
+        when(commentReadService.countCommentsByPostId("post-1")).thenReturn(Mono.just(5L));
+        when(commentReadService.countRepliesByParentId("comment-1")).thenReturn(Mono.just(2L));
 
         client.get().uri("/comments/user/user-1/posts?page=0&size=10")
                 .exchange()
@@ -381,7 +393,7 @@ class PostModuleControllerTest {
 
     @Test
     void sseEndpointReturnsEventStream() {
-        when(postSseService.subscribe("user-1"))
+        when(accountSseHub.subscribe("user-1"))
                 .thenReturn(Flux.just(ServerSentEvent.builder("payload").event("post_success_event").build()));
 
         client.get()
@@ -389,6 +401,16 @@ class PostModuleControllerTest {
                 .exchange()
                 .expectStatus().isOk()
                 .expectHeader().valueMatches("Content-Type", "text/event-stream.*");
+    }
+
+    @Test
+    void sseEndpointDoesNotAllowReadingAnotherAccountsStream() {
+        client.get()
+                .uri("/posts/sse/user-2")
+                .exchange()
+                .expectStatus().isForbidden();
+
+        verify(accountSseHub, never()).subscribe("user-2");
     }
 
     private PostDetailResponse postDetail(String postId) {

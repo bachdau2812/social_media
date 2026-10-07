@@ -6,12 +6,11 @@ import com.dauducbach.clone.modules.feed.constant.FeedActivityType;
 import com.dauducbach.clone.modules.feed.dto.response.FeedItemResponse;
 import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import com.dauducbach.clone.modules.post.dto.response.FriendFeedActivityResponse;
-import com.dauducbach.clone.modules.post.service.post.PostFeedQueryService;
+import com.dauducbach.clone.modules.post.publicapi.PostFeedQuery;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -24,11 +23,11 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class FeedServiceTest {
     @Mock
-    ReactiveRedisTemplate<String, String> redisTemplate;
+    FeedSeenPostStore seenPosts;
     @Mock
-    FeedQueueCommitService queue;
+    FeedQueue queue;
     @Mock
-    PostFeedQueryService postFeedQueryService;
+    PostFeedQuery postFeedQuery;
     @Mock
     FeedCandidatePipeline candidatePipeline;
     @Mock
@@ -41,14 +40,13 @@ class FeedServiceTest {
         FriendFeedActivityResponse second = activity("repost-2", "post-1", "friend-2", 2);
         FriendFeedActivityResponse third = activity("repost-3", "post-2", "friend-1", 1);
 
-        when(postFeedQueryService.getRecentFriendFeedActivities("viewer-1", 3, 0))
+        when(postFeedQuery.findRecentFriendFeedActivities("viewer-1", 3, 0))
                 .thenReturn(Flux.just(first, second, third));
-        when(itemHydrator.hydrateFriendActivity("viewer-1", first, MediaDisplayType.FEED))
-                .thenReturn(Mono.just(feedItem("post-1").withActivity(
-                        "repost-1", FeedActivityType.REPOST, first.activityAt(), null)));
-        when(itemHydrator.hydrateFriendActivity("viewer-1", second, MediaDisplayType.FEED))
-                .thenReturn(Mono.just(feedItem("post-1").withActivity(
-                        "repost-2", FeedActivityType.REPOST, second.activityAt(), null)));
+        when(itemHydrator.hydrateFriendActivities("viewer-1", List.of(first, second), MediaDisplayType.FEED))
+                .thenReturn(Mono.just(List.of(
+                        feedItem("post-1").withActivity("repost-1", FeedActivityType.REPOST, first.activityAt(), null),
+                        feedItem("post-1").withActivity("repost-2", FeedActivityType.REPOST, second.activityAt(), null)
+                )));
 
         StepVerifier.create(service.getFriendsFeed("viewer-1", 2, 0, MediaDisplayType.FEED))
                 .assertNext(response -> {
@@ -87,12 +85,14 @@ class FeedServiceTest {
 
     private FeedService newService() {
         return new FeedService(
-                redisTemplate,
-                postFeedQueryService,
+                seenPosts,
+                postFeedQuery,
                 candidatePipeline,
                 itemHydrator,
                 org.mockito.Mockito.mock(FeedVectorSnapshotService.class),
-                queue
+                queue,
+                org.mockito.Mockito.mock(MixedFeedService.class),
+                new com.dauducbach.clone.configuration.PostPopularityProperties()
         );
     }
 

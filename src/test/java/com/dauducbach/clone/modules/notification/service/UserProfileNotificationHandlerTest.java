@@ -5,10 +5,12 @@ import com.dauducbach.clone.modules.notification.constants.NotificationType;
 import com.dauducbach.clone.modules.notification.dto.request.NotificationRequest;
 import com.dauducbach.clone.modules.notification.entity.NotificationTemplates;
 import com.dauducbach.clone.modules.notification.repository.NotificationTemplatesRepository;
+import com.dauducbach.clone.modules.notification.incoming.profile.UserProfileNotificationHandler;
 import com.dauducbach.clone.modules.user.dto.response.FollowerListResponse;
 import com.dauducbach.clone.modules.user.entity.UserDetails;
-import com.dauducbach.clone.modules.user.service.UserIdentityQueryService;
-import com.dauducbach.clone.modules.user.service.UserFollowerService;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentityQuery;
+import com.dauducbach.clone.modules.user.publicapi.UserRelationshipQuery;
+import com.dauducbach.clone.modules.notification.service.NotificationService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -35,9 +37,9 @@ class UserProfileNotificationHandlerTest {
     @Mock
     NotificationTemplatesRepository notificationTemplatesRepository;
     @Mock
-    UserFollowerService userFollowerService;
+    UserRelationshipQuery userFollowerService;
     @Mock
-    UserIdentityQueryService userIdentityQueryService;
+    UserIdentityQuery userIdentityQueryService;
 
     @ParameterizedTest
     @EnumSource(value = UserActionType.class, names = {"AVATAR_UPDATE", "UP_STORY"})

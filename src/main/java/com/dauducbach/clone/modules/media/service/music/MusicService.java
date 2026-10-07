@@ -6,6 +6,7 @@ import com.dauducbach.clone.commons.response.PageResponse;
 import com.dauducbach.clone.modules.media.dto.music.response.MusicFetchAcceptedResponse;
 import com.dauducbach.clone.modules.media.entity.music.Musics;
 import com.dauducbach.clone.modules.media.repository.MusicsRepository;
+import com.dauducbach.clone.modules.media.music.fetch.FetchMusicUseCase;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
@@ -24,13 +25,13 @@ public class MusicService {
     private static final int MAX_PAGE_SIZE = 100;
 
     MusicsRepository musicsRepository;
-    SpotifyMusicFetchService spotifyMusicFetchService;
+    FetchMusicUseCase fetchMusicUseCase;
 
     public Mono<MusicFetchAcceptedResponse> fetchSpotifyMusic(
             String trackId,
             String userId) {
         log.info("|MusicService|fetchSpotifyMusic|received|trackId={}", trackId);
-        return spotifyMusicFetchService.requestFetch(trackId, userId)
+        return fetchMusicUseCase.requestFetch(trackId, userId)
                 .doOnNext(result -> log.info(
                         "|MusicService|fetchSpotifyMusic|completed|trackId={}|status={}",
                         trackId,

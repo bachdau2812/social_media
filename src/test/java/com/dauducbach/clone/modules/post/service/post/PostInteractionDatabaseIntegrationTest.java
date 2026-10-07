@@ -4,7 +4,7 @@ import com.dauducbach.clone.infrastructure.outbox.InteractionOutbox;
 import com.dauducbach.clone.infrastructure.outbox.OutboxRepository;
 import com.dauducbach.clone.modules.post.dto.request.PostInteractionRequest;
 import com.dauducbach.clone.modules.post.entity.PostDetails;
-import com.dauducbach.clone.modules.post.repositoty.PostInteractionReceiptRepository;
+import com.dauducbach.clone.modules.post.repository.PostInteractionReceiptRepository;
 import io.r2dbc.spi.ConnectionFactories;
 import io.r2dbc.spi.ConnectionFactory;
 import io.r2dbc.spi.ConnectionFactoryOptions;

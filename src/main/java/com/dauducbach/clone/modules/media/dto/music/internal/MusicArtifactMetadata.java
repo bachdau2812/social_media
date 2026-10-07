@@ -1,6 +1,6 @@
 package com.dauducbach.clone.modules.media.dto.music.internal;
 
-import com.dauducbach.clone.modules.media.service.music.SpotifyMusicMetadata;
+import com.dauducbach.clone.modules.media.music.fetch.SpotifyMusicMetadata;
 
 public record MusicArtifactMetadata(
         String title,

@@ -1,13 +1,14 @@
 package com.dauducbach.clone.modules.audit.service;
 
 import com.dauducbach.clone.commons.constant.EntityType;
-import com.dauducbach.clone.modules.feed.dto.event.FeedInteractionEvent;
+import com.dauducbach.clone.modules.audit.publicapi.AuditEntry;
+import com.dauducbach.clone.modules.audit.publicapi.AuditRecorder;
 import org.springframework.dao.DuplicateKeyException;
-import com.dauducbach.clone.modules.audit.dto.AuditActionType;
+import com.dauducbach.clone.modules.audit.publicapi.AuditActionType;
 import com.dauducbach.clone.modules.audit.entity.AuditLogs;
-import com.dauducbach.clone.modules.audit.repositoty.AuditLogsRepository;
-import com.dauducbach.clone.utils.GsonUtils;
-import com.dauducbach.clone.utils.KafkaUtils;
+import com.dauducbach.clone.modules.audit.repository.AuditLogsRepository;
+import com.dauducbach.clone.commons.serialization.GsonUtils;
+import com.dauducbach.clone.commons.serialization.JsonPayloadReader;
 import com.google.gson.JsonObject;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
@@ -26,14 +27,12 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 @FieldDefaults(level = lombok.AccessLevel.PRIVATE, makeFinal = true)
-public class UserAuditService {
+public class UserAuditService implements AuditRecorder {
     private static final Logger log = LoggerFactory.getLogger(UserAuditService.class);
     private static final String STATUS_SUCCESS = "SUCCESS";
-    private static final String STATUS_FAILURE = "FAILURE";
     private static final String ACTOR_TYPE_USER = "USER";
     private static final String ACTOR_TYPE_EMAIL = "EMAIL";
     private static final String ACTOR_TYPE_UNKNOWN = "UNKNOWN";
-    private static final String RESOURCE_AUTH = "AUTH";
     private static final String RESOURCE_PASSWORD = "PASSWORD";
     private static final String RESOURCE_AVATAR = "AVATAR";
     private static final String RESOURCE_STORY = "STORY";
@@ -41,28 +40,18 @@ public class UserAuditService {
     AuditLogsRepository auditLogsRepository;
     R2dbcEntityTemplate r2dbcEntityTemplate;
 
-    // A LIKE of a comment remains a post-interest signal, using its original persisted like identity.
-    public Mono<Void> recordPostInteraction(FeedInteractionEvent event) {
+    @Override
+    public Mono<Void> recordRequiredInteraction(AuditEntry entry) {
         return Mono.defer(() -> {
-            AuditActionType action = switch (event.action()) {
-                case "LIKE" -> AuditActionType.LIKE_POST;
-                case "COMMENT" -> AuditActionType.COMMENT_POST;
-                case "REPOST" -> AuditActionType.REPOST_POST;
-                default -> throw new IllegalArgumentException("Unsupported post interaction");
-            };
-            JsonObject metadata = new JsonObject();
-            metadata.addProperty("postId", event.postId());
-            metadata.addProperty("sourceId", event.sourceId());
-            metadata.addProperty("occurredAt", event.occurredAt().toString());
-            AuditLogs audit = AuditLogs.builder().id(UUID.randomUUID().toString())
-                    .sourceEventId(event.eventId()).actorId(event.userId()).actorType(ACTOR_TYPE_USER)
-                    .action(action).resourceType(EntityType.POST.name()).resourceId(event.postId())
-                    .status(STATUS_SUCCESS).metadata(metadata.toString()).createdAt(Instant.now()).build();
+            validateRequiredInteraction(entry);
+            AuditLogs audit = prepareAuditLog(toAuditLog(entry));
+            JsonObject metadata = GsonUtils.fromString(audit.getMetadata());
             return r2dbcEntityTemplate.insert(AuditLogs.class).using(audit)
                     .onErrorResume(DuplicateKeyException.class, error -> auditLogsRepository
-                            .findBySourceEventId(event.eventId())
-                            .filter(existing -> event.userId().equals(existing.getActorId())
-                                    && event.postId().equals(existing.getResourceId()) && action == existing.getAction()
+                            .findBySourceEventId(entry.sourceEventId())
+                            .filter(existing -> entry.actorId().equals(existing.getActorId())
+                                    && entry.resourceId().equals(existing.getResourceId())
+                                    && entry.action() == existing.getAction()
                                     && STATUS_SUCCESS.equals(existing.getStatus())
                                     && metadata.equals(GsonUtils.fromString(existing.getMetadata())))
                             .switchIfEmpty(Mono.error(error)))
@@ -70,13 +59,14 @@ public class UserAuditService {
         });
     }
 
-    public Mono<Void> save(AuditLogs auditLog) {
-        if (auditLog == null || auditLog.getAction() == null) {
-            log.warn("|UserAuditService|save|skip invalid audit log");
+    @Override
+    public Mono<Void> record(AuditEntry entry) {
+        if (entry == null || entry.action() == null) {
+            log.warn("|UserAuditService|record|skip invalid audit entry");
             return Mono.empty();
         }
 
-        AuditLogs prepared = prepareAuditLog(auditLog);
+        AuditLogs prepared = prepareAuditLog(toAuditLog(entry));
         return r2dbcEntityTemplate.insert(AuditLogs.class).using(prepared)
                 .doOnSuccess(saved -> log.info("|UserAuditService|save|saved|auditId={}|actorId={}|action={}|status={}",
                         saved.getId(), saved.getActorId(), saved.getAction(), saved.getStatus()))
@@ -92,24 +82,17 @@ public class UserAuditService {
                              String resourceId,
                              String status,
                              JsonObject metadata) {
-        return save(AuditLogs.builder()
-                .actorId(normalizeActorId(actorId))
-                .actorType(resolveActorType(actorId))
-                .action(action)
-                .resourceType(resourceType)
-                .resourceId(resourceId)
-                .status(status)
-                .metadata(metadata == null ? null : metadata.toString())
-                .build());
+        return record(new AuditEntry(normalizeActorId(actorId), resolveActorType(actorId), action, resourceType, resourceId, status,
+                metadata == null ? null : metadata.toString(), null));
     }
 
     @KafkaListener(topics = "profile_creation_event", groupId = "audit-service")
     public CompletableFuture<Void> handleProfileCreationEvent(@Payload String payload) {
         JsonObject json = GsonUtils.fromString(payload);
-        String userId = KafkaUtils.extractString(json, "userId");
+        String userId = JsonPayloadReader.extractString(json, "userId");
         JsonObject metadata = new JsonObject();
-        metadata.addProperty("username", KafkaUtils.extractString(json, "username"));
-        metadata.addProperty("email", KafkaUtils.extractString(json, "email"));
+        metadata.addProperty("username", JsonPayloadReader.extractString(json, "username"));
+        metadata.addProperty("email", JsonPayloadReader.extractString(json, "email"));
 
         return record(AuditActionType.REGISTER, userId, EntityType.USER.name(), userId, STATUS_SUCCESS, metadata).toFuture();
     }
@@ -120,8 +103,8 @@ public class UserAuditService {
     @KafkaListener(topics = "follow_event", groupId = "audit-service")
     public CompletableFuture<Void> handleFollowEvent(@Payload String payload) {
         JsonObject json = GsonUtils.fromString(payload);
-        String followerId = KafkaUtils.extractString(json, "followerId");
-        String followingId = KafkaUtils.extractString(json, "followingId");
+        String followerId = JsonPayloadReader.extractString(json, "followerId");
+        String followingId = JsonPayloadReader.extractString(json, "followingId");
         JsonObject metadata = new JsonObject();
         metadata.addProperty("followingId", followingId);
 
@@ -131,8 +114,8 @@ public class UserAuditService {
     @KafkaListener(topics = "un_follow_event", groupId = "audit-service")
     public CompletableFuture<Void> handleUnfollowEvent(@Payload String payload) {
         JsonObject json = GsonUtils.fromString(payload);
-        String followerId = KafkaUtils.extractString(json, "followerId");
-        String followingId = KafkaUtils.extractString(json, "followingId");
+        String followerId = JsonPayloadReader.extractString(json, "followerId");
+        String followingId = JsonPayloadReader.extractString(json, "followingId");
         JsonObject metadata = new JsonObject();
         metadata.addProperty("followingId", followingId);
 
@@ -142,8 +125,8 @@ public class UserAuditService {
     @KafkaListener(topics = "avatar_update_event", groupId = "audit-service")
     public CompletableFuture<Void> handleAvatarUpdateEvent(@Payload String payload) {
         JsonObject json = GsonUtils.fromString(payload);
-        String userId = KafkaUtils.extractString(json, "userId");
-        String mediaId = KafkaUtils.extractString(json, "mediaId");
+        String userId = JsonPayloadReader.extractString(json, "userId");
+        String mediaId = JsonPayloadReader.extractString(json, "mediaId");
         JsonObject metadata = new JsonObject();
         metadata.addProperty("mediaId", mediaId);
 
@@ -153,12 +136,12 @@ public class UserAuditService {
     @KafkaListener(topics = "story_success_event", groupId = "audit-service")
     public CompletableFuture<Void> handleStorySuccessEvent(@Payload String payload) {
         JsonObject json = GsonUtils.fromString(payload);
-        String userId = KafkaUtils.extractString(json, "userId");
-        String storyId = KafkaUtils.extractString(json, "storyId");
+        String userId = JsonPayloadReader.extractString(json, "userId");
+        String storyId = JsonPayloadReader.extractString(json, "storyId");
         JsonObject metadata = new JsonObject();
-        metadata.addProperty("mediaId", KafkaUtils.extractString(json, "mediaId"));
-        metadata.addProperty("mediaType", KafkaUtils.extractString(json, "mediaType"));
-        metadata.addProperty("hasMusic", !KafkaUtils.extractString(json, "musicUrl").isBlank());
+        metadata.addProperty("mediaId", JsonPayloadReader.extractString(json, "mediaId"));
+        metadata.addProperty("mediaType", JsonPayloadReader.extractString(json, "mediaType"));
+        metadata.addProperty("hasMusic", !JsonPayloadReader.extractString(json, "musicUrl").isBlank());
 
         return record(AuditActionType.UPLOAD_STORY, userId, RESOURCE_STORY, storyId, STATUS_SUCCESS, metadata).toFuture();
     }
@@ -166,21 +149,21 @@ public class UserAuditService {
     @KafkaListener(topics = "forget_password_event", groupId = "audit-service")
     public CompletableFuture<Void> handleForgetPasswordEvent(@Payload String payload) {
         JsonObject json = GsonUtils.fromString(payload);
-        String email = KafkaUtils.extractString(json, "email");
+        String email = JsonPayloadReader.extractString(json, "email");
         return record(AuditActionType.FORGET_PASSWORD, email, RESOURCE_PASSWORD, email, STATUS_SUCCESS, emailMetadata(email)).toFuture();
     }
 
     @KafkaListener(topics = "new_password_event", groupId = "audit-service")
     public CompletableFuture<Void> handleNewPasswordEvent(@Payload String payload) {
         JsonObject json = GsonUtils.fromString(payload);
-        String email = KafkaUtils.extractString(json, "email");
+        String email = JsonPayloadReader.extractString(json, "email");
         return record(AuditActionType.RESET_PASSWORD, email, RESOURCE_PASSWORD, email, STATUS_SUCCESS, emailMetadata(email)).toFuture();
     }
 
     @KafkaListener(topics = "new_password_and_username_event", groupId = "audit-service")
     public CompletableFuture<Void> handleNewPasswordAndUsernameEvent(@Payload String payload) {
         JsonObject json = GsonUtils.fromString(payload);
-        String email = KafkaUtils.extractString(json, "email");
+        String email = JsonPayloadReader.extractString(json, "email");
         return record(AuditActionType.RESET_PASSWORD, email, RESOURCE_PASSWORD, email, STATUS_SUCCESS, emailMetadata(email)).toFuture();
     }
 
@@ -199,6 +182,31 @@ public class UserAuditService {
             auditLog.setCreatedAt(Instant.now());
         }
         return auditLog;
+    }
+
+    private AuditLogs toAuditLog(AuditEntry entry) {
+        return AuditLogs.builder()
+                .actorId(entry.actorId())
+                .actorType(entry.actorType() == null ? ACTOR_TYPE_USER : entry.actorType())
+                .action(entry.action())
+                .resourceType(entry.resourceType())
+                .resourceId(entry.resourceId())
+                .status(entry.status())
+                .metadata(entry.metadataJson())
+                .sourceEventId(entry.sourceEventId())
+                .build();
+    }
+
+    private void validateRequiredInteraction(AuditEntry entry) {
+        if (entry == null || entry.actorId() == null || entry.actorId().isBlank()
+                || entry.resourceId() == null || entry.resourceId().isBlank()
+                || entry.sourceEventId() == null || entry.sourceEventId().isBlank()) {
+            throw new IllegalArgumentException("Required post interaction is missing its stable identity");
+        }
+        if (entry.action() != AuditActionType.LIKE_POST && entry.action() != AuditActionType.COMMENT_POST
+                && entry.action() != AuditActionType.REPOST_POST) {
+            throw new IllegalArgumentException("Unsupported required post interaction action");
+        }
     }
 
     private JsonObject emailMetadata(String email) {

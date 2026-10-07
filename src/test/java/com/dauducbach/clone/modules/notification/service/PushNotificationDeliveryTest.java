@@ -2,17 +2,28 @@ package com.dauducbach.clone.modules.notification.service;
 
 import com.dauducbach.clone.commons.constant.UserActionType;
 import com.dauducbach.clone.modules.notification.constants.NotificationType;
+import com.dauducbach.clone.modules.notification.delivery.DeliverNotificationUseCase;
+import com.dauducbach.clone.modules.notification.delivery.NotificationContentNormalizer;
+import com.dauducbach.clone.modules.notification.delivery.NotificationDestinationBuilder;
+import com.dauducbach.clone.modules.notification.delivery.NotificationMetadataCodec;
+import com.dauducbach.clone.modules.notification.delivery.NotificationPushGateway;
+import com.dauducbach.clone.modules.notification.delivery.NotificationPushPayload;
+import com.dauducbach.clone.modules.notification.delivery.NotificationPushPayloadFactory;
+import com.dauducbach.clone.modules.notification.delivery.NotificationRealtimePublisher;
 import com.dauducbach.clone.modules.notification.dto.NotificationForService;
 import com.dauducbach.clone.modules.notification.entity.NotificationEvents;
 import com.dauducbach.clone.modules.notification.entity.NotificationPushToken;
 import com.dauducbach.clone.modules.notification.entity.UserNotifications;
 import com.dauducbach.clone.modules.notification.repository.NotificationEventsRepository;
 import com.dauducbach.clone.modules.notification.repository.UserPushNotificationRepository;
+import com.dauducbach.clone.modules.notification.infrastructure.persistence.R2dbcNotificationPersistenceAdapter;
+import com.dauducbach.clone.modules.notification.infrastructure.persistence.R2dbcNotificationPushTokenQueryAdapter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
 import org.springframework.data.r2dbc.core.ReactiveInsertOperation;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
@@ -30,7 +41,8 @@ class PushNotificationDeliveryTest {
     private final NotificationEventsRepository eventRepository = mock(NotificationEventsRepository.class);
     private final R2dbcEntityTemplate entityTemplate = mock(R2dbcEntityTemplate.class);
     private final NotificationPushGateway pushGateway = mock(NotificationPushGateway.class);
-    private final NotificationSseService realtime = mock(NotificationSseService.class);
+    private final NotificationRealtimePublisher realtime = mock(NotificationRealtimePublisher.class);
+    private final TransactionalOperator transactions = mock(TransactionalOperator.class);
 
     @Test
     void avatarRecipientConstraintFailureIsNotAcknowledgedAsADuplicate() {
@@ -47,7 +59,8 @@ class PushNotificationDeliveryTest {
         StepVerifier.create(service.sendPushNotification(request))
                 .expectErrorMatches(error -> error.getCause() instanceof DataIntegrityViolationException)
                 .verify();
-        verify(eventRepository).deleteById(anyString());
+        verify(eventRepository, never()).deleteById(anyString());
+        verify(transactions).transactional(any(Mono.class));
         verifyNoInteractions(realtime, pushGateway);
     }
 
@@ -130,7 +143,7 @@ class PushNotificationDeliveryTest {
 
     @Test
     void pushPayloadContainsCanonicalDataAndStableDedupTag() {
-        FirebasePushMessageFactory factory = new FirebasePushMessageFactory();
+        NotificationPushPayloadFactory factory = new NotificationPushPayloadFactory();
 
         NotificationPushPayload payload = factory.create(
                 "device-token",
@@ -197,19 +210,93 @@ class PushNotificationDeliveryTest {
         verifyNoInteractions(pushGateway);
     }
 
+    @Test
+    void sourceEventReplayUsesTheExistingLegacyDedupKeyBeforeWriting() {
+        PushNotificationService service = newService();
+        when(eventRepository.findBySourceEventKey("SEND_MESSAGE:source-event-1:recipient-1"))
+                .thenReturn(Mono.empty());
+        when(eventRepository.findByDedupKey("source-event-1:recipient-1"))
+                .thenReturn(Mono.just(NotificationEvents.builder().id("legacy-event").build()));
+
+        NotificationForService request = notificationRequest();
+        request.setMetadata(Map.of("EVENT_ID", "source-event-1"));
+
+        StepVerifier.create(service.sendPushNotification(request))
+                .expectNext("Duplicate notification skipped")
+                .verifyComplete();
+
+        verify(entityTemplate, never()).insert(NotificationEvents.class);
+        verify(entityTemplate, never()).insert(UserNotifications.class);
+        verifyNoInteractions(realtime, pushGateway);
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void persistsSourceEventAndRecipientWithinOneTransaction() {
+        PushNotificationService service = newService();
+        ReactiveInsertOperation.ReactiveInsert<NotificationEvents> eventInsert =
+                mock(ReactiveInsertOperation.ReactiveInsert.class);
+        ReactiveInsertOperation.ReactiveInsert<UserNotifications> recipientInsert =
+                mock(ReactiveInsertOperation.ReactiveInsert.class);
+        when(entityTemplate.insert(NotificationEvents.class)).thenReturn(eventInsert);
+        when(entityTemplate.insert(UserNotifications.class)).thenReturn(recipientInsert);
+        when(eventInsert.using(any(NotificationEvents.class)))
+                .thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+        when(recipientInsert.using(any(UserNotifications.class)))
+                .thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+        when(tokenRepository.findByUserId("recipient-1")).thenReturn(Mono.empty());
+        NotificationForService request = notificationRequest();
+        request.setMetadata(Map.of("EVENT_ID", "source-event-2"));
+
+        StepVerifier.create(service.sendPushNotification(request))
+                .expectNext("Notification persisted; no push token")
+                .verifyComplete();
+
+        var eventCaptor = org.mockito.ArgumentCaptor.forClass(NotificationEvents.class);
+        verify(eventInsert).using(eventCaptor.capture());
+        assertThat(eventCaptor.getValue().getSourceEventKey())
+                .isEqualTo("SEND_MESSAGE:source-event-2:recipient-1");
+        verify(transactions).transactional(any(Mono.class));
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void concurrentSourceEventDuplicateIsSkippedOnlyWhenTheUniqueRowExists() {
+        PushNotificationService service = newService();
+        ReactiveInsertOperation.ReactiveInsert<NotificationEvents> eventInsert =
+                mock(ReactiveInsertOperation.ReactiveInsert.class);
+        when(entityTemplate.insert(NotificationEvents.class)).thenReturn(eventInsert);
+        when(eventInsert.using(any(NotificationEvents.class)))
+                .thenReturn(Mono.error(new DataIntegrityViolationException("source event key duplicate")));
+        when(eventRepository.findBySourceEventKey("SEND_MESSAGE:source-event-3:recipient-1"))
+                .thenReturn(Mono.empty(), Mono.just(NotificationEvents.builder().id("winner").build()));
+        NotificationForService request = notificationRequest();
+        request.setMetadata(Map.of("EVENT_ID", "source-event-3"));
+
+        StepVerifier.create(service.sendPushNotification(request))
+                .expectNext("Duplicate notification skipped")
+                .verifyComplete();
+
+        verify(transactions).transactional(any(Mono.class));
+        verify(entityTemplate, never()).insert(UserNotifications.class);
+        verifyNoInteractions(realtime, pushGateway);
+    }
+
     private PushNotificationService newService() {
         lenient().when(eventRepository.findByDedupKey(anyString())).thenReturn(Mono.empty());
+        lenient().when(eventRepository.findBySourceEventKey(anyString())).thenReturn(Mono.empty());
         lenient().when(realtime.notifyChanged(anyString(), anyString())).thenReturn(Mono.empty());
-        return new PushNotificationService(
-                tokenRepository,
-                eventRepository,
-                entityTemplate,
+        lenient().when(transactions.transactional(any(Mono.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        return new PushNotificationService(new DeliverNotificationUseCase(
+                new R2dbcNotificationPersistenceAdapter(eventRepository, entityTemplate, transactions),
+                new R2dbcNotificationPushTokenQueryAdapter(tokenRepository),
                 pushGateway,
                 new NotificationDestinationBuilder(),
                 new NotificationContentNormalizer(),
                 new NotificationMetadataCodec(new ObjectMapper()),
-                new FirebasePushMessageFactory(),
-                realtime);
+                new NotificationPushPayloadFactory(),
+                realtime));
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})

@@ -63,8 +63,8 @@ class ChatMessageActionsTest {
         pins = new ChatPinService(access, actions, reads, outbox, members, mapper, tx, 5);
         state = new ChatMessageStateService(access, messages, reads, mapper, tx);
         var writer = mock(ChatMessageWriter.class);
-        when(writer.write(any(), any(), any())).thenAnswer(i -> ((Mono<Void>)i.getArgument(2)).thenReturn(i.getArgument(0)));
-        forward = new ChatForwardService(access, actions, messages, writer, outbox, members, mapper, tx);
+        when(writer.write(any(), any(), any(), any())).thenAnswer(i -> ((Mono<Void>)i.getArgument(2)).thenReturn(i.getArgument(0)));
+        forward = new ChatForwardService(access, actions, messages, writer, members, mapper, tx);
         when(messages.findBySenderIdAndClientMessageId(anyString(), anyString())).thenReturn(Mono.empty());
         when(actions.recordForward(anyString(), anyString(), anyString())).thenReturn(Mono.empty());
         when(actions.referenceMedia(anyString(), anyString())).thenReturn(Mono.just(1L));
@@ -107,7 +107,7 @@ class ChatMessageActionsTest {
         message.setMessageType(type); message.setMetadata(type==MessageType.TEXT?null:"{\"url\":\"https://asset\",\"publicId\":\"asset\"}"); message.setReplyToSeq(1L);
         StepVerifier.create(forward.forward("me","target",request())).assertNext(r -> {
             assertThat(r.forwarded()).isTrue(); assertThat(r.senderId()).isEqualTo("me"); assertThat(r.content()).isEqualTo("body"); assertThat(r.replyToSeq()).isNull(); assertThat(r.messageSeq()).isEqualTo(11);
-        }).verifyComplete(); verify(outbox).append(any());
+        }).verifyComplete();
         if(type!=MessageType.TEXT) verify(actions).referenceMedia(anyString(),eq("m"));
     }
     @ParameterizedTest @EnumSource(value=MessageType.class,names={"SYSTEM","STORY_REPLY","VIDEO","FILE"}) void rejectsUnsupportedForward(MessageType type) { message.setMessageType(type); fails(forward.forward("me","target",request())); }
@@ -126,7 +126,7 @@ class ChatMessageActionsTest {
         StepVerifier.create(recall.recall("me","c","m")).expectNextMatches(r->r.reactionVersion()==8).verifyComplete();
         when(messages.findById("m")).thenReturn(Mono.just(message));
         StepVerifier.create(state.get("me","c",List.of("m"))).expectNextMatches(items->items.getFirst().reactionVersion()==8).verifyComplete();
-        var captured=org.mockito.ArgumentCaptor.forClass(com.dauducbach.clone.modules.chat.dto.event.ChatEvent.class);
+        var captured=org.mockito.ArgumentCaptor.forClass(com.dauducbach.clone.modules.chat.publicapi.ChatEvent.class);
         verify(outbox).append(captured.capture());assertThat(captured.getValue().message().reactionVersion()).isEqualTo(8);
     }
     @Test void forwardLocksConversationsInSortedOrder() {
@@ -147,11 +147,11 @@ class ChatMessageActionsTest {
     }
     @Test void forwardedBadgeSurvivesMappingAndNeutralBroadcast() {
         message.setForwarded(true);var response=new ChatResponseMapper().toChatMessageResponse(message);
-        assertThat(response.forwarded()).isTrue();assertThat(com.dauducbach.clone.modules.chat.dto.event.ChatEvent.messageCreated(response,List.of("peer")).message().forwarded()).isTrue();
+        assertThat(response.forwarded()).isTrue();assertThat(com.dauducbach.clone.modules.chat.publicapi.ChatEvent.messageCreated(response,List.of("peer")).message().forwarded()).isTrue();
     }
     @Test void pinEventsExposeRevisionWithoutMessageOrPermission()throws Exception {
         var json=new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules();
-        var payload=json.writeValueAsString(com.dauducbach.clone.modules.chat.dto.event.ChatEvent.pinsChanged("c","me",9,List.of("peer")));
+        var payload=json.writeValueAsString(com.dauducbach.clone.modules.chat.publicapi.ChatEvent.pinsChanged("c","me",9,List.of("peer")));
         assertThat(payload).contains("\"type\":\"PINS_CHANGED\"","\"pinVersion\":9","\"message\":null").doesNotContain("canManage","sourceMessageId");
     }
     @Test void missingMediaReferenceFailsWithoutCreationEvent() {
@@ -180,8 +180,8 @@ class ChatMessageActionsTest {
             new com.dauducbach.clone.modules.chat.dto.response.ReactionSnapshot("copy",11,7,ReactionType.HEART,true,2,
                 List.of(new com.dauducbach.clone.modules.chat.dto.response.ReactionCount(ReactionType.HEART,2))))));
         var mapper=new ChatResponseMapper();
-        var hydration=new ChatMessageQueryService(mock(ChatAccessService.class),reads,mapper,mock(ChatCursorService.class),mock(StoryAvailabilityPort.class),reactionService);
-        forward=new ChatForwardService(access,actions,messages,mock(ChatMessageWriter.class),outbox,members,mapper,tx,hydration);
+        var hydration=new ChatMessageQueryService(mock(ChatAccessService.class),reads,mapper,mock(com.dauducbach.clone.modules.post.publicapi.StoryQuery.class),reactionService);
+        forward=new ChatForwardService(access,actions,messages,mock(ChatMessageWriter.class),members,mapper,tx,hydration);
         StepVerifier.create(forward.forward("me","target",request())).assertNext(r->{
             assertThat(r.reactionVersion()).isEqualTo(7);assertThat(r.likeCount()).isEqualTo(2);
             assertThat(r.myReaction()).isEqualTo(ReactionType.HEART);assertThat(r.isReact()).isTrue();

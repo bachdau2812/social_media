@@ -1,6 +1,6 @@
 package com.dauducbach.clone.modules.post.service.post;
 
-import com.dauducbach.clone.modules.post.service.comment.CommentMediaModerationOrchestrator;
+import com.dauducbach.clone.modules.post.comments.moderation.CommentMediaModerationOrchestrator;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;

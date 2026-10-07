@@ -1,27 +1,26 @@
 package com.dauducbach.clone.modules.notification.service;
 
-import com.dauducbach.clone.commons.constant.PostNotificationCacheKeys;
 import com.dauducbach.clone.commons.constant.UserActionType;
 import com.dauducbach.clone.modules.notification.constants.NotificationType;
 import com.dauducbach.clone.modules.notification.dto.request.NotificationRequest;
 import com.dauducbach.clone.modules.notification.entity.NotificationTemplates;
 import com.dauducbach.clone.modules.notification.repository.NotificationTemplatesRepository;
-import com.dauducbach.clone.modules.post.entity.Comment;
-import com.dauducbach.clone.modules.post.entity.PostDetails;
-import com.dauducbach.clone.modules.post.service.comment.CommentService;
-import com.dauducbach.clone.modules.post.service.post.LikeService;
-import com.dauducbach.clone.modules.post.service.post.PostService;
+import com.dauducbach.clone.modules.notification.incoming.post.PushModuleNotificationHandler;
+import com.dauducbach.clone.modules.post.publicapi.PostInteractionQuery;
+import com.dauducbach.clone.modules.post.publicapi.PostQuery;
+import com.dauducbach.clone.modules.post.publicapi.CommentQuery;
+import com.dauducbach.clone.modules.post.publicapi.PostNotificationMuteQuery;
 import com.dauducbach.clone.modules.user.dto.response.FollowerListResponse;
 import com.dauducbach.clone.modules.user.entity.UserDetails;
-import com.dauducbach.clone.modules.user.service.UserFollowerService;
-import com.dauducbach.clone.modules.user.service.UserIdentityQueryService;
+import com.dauducbach.clone.modules.user.publicapi.UserRelationshipQuery;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentityQuery;
+import com.dauducbach.clone.modules.notification.service.NotificationService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -43,23 +42,23 @@ class PushModuleNotificationHandlerTest {
     @Mock
     NotificationTemplatesRepository notificationTemplatesRepository;
     @Mock
-    ReactiveRedisTemplate<String, Object> redisTemplate;
+    PostNotificationMuteQuery postNotificationMuteQuery;
     @Mock
-    UserFollowerService userFollowerService;
+    UserRelationshipQuery userFollowerService;
     @Mock
-    UserIdentityQueryService userIdentityQueryService;
+    UserIdentityQuery userIdentityQueryService;
     @Mock
-    PostService postService;
+    PostQuery postQuery;
     @Mock
-    CommentService commentService;
+    PostInteractionQuery postInteractionQuery;
     @Mock
-    LikeService likeService;
+    CommentQuery commentQuery;
 
     @Test
     void handlePostUploadEventSendsNewPostPushNotification() {
         PushModuleNotificationHandler handler = newHandler();
 
-        when(redisTemplate.hasKey(anyString())).thenReturn(Mono.just(false));
+        when(postNotificationMuteQuery.isMuted(anyString(), anyString())).thenReturn(Mono.just(false));
         when(userIdentityQueryService.resolveUsername("owner-1")).thenReturn(Mono.just("Bach"));
         when(userFollowerService.getFollowers("owner-1", 0, 100))
                 .thenReturn(Mono.just(FollowerListResponse.builder()
@@ -96,13 +95,36 @@ class PushModuleNotificationHandlerTest {
     }
 
     @Test
+    void postNotificationPersistenceFailureEscapesListenerForKafkaRetry() {
+        PushModuleNotificationHandler handler = newHandler();
+        when(postNotificationMuteQuery.isMuted(anyString(), anyString())).thenReturn(Mono.just(false));
+        when(userIdentityQueryService.resolveUsername("owner-1")).thenReturn(Mono.just("Bach"));
+        when(userFollowerService.getFollowers("owner-1", 0, 100))
+                .thenReturn(Mono.just(FollowerListResponse.builder()
+                        .followers(List.of(FollowerListResponse.FollowerInfo.builder().userId("follower-1").build()))
+                        .hasNextPage(false)
+                        .build()));
+        when(notificationTemplatesRepository.findByActionType(UserActionType.NEW_POST))
+                .thenReturn(Mono.just(NotificationTemplates.builder()
+                        .actionType(UserActionType.NEW_POST)
+                        .template("{{USERNAME}} posted")
+                        .build()));
+        when(notificationService.sendNotification(any(NotificationRequest.class)))
+                .thenReturn(Mono.error(new IllegalStateException("database unavailable")));
+
+        assertThatThrownBy(() -> handler.handlePostUploadEvent(
+                "{\"postId\":\"post-2\",\"userId\":\"owner-1\"}").join())
+                .hasRootCauseMessage("database unavailable");
+    }
+
+    @Test
     void handlePostLikeUsesCommentServiceForInteractedPeople() {
         PushModuleNotificationHandler handler = newHandler();
 
-        when(redisTemplate.hasKey(anyString())).thenReturn(Mono.just(false));
+        when(postNotificationMuteQuery.isMuted(anyString(), anyString())).thenReturn(Mono.just(false));
         when(userIdentityQueryService.resolveUsername("actor-1")).thenReturn(Mono.just("Nam"));
-        when(postService.getPostById("post-1")).thenReturn(Mono.just(post("post-1", "owner-1", "noi dung bai viet")));
-        when(commentService.getDistinctCommenterUserIdsByPostId("post-1"))
+        when(postQuery.findSnapshot("post-1")).thenReturn(Mono.just(new PostQuery.PostSnapshot("post-1", "owner-1", "noi dung bai viet")));
+        when(commentQuery.findDistinctCommenterUserIdsByPostId("post-1"))
                 .thenReturn(Flux.just("commenter-1", "owner-1", "actor-1"));
         when(notificationTemplatesRepository.findByActionType(UserActionType.LIKE))
                 .thenReturn(Mono.just(NotificationTemplates.builder()
@@ -142,21 +164,20 @@ class PushModuleNotificationHandlerTest {
                     assertThat(request.getRecipientIds()).containsExactly("commenter-1");
                     assertThat(request.getContent()).isEqualTo("Nam other liked noi dung bai viet");
                 });
-        verify(commentService, times(1)).getDistinctCommenterUserIdsByPostId("post-1");
+        verify(commentQuery, times(1)).findDistinctCommenterUserIdsByPostId("post-1");
     }
 
     @Test
     void handleCommentSuccessSendsOwnerParentOwnerAndInteractedPeopleWithoutOwners() {
         PushModuleNotificationHandler handler = newHandler();
 
-        when(redisTemplate.hasKey(anyString())).thenReturn(Mono.just(false));
+        when(postNotificationMuteQuery.isMuted(anyString(), anyString())).thenReturn(Mono.just(false));
         when(userIdentityQueryService.resolveUsername("actor-1")).thenReturn(Mono.just("Nam"));
-        when(postService.getPostOwnerIdByPostId("post-1")).thenReturn(Mono.just("owner-1"));
-        when(postService.getPostById("post-1")).thenReturn(Mono.just(post("post-1", "owner-1", "noi dung bai viet")));
-        when(commentService.getCommentById("parent-1"))
-                .thenReturn(Mono.just(comment("parent-1", "parent-owner-1", "parent content")));
-        when(commentService.countCommentsByPostId("post-1")).thenReturn(Mono.just(3L));
-        when(commentService.getDistinctCommenterUserIdsByPostId("post-1"))
+        when(postQuery.findSnapshot("post-1")).thenReturn(Mono.just(new PostQuery.PostSnapshot("post-1", "owner-1", "noi dung bai viet")));
+        when(commentQuery.findById("parent-1"))
+                .thenReturn(Mono.just(new CommentQuery.CommentSnapshot("parent-1", "post-1", "parent-owner-1", null, "parent content")));
+        when(commentQuery.countByPostId("post-1")).thenReturn(Mono.just(3L));
+        when(commentQuery.findDistinctCommenterUserIdsByPostId("post-1"))
                 .thenReturn(Flux.just("commenter-1", "owner-1", "parent-owner-1", "actor-1"));
         when(notificationTemplatesRepository.findByActionType(UserActionType.COMMENT))
                 .thenReturn(Mono.just(NotificationTemplates.builder()
@@ -208,12 +229,12 @@ class PushModuleNotificationHandlerTest {
         PushModuleNotificationHandler handler = newHandler();
 
         when(userIdentityQueryService.resolveUsername("actor-1")).thenReturn(Mono.just("Nam"));
-        when(postService.getPostById("post-1")).thenReturn(Mono.just(post("post-1", "owner-1", "noi dung bai viet")));
-        when(redisTemplate.hasKey(PostNotificationCacheKeys.mutedPostNotification("post-1", "owner-1")))
+        when(postQuery.findSnapshot("post-1")).thenReturn(Mono.just(new PostQuery.PostSnapshot("post-1", "owner-1", "noi dung bai viet")));
+        when(postNotificationMuteQuery.isMuted("post-1", "owner-1"))
                 .thenReturn(Mono.just(false));
-        when(redisTemplate.hasKey(PostNotificationCacheKeys.mutedPostNotification("post-1", "commenter-1")))
+        when(postNotificationMuteQuery.isMuted("post-1", "commenter-1"))
                 .thenReturn(Mono.just(true));
-        when(commentService.getDistinctCommenterUserIdsByPostId("post-1"))
+        when(commentQuery.findDistinctCommenterUserIdsByPostId("post-1"))
                 .thenReturn(Flux.just("commenter-1"));
         when(notificationTemplatesRepository.findByActionType(UserActionType.LIKE))
                 .thenReturn(Mono.just(NotificationTemplates.builder()
@@ -239,10 +260,10 @@ class PushModuleNotificationHandlerTest {
     void handleCommentLikeRendersUsernameAndCommentContent() {
         PushModuleNotificationHandler handler = newHandler();
 
-        when(redisTemplate.hasKey(anyString())).thenReturn(Mono.just(false));
+        when(postNotificationMuteQuery.isMuted(anyString(), anyString())).thenReturn(Mono.just(false));
         when(userIdentityQueryService.resolveUsername("actor-1")).thenReturn(Mono.just("Nam"));
-        when(commentService.getCommentById("comment-1"))
-                .thenReturn(Mono.just(comment("comment-1", "comment-owner-1", "noi dung binh luan")));
+        when(commentQuery.findById("comment-1"))
+                .thenReturn(Mono.just(new CommentQuery.CommentSnapshot("comment-1", "post-1", "comment-owner-1", null, "noi dung binh luan")));
         when(notificationTemplatesRepository.findByActionType(UserActionType.LIKE_COMMENT))
                 .thenReturn(Mono.just(NotificationTemplates.builder()
                         .id(7)
@@ -319,12 +340,12 @@ class PushModuleNotificationHandlerTest {
         return new PushModuleNotificationHandler(
                 notificationService,
                 notificationTemplatesRepository,
-                redisTemplate,
+                postNotificationMuteQuery,
                 userFollowerService,
                 userIdentityQueryService,
-                postService,
-                commentService,
-                likeService
+                postQuery,
+                postInteractionQuery,
+                commentQuery
         );
     }
 
@@ -335,19 +356,4 @@ class PushModuleNotificationHandlerTest {
                 .build();
     }
 
-    private PostDetails post(String postId, String userId, String content) {
-        return PostDetails.builder()
-                .postId(postId)
-                .userId(userId)
-                .content(content)
-                .build();
-    }
-
-    private Comment comment(String commentId, String userId, String content) {
-        return Comment.builder()
-                .id(commentId)
-                .userId(userId)
-                .content(content)
-                .build();
-    }
 }

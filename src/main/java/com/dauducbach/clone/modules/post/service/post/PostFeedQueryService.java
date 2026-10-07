@@ -2,10 +2,11 @@ package com.dauducbach.clone.modules.post.service.post;
 
 import co.elastic.clients.json.JsonData;
 import com.dauducbach.clone.modules.post.elastic.PostVector;
-import com.dauducbach.clone.infrastructure.vector.VectorMath;
+import com.dauducbach.clone.commons.vector.VectorMath;
 import com.dauducbach.clone.modules.post.dto.response.FriendFeedActivityResponse;
 import com.dauducbach.clone.modules.post.entity.PostDetails;
-import com.dauducbach.clone.modules.post.repositoty.PostDetailsRepository;
+import com.dauducbach.clone.modules.post.publicapi.PostFeedQuery;
+import com.dauducbach.clone.modules.post.repository.PostDetailsRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import lombok.experimental.NonFinal;
@@ -26,7 +27,7 @@ import java.util.Set;
 @Service
 @RequiredArgsConstructor
 @FieldDefaults(level = lombok.AccessLevel.PRIVATE, makeFinal = true)
-public class PostFeedQueryService {
+public class PostFeedQueryService implements PostFeedQuery {
     private static final Logger log = LoggerFactory.getLogger(PostFeedQueryService.class);
     private static final String APPROVED_STATUS = "APPROVED";
     private static final String POST_CONTENT_VECTOR_FIELD = "content_vector";
@@ -62,10 +63,22 @@ public class PostFeedQueryService {
                         safeLimit, excludes.size()));
     }
 
+    @Override
+    public Flux<String> findRecentApprovedPostIds(int limit, Set<String> excludedPostIds) {
+        return getRecentApprovedPosts(limit, excludedPostIds).map(PostDetails::getPostId);
+    }
+
     public Flux<PostDetails> getApprovedFriendPostsBefore(String userId, java.time.Instant upperBound,
             java.time.Instant afterTime, String afterId, int limit) {
         if (limit <= 0) return Flux.empty();
         return postDetailsRepository.findApprovedFriendPostsBefore(userId, upperBound, afterTime, afterId, Math.min(limit, 40));
+    }
+
+    @Override
+    public Flux<PostFeedQuery.FeedCandidatePost> findApprovedFriendPostsBefore(
+            String userId, java.time.Instant upperBound, java.time.Instant afterTime, String afterId, int limit) {
+        return getApprovedFriendPostsBefore(userId, upperBound, afterTime, afterId, limit)
+                .map(post -> new PostFeedQuery.FeedCandidatePost(post.getPostId(), post.getCreatedAt()));
     }
 
     public Flux<PostDetails> getRecentApprovedPostsFromMutualFriends(String userId, int limit, int offset) {
@@ -80,7 +93,8 @@ public class PostFeedQueryService {
         );
     }
 
-    public Flux<FriendFeedActivityResponse> getRecentFriendFeedActivities(String userId, int limit, int offset) {
+    @Override
+    public Flux<FriendFeedActivityResponse> findRecentFriendFeedActivities(String userId, int limit, int offset) {
         int safeLimit = Math.max(limit, 0);
         if (safeLimit == 0) {
             return Flux.empty();
@@ -98,6 +112,13 @@ public class PostFeedQueryService {
                         activity.getActivityAt()
                 ));
     }
+
+    /** Kept as an internal compatibility name while existing post callers move to the public query. */
+    public Flux<FriendFeedActivityResponse> getRecentFriendFeedActivities(String userId, int limit, int offset) {
+        return findRecentFriendFeedActivities(userId, limit, offset);
+    }
+
+    @Override
     public Mono<List<String>> searchRecommendedPostIds(List<Double> queryVector, int limit, Set<String> excludedPostIds) {
         int safeLimit = Math.max(limit, 0);
         if (safeLimit == 0 || queryVector == null || queryVector.isEmpty()) {
@@ -169,6 +190,11 @@ public class PostFeedQueryService {
                         }
                     });
         });
+    }
+
+    @Override
+    public Mono<List<Double>> getRecommendationVector(String postId) {
+        return getPostRecommendationVector(postId);
     }
 
     /** Compatibility adapter used by the current ST/LT consumers; same strict readiness contract. */

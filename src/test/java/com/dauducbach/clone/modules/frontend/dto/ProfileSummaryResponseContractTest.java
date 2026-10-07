@@ -6,11 +6,11 @@ import com.dauducbach.clone.modules.user.entity.UserDetails;
 import com.dauducbach.clone.modules.user.entity.UserHighSchool;
 import com.dauducbach.clone.modules.user.entity.UserJob;
 import com.dauducbach.clone.modules.user.entity.UserUniversity;
-import com.dauducbach.clone.modules.user.service.UserProfileCompositionQueryService.HighSchoolSnapshot;
-import com.dauducbach.clone.modules.user.service.UserProfileCompositionQueryService.JobSnapshot;
-import com.dauducbach.clone.modules.user.service.UserProfileCompositionQueryService.MediaSnapshot;
-import com.dauducbach.clone.modules.user.service.UserProfileCompositionQueryService.UniversitySnapshot;
-import com.dauducbach.clone.modules.user.service.UserProfileCompositionQueryService.UserDetailsSnapshot;
+import com.dauducbach.clone.modules.user.publicapi.UserProfileQuery.HighSchoolSnapshot;
+import com.dauducbach.clone.modules.user.publicapi.UserProfileQuery.JobSnapshot;
+import com.dauducbach.clone.modules.user.publicapi.UserProfileQuery.MediaSnapshot;
+import com.dauducbach.clone.modules.user.publicapi.UserProfileQuery.UniversitySnapshot;
+import com.dauducbach.clone.modules.user.publicapi.UserProfileQuery.UserDetailsSnapshot;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 

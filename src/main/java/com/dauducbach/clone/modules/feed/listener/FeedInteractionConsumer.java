@@ -1,9 +1,10 @@
 package com.dauducbach.clone.modules.feed.listener;
 
 import com.dauducbach.clone.modules.feed.dto.event.FeedInteractionEvent;
-import com.dauducbach.clone.modules.feed.service.FeedInteractionProcessingService;
-import com.dauducbach.clone.modules.feed.service.FeedInteractionProcessingService.CanonicalPosition;
-import com.dauducbach.clone.utils.GsonUtils;
+import com.dauducbach.clone.modules.personalization.publicapi.CanonicalInteractionPosition;
+import com.dauducbach.clone.modules.personalization.publicapi.PreferenceInteraction;
+import com.dauducbach.clone.modules.personalization.publicapi.PreferenceInteractionProcessor;
+import com.dauducbach.clone.commons.serialization.GsonUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -25,13 +26,13 @@ import java.time.Duration;
 public class FeedInteractionConsumer implements SmartLifecycle {
     private static final Logger log = LoggerFactory.getLogger(FeedInteractionConsumer.class);
     private final ReceiverOptions<String, String> options;
-    private final FeedInteractionProcessingService processing;
+    private final PreferenceInteractionProcessor processing;
     private final String generation;
     private final int partitionCount;
     private volatile Disposable subscription;
 
     public FeedInteractionConsumer(@Qualifier("feedInteractionReceiverOptions") ReceiverOptions<String, String> options,
-            FeedInteractionProcessingService processing,
+            PreferenceInteractionProcessor processing,
             @Value("${vector.interaction.consumer.generation:v1}") String generation,
             @Value("${vector.interaction.consumer.partition-count:1}") int partitionCount) {
         if (generation == null || generation.isBlank() || partitionCount < 1)
@@ -52,11 +53,19 @@ public class FeedInteractionConsumer implements SmartLifecycle {
             FeedInteractionEvent event = FeedInteractionEvent.fromJson(GsonUtils.fromString(record.value()));
             if (!event.userId().equals(record.key()))
                 return Mono.error(new IllegalArgumentException("Canonical Kafka key must equal userId"));
-            return processing.apply(event, new CanonicalPosition(record.topic(), generation, record.partition(), record.offset()))
+            PreferenceInteraction interaction = toPreferenceInteraction(event);
+            CanonicalInteractionPosition position = new CanonicalInteractionPosition(
+                    record.topic(), generation, record.partition(), record.offset());
+            return processing.apply(interaction, position)
                     .then(Mono.defer(() -> record.receiverOffset().commit()));
         }).retryWhen(Retry.backoff(Long.MAX_VALUE, Duration.ofSeconds(1)).maxBackoff(Duration.ofMinutes(1))
                 .doBeforeRetry(retry -> log.error("Canonical interaction parked/retrying; topic={} partition={} offset={} attempt={} cause={}",
                         record.topic(), record.partition(), record.offset(), retry.totalRetries() + 1, retry.failure().toString())));
+    }
+
+    static PreferenceInteraction toPreferenceInteraction(FeedInteractionEvent event) {
+        return new PreferenceInteraction(event.eventId(), event.userId(), event.postId(),
+                event.action(), event.sourceId(), event.occurredAt());
     }
 
     @Override public synchronized void start() {

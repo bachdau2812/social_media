@@ -1,32 +1,39 @@
 package com.dauducbach.clone.modules.notification.controller;
 
+import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.modules.notification.dto.request.PushTokenRegisterRequest;
 import com.dauducbach.clone.modules.notification.dto.response.PushTokenRegisterResponse;
-import com.dauducbach.clone.modules.notification.service.PushNotificationService;
+import com.dauducbach.clone.modules.notification.service.PushTokenRegistrationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.test.web.reactive.server.WebTestClient;
+import org.springframework.security.core.Authentication;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class NotificationControllerTest {
-    PushNotificationService pushNotificationService;
-    WebTestClient client;
+    private PushTokenRegistrationService pushTokenRegistrationService;
+    private NotificationController controller;
+    private Authentication authentication;
 
     @BeforeEach
     void setUp() {
-        pushNotificationService = mock(PushNotificationService.class);
-        client = WebTestClient.bindToController(new NotificationController(pushNotificationService)).build();
+        pushTokenRegistrationService = mock(PushTokenRegistrationService.class);
+        controller = new NotificationController(pushTokenRegistrationService);
+        authentication = mock(Authentication.class);
+        when(authentication.getName()).thenReturn("user-1");
     }
 
     @Test
     void registerPushTokenReturnsApiResponse() {
-        when(pushNotificationService.registerPushToken(any(PushTokenRegisterRequest.class)))
+        when(pushTokenRegistrationService.registerPushToken(any(PushTokenRegisterRequest.class)))
                 .thenReturn(Mono.just(new PushTokenRegisterResponse(
                         "token-id-1",
                         "user-1",
@@ -34,15 +41,27 @@ class NotificationControllerTest {
                         Instant.parse("2026-06-14T00:00:00Z")
                 )));
 
-        client.post()
-                .uri("/notifications/push-tokens")
-                .bodyValue(new PushTokenRegisterRequest("user-1", "device-1", "token-1"))
-                .exchange()
-                .expectStatus().isOk()
-                .expectBody()
-                .jsonPath("$.message").isEqualTo("Push token registered successfully")
-                .jsonPath("$.result.id").isEqualTo("token-id-1")
-                .jsonPath("$.result.userId").isEqualTo("user-1")
-                .jsonPath("$.result.deviceId").isEqualTo("device-1");
+        var response = controller.registerPushToken(
+                new PushTokenRegisterRequest("user-1", "device-1", "token-1"), authentication).block();
+
+        assertEquals("Push token registered successfully", response.getMessage());
+        assertEquals("token-id-1", response.getResult().id());
+        verify(pushTokenRegistrationService).registerPushToken(any(PushTokenRegisterRequest.class));
+    }
+
+    @Test
+    void registerPushTokenRejectsAnActorDifferentFromTheAuthenticatedUser() {
+        assertThrows(AppException.class, () -> controller.registerPushToken(
+                new PushTokenRegisterRequest("other-user", "device-1", "token-1"), authentication));
+    }
+
+    @Test
+    void removePushTokenUsesAuthenticatedUserAndDeviceId() {
+        when(pushTokenRegistrationService.removePushToken("user-1", "device-1")).thenReturn(Mono.empty());
+
+        var response = controller.removePushToken("device-1", authentication).block();
+
+        assertEquals("Push token removed successfully", response.getMessage());
+        verify(pushTokenRegistrationService).removePushToken("user-1", "device-1");
     }
 }

@@ -8,14 +8,15 @@ import com.dauducbach.clone.modules.chat.dto.request.StoryContextRequest;
 import com.dauducbach.clone.modules.chat.entity.ChatMessage;
 import com.dauducbach.clone.modules.chat.entity.Conversation;
 import com.dauducbach.clone.modules.chat.entity.ConversationMember;
+import com.dauducbach.clone.commons.exception.AppException;
+import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.chat.repository.ChatMessageRepository;
 import com.dauducbach.clone.modules.chat.repository.ChatReadRepository;
 import com.dauducbach.clone.modules.chat.repository.ConversationMemberRepository;
 import com.dauducbach.clone.modules.chat.repository.ConversationRepository;
 import com.dauducbach.clone.modules.media.constant.OwnerType;
-import com.dauducbach.clone.modules.media.entity.Media;
-import com.dauducbach.clone.modules.media.service.MediaCompatibilityFacade;
-import com.dauducbach.clone.modules.media.service.MediaService;
+import com.dauducbach.clone.modules.media.publicapi.MediaAssetView;
+import com.dauducbach.clone.modules.media.publicapi.MediaAssets;
 import com.dauducbach.clone.modules.media.configuration.MediaPolicyProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,8 +25,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
-import org.springframework.data.r2dbc.core.ReactiveInsertOperation;
 import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -39,6 +38,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -49,12 +50,9 @@ class SendMessageServiceTest {
     @Mock ConversationRepository conversationRepository;
     @Mock ConversationMemberRepository memberRepository;
     @Mock ChatAccessService accessService;
-    @Mock ChatEventPublisher eventPublisher;
     @Mock TransactionalOperator transactionalOperator;
-    @Mock R2dbcEntityTemplate entityTemplate;
-    @Mock ReactiveInsertOperation.ReactiveInsert<ChatMessage> insertSpec;
-    @Mock MediaCompatibilityFacade mediaFacade;
-    @Mock MediaService mediaService;
+    @Mock ChatMessageWriter messageWriter;
+    @Mock MediaAssets mediaAssets;
     @Captor ArgumentCaptor<ChatMessage> messageCaptor;
 
     private SendMessageService service;
@@ -69,13 +67,14 @@ class SendMessageServiceTest {
                 accessService,
                 new ChatMessageValidator(new MediaPolicyProperties()),
                 new ChatResponseMapper(),
-                eventPublisher,
                 transactionalOperator,
-                entityTemplate,
-                mediaFacade,
-                mediaService);
-        when(transactionalOperator.transactional(any(Mono.class)))
+                messageWriter,
+                mediaAssets);
+        lenient().when(transactionalOperator.transactional(any(Mono.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().when(messageWriter.write(any(), any(), any(), any()))
+                .thenAnswer(invocation -> ((Mono<Void>) invocation.getArgument(2))
+                        .thenReturn(invocation.getArgument(0)));
     }
 
     @Test
@@ -100,13 +99,8 @@ class SendMessageServiceTest {
                 .thenReturn(Mono.empty());
         when(conversationRepository.findByIdForUpdate("conversation-1"))
                 .thenReturn(Mono.just(conversation));
-        when(entityTemplate.insert(ChatMessage.class)).thenReturn(insertSpec);
-        when(insertSpec.using(any(ChatMessage.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
-        when(conversationRepository.updateMessageSummary(any(), any(Long.class), any(), any()))
-                .thenReturn(Mono.just(1));
         when(chatReadRepository.findAfterSequence("conversation-1", 1L, 4L, 1))
                 .thenReturn(Flux.empty());
-        when(eventPublisher.publish(any())).thenReturn(Mono.empty());
 
         StepVerifier.create(service.sendMessage("actor-1", "conversation-1", request))
                 .assertNext(response -> {
@@ -116,12 +110,17 @@ class SendMessageServiceTest {
                 })
                 .verifyComplete();
 
-        verify(insertSpec).using(messageCaptor.capture());
+        verify(messageWriter).write(messageCaptor.capture(), any(), any(), any());
         assertThat(messageCaptor.getValue().getMetadata())
                 .contains("\"storyId\":\"story-1\"")
                 .contains("\"previewAtMs\":12400");
-        verify(mediaFacade, never()).fetchMediaByPublicId(any());
-        verify(mediaService, never()).registerFetchedMedia(any(), any(), any());
+        assertThat(messageCaptor.getValue().getClientPayloadHash()).hasSize(64);
+        verify(mediaAssets, never()).fetchRemoteAsset(any());
+        verify(mediaAssets, never()).registerFetchedAsset(any(), any(), any());
+
+        var lockOrder = inOrder(conversationRepository, memberRepository);
+        lockOrder.verify(conversationRepository).findByIdForUpdate("conversation-1");
+        lockOrder.verify(memberRepository).findActiveUserIds("conversation-1");
     }
 
     @Test
@@ -149,15 +148,9 @@ class SendMessageServiceTest {
                 .conversationType(ConversationType.DIRECT)
                 .lastMessageSeq(4L)
                 .build();
-        Media fetched = Media.builder()
-                .assetId("asset-1")
-                .publicId("voice-1")
-                .resourceType("video")
-                .bytes(5)
-                .secureUrl("https://cdn.test/voice.webm")
-                .width(0)
-                .height(0)
-                .build();
+        MediaAssetView fetched = new MediaAssetView(
+                "asset-1", "voice-1", 0, 0, null, "video", 5, null,
+                "https://cdn.test/voice.webm", null, null, null, null, null, null, null);
 
         when(accessService.requireActiveMember("conversation-1", "actor-1"))
                 .thenReturn(Mono.just(ConversationMember.builder().build()));
@@ -165,19 +158,13 @@ class SendMessageServiceTest {
                 .thenReturn(Flux.just("actor-1", "recipient-1"));
         when(messageRepository.findBySenderIdAndClientMessageId("actor-1", request.clientMessageId()))
                 .thenReturn(Mono.empty());
-        when(mediaFacade.fetchMediaByPublicId("voice-1")).thenReturn(Mono.just(fetched));
+        when(mediaAssets.fetchRemoteAsset("voice-1")).thenReturn(Mono.just(fetched));
         when(conversationRepository.findByIdForUpdate("conversation-1"))
                 .thenReturn(Mono.just(conversation));
-        when(entityTemplate.insert(ChatMessage.class)).thenReturn(insertSpec);
-        when(insertSpec.using(any(ChatMessage.class)))
+        when(mediaAssets.registerFetchedAsset(any(MediaAssetView.class), any(), eq(OwnerType.CHAT_MESSAGE)))
                 .thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
-        when(mediaService.registerFetchedMedia(any(Media.class), any(), eq(OwnerType.CHAT_MESSAGE)))
-                .thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
-        when(conversationRepository.updateMessageSummary(any(), any(Long.class), any(), any()))
-                .thenReturn(Mono.just(1));
         when(chatReadRepository.findAfterSequence("conversation-1", 1L, 4L, 1))
                 .thenReturn(Flux.empty());
-        when(eventPublisher.publish(any())).thenReturn(Mono.empty());
 
         StepVerifier.create(service.sendMessage("actor-1", "conversation-1", request))
                 .assertNext(response -> {
@@ -187,6 +174,60 @@ class SendMessageServiceTest {
                     assertThat(response.metadata().height()).isNull();
                     assertThat(response.metadata().duration()).isEqualTo(1200L);
                 })
+                .verifyComplete();
+    }
+
+    @Test
+    void rejectsReusingClientMessageIdForDifferentPayload() {
+        String clientMessageId = "123e4567-e89b-12d3-a456-426614174000";
+        SendMessageRequest retry = new SendMessageRequest(
+                clientMessageId, MessageType.TEXT, "different text", null, null, "recipient-1", null, null);
+        ChatMessage accepted = ChatMessage.builder()
+                .id("message-1")
+                .conversationId("conversation-1")
+                .messageSeq(5L)
+                .clientMessageId(clientMessageId)
+                .senderId("actor-1")
+                .messageType(MessageType.TEXT)
+                .content("original text")
+                .createdAt(Instant.parse("2026-08-01T00:00:00Z"))
+                .build();
+
+        when(accessService.requireActiveMember("conversation-1", "actor-1"))
+                .thenReturn(Mono.just(ConversationMember.builder().build()));
+        when(messageRepository.findBySenderIdAndClientMessageId("actor-1", clientMessageId))
+                .thenReturn(Mono.just(accepted));
+        StepVerifier.create(service.sendMessage("actor-1", "conversation-1", retry))
+                .expectErrorMatches(error -> error instanceof AppException appException
+                        && appException.getErrorCode() == ErrorCode.CHAT_MESSAGE_IDEMPOTENCY_CONFLICT)
+                .verify();
+    }
+
+    @Test
+    void replaysLegacyClientMessageIdWhenStoredPayloadMatches() {
+        String clientMessageId = "123e4567-e89b-12d3-a456-426614174000";
+        SendMessageRequest retry = new SendMessageRequest(
+                clientMessageId, MessageType.TEXT, "original text", null, null, "recipient-1", null, null);
+        ChatMessage accepted = ChatMessage.builder()
+                .id("message-1")
+                .conversationId("conversation-1")
+                .messageSeq(5L)
+                .clientMessageId(clientMessageId)
+                .senderId("actor-1")
+                .messageType(MessageType.TEXT)
+                .content("original text")
+                .createdAt(Instant.parse("2026-08-01T00:00:00Z"))
+                .build();
+
+        when(accessService.requireActiveMember("conversation-1", "actor-1"))
+                .thenReturn(Mono.just(ConversationMember.builder().build()));
+        when(messageRepository.findBySenderIdAndClientMessageId("actor-1", clientMessageId))
+                .thenReturn(Mono.just(accepted));
+        when(chatReadRepository.findAfterSequence("conversation-1", 1L, 4L, 1))
+                .thenReturn(Flux.empty());
+
+        StepVerifier.create(service.sendMessage("actor-1", "conversation-1", retry))
+                .assertNext(response -> assertThat(response.id()).isEqualTo("message-1"))
                 .verifyComplete();
     }
 }

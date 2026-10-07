@@ -7,6 +7,11 @@ import com.dauducbach.clone.modules.chat.dto.response.CursorPageResponse;
 import com.dauducbach.clone.modules.chat.dto.response.StoryContextResponse;
 import com.dauducbach.clone.modules.chat.entity.ChatMessage;
 import com.dauducbach.clone.modules.chat.repository.ChatReadRepository;
+import com.dauducbach.clone.modules.media.publicapi.MediaAssetView;
+import com.dauducbach.clone.modules.media.publicapi.MediaCatalog;
+import com.dauducbach.clone.modules.post.publicapi.StoryQuery;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentity;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentityQuery;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.springframework.stereotype.Service;
@@ -16,6 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.time.Instant;
 import java.util.LinkedHashSet;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor(onConstructor_ = @org.springframework.beans.factory.annotation.Autowired)
@@ -27,13 +33,19 @@ public class ChatMessageQueryService {
     ChatAccessService accessService;
     ChatReadRepository chatReadRepository;
     ChatResponseMapper mapper;
-    ChatCursorService cursorService;
-    StoryAvailabilityPort storyAvailabilityPort;
+    StoryQuery storyQuery;
     MessageReactionService reactionService;
+    UserIdentityQuery userIdentityQuery;
+    MediaCatalog mediaCatalog;
 
     public ChatMessageQueryService(ChatAccessService accessService, ChatReadRepository chatReadRepository,
-            ChatResponseMapper mapper, ChatCursorService cursorService, StoryAvailabilityPort storyAvailabilityPort) {
-        this(accessService, chatReadRepository, mapper, cursorService, storyAvailabilityPort, null);
+            ChatResponseMapper mapper, StoryQuery storyQuery) {
+        this(accessService, chatReadRepository, mapper, storyQuery, null, null, null);
+    }
+
+    public ChatMessageQueryService(ChatAccessService accessService, ChatReadRepository chatReadRepository,
+            ChatResponseMapper mapper, StoryQuery storyQuery, MessageReactionService reactionService) {
+        this(accessService, chatReadRepository, mapper, storyQuery, reactionService, null, null);
     }
 
     public Mono<CursorPageResponse<ChatMessageResponse>> getMessages(
@@ -61,10 +73,9 @@ public class ChatMessageQueryService {
                                     pageSize + 1);
                 })
                 .collectList()
-                .map(rows -> toCursorPage(rows, pageSize, backward))
+                .flatMap(rows -> hydrateMessageProfiles(rows).map(hydrated -> toCursorPage(hydrated, pageSize, backward)))
                 .flatMap(this::hydrateStoryAvailability)
                 .flatMap(page -> hydrateReactions(actorId, conversationId, page))
-                .flatMap(page -> markFetchedMessagesDelivered(actorId, conversationId, page))
                 .onErrorMap(error -> error instanceof AppException
                         ? error
                         : new AppException(ErrorCode.CHAT_MESSAGE_FETCH_FAILED, "Fetch chat messages failed", error));
@@ -74,6 +85,51 @@ public class ChatMessageQueryService {
     public Mono<List<ChatMessageResponse>> hydrateMessages(String actorId,String conversationId,List<ChatMessageResponse> messages) {
         return hydrateStoryAvailability(new CursorPageResponse<>(messages,null,false))
             .flatMap(page->hydrateReactions(actorId,conversationId,page)).map(CursorPageResponse::items);
+    }
+
+    /** Batch-reads owner snapshots once per bounded message page; profile failure keeps chat rows readable. */
+    private Mono<List<ChatMessage>> hydrateMessageProfiles(List<ChatMessage> messages) {
+        if (messages.isEmpty() || userIdentityQuery == null || mediaCatalog == null) return Mono.just(messages);
+        List<String> userIds = messages.stream()
+                .flatMap(message -> java.util.stream.Stream.of(message.getSenderId(), message.getReplySenderId()))
+                .filter(id -> id != null && !id.isBlank())
+                .distinct()
+                .toList();
+        if (userIds.isEmpty()) return Mono.just(messages);
+        Mono<Map<String, UserIdentity>> identities = userIdentityQuery.findIdentities(userIds)
+                .collectMap(UserIdentity::userId)
+                .onErrorReturn(Map.of());
+        Mono<Map<String, MediaAssetView>> avatars = mediaCatalog.findCurrentAvatars(userIds)
+                .collectMap(MediaAssetView::ownerId)
+                .onErrorReturn(Map.of());
+        return Mono.zip(identities, avatars).map(snapshots -> {
+            Map<String, UserIdentity> identityById = snapshots.getT1();
+            Map<String, MediaAssetView> avatarByOwner = snapshots.getT2();
+            messages.forEach(message -> {
+                UserIdentity sender = identityById.get(message.getSenderId());
+                message.setSenderDisplayName(displayName(message.getSenderDisplayName(), sender, message.getSenderId()));
+                MediaAssetView avatar = avatarByOwner.get(message.getSenderId());
+                message.setSenderAvatarUrl(avatar == null ? null : firstNonBlank(avatar.secureUrl(), avatar.url()));
+                if (message.getReplySenderId() != null) {
+                    UserIdentity replySender = identityById.get(message.getReplySenderId());
+                    message.setReplySenderDisplayName(displayName(
+                            message.getReplySenderDisplayName(), replySender, message.getReplySenderId()));
+                }
+            });
+            return messages;
+        });
+    }
+
+    private String displayName(String chatNickname, UserIdentity identity, String fallbackId) {
+        return firstNonBlank(chatNickname,
+                identity == null ? null : identity.fullName(),
+                identity == null ? null : identity.username(),
+                fallbackId);
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) if (value != null && !value.isBlank()) return value;
+        return null;
     }
 
     private Mono<CursorPageResponse<ChatMessageResponse>> hydrateReactions(
@@ -102,13 +158,13 @@ public class ChatMessageQueryService {
         var references = page.items().stream()
                 .map(ChatMessageResponse::storyContext)
                 .filter(java.util.Objects::nonNull)
-                .map(context -> new StoryAvailabilityPort.StoryReference(
+                .map(context -> new StoryQuery.StoryReference(
                         context.storyId(), context.previewAtMs() == null ? 0L : context.previewAtMs()))
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         if (references.isEmpty()) {
             return Mono.just(page);
         }
-        return storyAvailabilityPort.resolve(references, Instant.now())
+        return storyQuery.resolve(references, Instant.now())
                 .map(resolved -> new CursorPageResponse<>(
                         page.items().stream()
                                 .map(message -> hydrateStoryContext(message, resolved))
@@ -119,15 +175,15 @@ public class ChatMessageQueryService {
 
     private ChatMessageResponse hydrateStoryContext(
             ChatMessageResponse message,
-            java.util.Map<StoryAvailabilityPort.StoryReference, StoryAvailabilityPort.StoryAvailability> resolved
+            java.util.Map<StoryQuery.StoryReference, StoryQuery.StoryAvailability> resolved
     ) {
         StoryContextResponse context = message.storyContext();
         if (context == null) {
             return message;
         }
-        StoryAvailabilityPort.StoryReference reference = new StoryAvailabilityPort.StoryReference(
+        StoryQuery.StoryReference reference = new StoryQuery.StoryReference(
                 context.storyId(), context.previewAtMs() == null ? 0L : context.previewAtMs());
-        StoryAvailabilityPort.StoryAvailability availability = resolved.get(reference);
+        StoryQuery.StoryAvailability availability = resolved.get(reference);
         StoryContextResponse hydrated = availability == null
                 ? new StoryContextResponse(
                         context.storyId(), context.storyOwnerId(), context.mediaType(), context.previewAtMs(),
@@ -143,21 +199,6 @@ public class ChatMessageQueryService {
                 message.likeCount(), message.isReact(), message.myReaction(), message.reactions(), message.reactionVersion(), message.forwarded());
     }
 
-    private Mono<CursorPageResponse<ChatMessageResponse>> markFetchedMessagesDelivered(
-            String actorId,
-            String conversationId,
-            CursorPageResponse<ChatMessageResponse> page
-    ) {
-        long deliveredSequence = page.items().stream()
-                .mapToLong(ChatMessageResponse::messageSeq)
-                .max()
-                .orElse(0L);
-        if (deliveredSequence <= 0) {
-            return Mono.just(page);
-        }
-        return cursorService.markDelivered(actorId, conversationId, deliveredSequence)
-                .thenReturn(page);
-    }
     private CursorPageResponse<ChatMessageResponse> toCursorPage(List<ChatMessage> rows, int pageSize, boolean backward) {
         List<ChatMessage> pageRows = new ArrayList<>(rows);
         boolean hasMore = pageRows.size() > pageSize;

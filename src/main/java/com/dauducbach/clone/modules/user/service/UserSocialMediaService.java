@@ -4,14 +4,13 @@ import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.modules.user.dto.request.UserSocialMediaRequest;
 import com.dauducbach.clone.modules.user.entity.UserSocialMedia;
-import com.dauducbach.clone.modules.user.repositoty.UserSocialMediaRepository;
-import com.dauducbach.clone.utils.RedisUtil;
+import com.dauducbach.clone.modules.user.profile.application.ProfileDataCache;
+import com.dauducbach.clone.modules.user.repository.UserSocialMediaRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
-import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -26,7 +25,7 @@ import java.util.UUID;
 public class UserSocialMediaService {
     UserSocialMediaRepository userSocialMediaRepository;
     R2dbcEntityTemplate r2dbcEntityTemplate;
-    ReactiveRedisTemplate<String, String> reactiveRedisStringTemplate;
+    ProfileDataCache profileDataCache;
 
     private static final Logger log = LoggerFactory.getLogger(UserSocialMediaService.class);
     private static final String CACHE_PREFIX = "user_social_media:";
@@ -54,14 +53,10 @@ public class UserSocialMediaService {
                         String.format("Save user social media failed for userId=%s", request.getUserId()),
                         throwable
                 ))
-                .doOnSuccess(savedSocialMedia -> {
-                    log.info("|UserSocialMediaService|createUserSocialMedia|created user social media|id={}", savedSocialMedia.getId());
-                    String jsonString = RedisUtil.serialize(savedSocialMedia);
-                    if (jsonString != null) {
-                        reactiveRedisStringTemplate.opsForValue().set(cacheKey, jsonString, CACHE_TTL).subscribe();
-                    }
-                    reactiveRedisStringTemplate.opsForValue().delete(listCacheKey).subscribe();
-                })
+                .flatMap(savedSocialMedia -> profileDataCache.put(cacheKey, savedSocialMedia, CACHE_TTL)
+                        .then(profileDataCache.evict(listCacheKey))
+                        .thenReturn(savedSocialMedia))
+                .doOnSuccess(savedSocialMedia -> log.info("|UserSocialMediaService|createUserSocialMedia|created user social media|id={}", savedSocialMedia.getId()))
                 .doOnError(error -> log.error("|UserSocialMediaService|createUserSocialMedia|failed to create|error={}", error.getMessage()));
     }
 
@@ -73,11 +68,9 @@ public class UserSocialMediaService {
                     if (request.getLink() != null && !request.getLink().isBlank()) existing.setLink(request.getLink().trim());
                     return userSocialMediaRepository.save(existing);
                 })
-                .doOnSuccess(updated -> {
-                    String json = RedisUtil.serialize(updated);
-                    if (json != null) reactiveRedisStringTemplate.opsForValue().set(CACHE_PREFIX + updated.getId(), json, CACHE_TTL).subscribe();
-                    reactiveRedisStringTemplate.opsForValue().delete(LIST_CACHE_PREFIX + updated.getUserId()).subscribe();
-                })
+                .flatMap(updated -> profileDataCache.put(CACHE_PREFIX + updated.getId(), updated, CACHE_TTL)
+                        .then(profileDataCache.evict(LIST_CACHE_PREFIX + updated.getUserId()))
+                        .thenReturn(updated))
                 .onErrorMap(error -> error instanceof AppException ? error : new AppException(
                         ErrorCode.USER_SOCIAL_MEDIA_SAVE_FAILED,
                         String.format("Update user social media failed for id=%s", request.getId()), error));
@@ -88,19 +81,8 @@ public class UserSocialMediaService {
 
         String cacheKey = CACHE_PREFIX + id;
 
-        return reactiveRedisStringTemplate.opsForValue().get(cacheKey)
-                .onErrorResume(error -> {
-                    log.warn("|UserSocialMediaService|getUserSocialMediaById|cache read failed, fallback to database|id={}|error={}", id, error.getMessage());
-                    return Mono.empty();
-                })
-                .flatMap(cachedJsonString -> {
-                    UserSocialMedia cached = RedisUtil.deserialize(cachedJsonString, UserSocialMedia.class);
-                    if (cached != null) {
-                        log.info("|UserSocialMediaService|getUserSocialMediaById|found in cache|id={}", id);
-                        return Mono.just(cached);
-                    }
-                    return Mono.empty();
-                })
+        return profileDataCache.find(cacheKey, UserSocialMedia.class)
+                .doOnNext(cached -> log.info("|UserSocialMediaService|getUserSocialMediaById|found in cache|id={}", id))
                 .switchIfEmpty(
                         userSocialMediaRepository.findById(id)
                                 .switchIfEmpty(Mono.error(new AppException(
@@ -114,13 +96,8 @@ public class UserSocialMediaService {
                                                 String.format("Fetch user social media failed for id=%s", id),
                                                 throwable
                                         ))
-                                .doOnSuccess(socialMedia -> {
-                                    log.info("|UserSocialMediaService|getUserSocialMediaById|found in database|id={}", id);
-                                    String jsonString = RedisUtil.serialize(socialMedia);
-                                    if (jsonString != null) {
-                                        reactiveRedisStringTemplate.opsForValue().set(cacheKey, jsonString, CACHE_TTL).subscribe();
-                                    }
-                                })
+                                .flatMap(socialMedia -> profileDataCache.put(cacheKey, socialMedia, CACHE_TTL).thenReturn(socialMedia)
+                                        .doOnNext(ignored -> log.info("|UserSocialMediaService|getUserSocialMediaById|found in database|id={}", id)))
                                 .doOnError(error -> log.error("|UserSocialMediaService|getUserSocialMediaById|failed to fetch|id={}|error={}", id, error.getMessage()))
                 );
     }
@@ -131,15 +108,11 @@ public class UserSocialMediaService {
 
         String listCacheKey = LIST_CACHE_PREFIX + userId;
 
-        return reactiveRedisStringTemplate.opsForValue().get(listCacheKey)
-                .onErrorResume(error -> {
-                    log.warn("|UserSocialMediaService|getUserSocialMediaByUserId|cache read failed, fallback to database|userId={}|error={}", userId, error.getMessage());
-                    return Mono.empty();
-                })
+        return profileDataCache.findList(listCacheKey, UserSocialMedia.class)
                 .flatMapMany(cachedJsonString -> {
                     if (cachedJsonString != null) {
                         log.info("|UserSocialMediaService|getUserSocialMediaByUserId|found list in cache|userId={}", userId);
-                        return Flux.fromIterable(RedisUtil.deserializeList(cachedJsonString, UserSocialMedia.class));
+                        return Flux.fromIterable(cachedJsonString);
                     }
                     return Flux.empty();
                 })
@@ -153,12 +126,9 @@ public class UserSocialMediaService {
                                 ))
                                 .doOnNext(socialMediaList -> {
                                     log.info("|UserSocialMediaService|getUserSocialMediaByUserId|found {} items in database|userId={}", socialMediaList.size(), userId);
-                                    String jsonString = RedisUtil.serialize(socialMediaList);
-                                    if (jsonString != null) {
-                                        reactiveRedisStringTemplate.opsForValue().set(listCacheKey, jsonString, CACHE_TTL).subscribe();
-                                    }
                                 })
-                                .flatMapMany(Flux::fromIterable)
+                                .flatMapMany(socialMediaList -> profileDataCache.put(listCacheKey, socialMediaList, CACHE_TTL)
+                                        .thenMany(Flux.fromIterable(socialMediaList)))
                                 .doOnError(error -> log.error("|UserSocialMediaService|getUserSocialMediaByUserId|failed to fetch|userId={}|error={}", userId, error.getMessage()))
                 );
     }
@@ -177,9 +147,9 @@ public class UserSocialMediaService {
                 .flatMap(socialMedia -> userSocialMediaRepository.deleteById(id)
                         .doOnSuccess(v -> {
                             log.info("|UserSocialMediaService|deleteUserSocialMedia|deleted|id={}", id);
-                            reactiveRedisStringTemplate.opsForValue().delete(cacheKey).subscribe();
-                            reactiveRedisStringTemplate.opsForValue().delete(LIST_CACHE_PREFIX + socialMedia.getUserId()).subscribe();
                         })
+                        .then(profileDataCache.evict(cacheKey))
+                        .then(profileDataCache.evict(LIST_CACHE_PREFIX + socialMedia.getUserId()))
                         .doOnError(error -> log.error("|UserSocialMediaService|deleteUserSocialMedia|failed to delete|id={}|error={}", id, error.getMessage()))
                         .onErrorMap(throwable -> throwable instanceof AppException
                                 ? throwable

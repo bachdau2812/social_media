@@ -7,7 +7,7 @@ import com.dauducbach.clone.modules.chat.constant.ConversationType;
 import com.dauducbach.clone.modules.chat.constant.MemberRole;
 import com.dauducbach.clone.modules.chat.constant.MemberStatus;
 import com.dauducbach.clone.modules.chat.constant.SystemMessageAction;
-import com.dauducbach.clone.modules.chat.dto.event.ChatEvent;
+import com.dauducbach.clone.modules.chat.publicapi.ChatEvent;
 import com.dauducbach.clone.modules.chat.dto.request.CreateDirectConversationRequest;
 import com.dauducbach.clone.modules.chat.dto.request.CreateGroupConversationRequest;
 import com.dauducbach.clone.modules.chat.dto.response.ConversationResponse;

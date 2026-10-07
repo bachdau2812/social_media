@@ -3,7 +3,6 @@ package com.dauducbach.clone.modules.feed.service;
 import com.dauducbach.clone.commons.exception.AppException;
 import com.dauducbach.clone.commons.exception.ErrorCode;
 import com.dauducbach.clone.configuration.PostPopularityProperties;
-import com.dauducbach.clone.modules.feed.constant.FeedCacheKeys;
 import com.dauducbach.clone.modules.feed.dto.FeedCursorState;
 import com.dauducbach.clone.modules.feed.dto.FeedSourceCursor;
 import com.dauducbach.clone.modules.feed.dto.response.FeedItemResponse;
@@ -12,12 +11,9 @@ import com.dauducbach.clone.modules.media.constant.MediaDisplayType;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -33,7 +29,7 @@ public class MixedFeedService {
     private final FriendFeedCandidateSource friends;
     private final PopularFeedCandidateSource popular;
     private final FeedItemHydrator hydrator;
-    private final ReactiveRedisTemplate<String, String> redis;
+    private final FeedSeenPostStore seenPosts;
     private final FeedCursorCodec codec;
     private final PostPopularityProperties properties;
 
@@ -92,38 +88,45 @@ public class MixedFeedService {
                 log.warn("|MixedFeedService|popular unavailable|viewer={}|error={}", viewer, error.getMessage());
                 return Mono.empty();
             });
-            return batch.flatMap(candidates -> consume(viewer, media, state, quota, candidates, 0,
-                            popularSource, seen, selectedIds, selected)
-                    .flatMap(lookahead -> {
+            return batch.flatMap(candidates -> {
+                List<String> hydrateIds = candidates.stream()
+                        .map(FeedCandidate::postId)
+                        .filter(postId -> !seen.contains(postId) && !selectedIds.contains(postId))
+                        .distinct()
+                        .toList();
+                return hydrator.hydratePage(viewer, hydrateIds, media)
+                        .map(items -> items.stream().collect(java.util.stream.Collectors.toMap(
+                                FeedItemResponse::postId, item -> item, (first, ignored) -> first)))
+                        .flatMap(itemsById -> consume(state, quota, candidates, itemsById, 0,
+                                popularSource, seen, selectedIds, selected)
+                                .flatMap(lookahead -> {
                         if (lookahead) return Mono.empty();
                         if (candidates.size() < requested) state.exhausted = true;
                         return scan(viewer, media, state, quota, source, popularSource, seen, selectedIds, selected);
-                    }));
+                                }));
+            });
         });
     }
 
-    private Mono<Boolean> consume(String viewer, MediaDisplayType media, Scan state, int quota,
-                                  List<FeedCandidate> batch, int index, boolean popularSource,
+    private Mono<Boolean> consume(Scan state, int quota, List<FeedCandidate> batch,
+                                  java.util.Map<String, FeedItemResponse> itemsById, int index, boolean popularSource,
                                   Set<String> seen, Set<String> selectedIds, List<FeedItemResponse> selected) {
         return Mono.defer(() -> {
             if (index >= batch.size()) return Mono.just(false);
             if (state.scanned >= scanBudget()) return Mono.just(true);
             FeedCandidate candidate = batch.get(index);
             state.scanned++;
-            Mono<FeedItemResponse> eligible = seen.contains(candidate.postId()) || selectedIds.contains(candidate.postId())
-                    ? Mono.empty() : hydrator.hydrate(viewer, candidate.postId(), media);
-            return eligible.map(java.util.Optional::of).defaultIfEmpty(java.util.Optional.empty())
-                    .flatMap(item -> {
-                        if (item.isPresent() && state.returned >= quota) return Mono.just(true);
-                        state.anchor = new FeedSourceCursor(candidate.sourceOrderTimeMillis(), candidate.postId(), candidate.sourceOrderTime());
-                        if (item.isPresent()) {
-                            selectedIds.add(candidate.postId());
-                            state.returned++;
-                            selected.add(item.get().withRecommendation(popularSource ? "POPULAR" : "FRIENDS",
-                                    popularSource ? "popular_post" : "friend_post", FeedCursorCodec.VERSION));
-                        }
-                        return consume(viewer, media, state, quota, batch, index + 1, popularSource, seen, selectedIds, selected);
-                    });
+            FeedItemResponse item = seen.contains(candidate.postId()) || selectedIds.contains(candidate.postId())
+                    ? null : itemsById.get(candidate.postId());
+            if (item != null && state.returned >= quota) return Mono.just(true);
+            state.anchor = new FeedSourceCursor(candidate.sourceOrderTimeMillis(), candidate.postId(), candidate.sourceOrderTime());
+            if (item != null) {
+                selectedIds.add(candidate.postId());
+                state.returned++;
+                selected.add(item.withRecommendation(popularSource ? "POPULAR" : "FRIENDS",
+                        popularSource ? "popular_post" : "friend_post", FeedCursorCodec.VERSION));
+            }
+            return consume(state, quota, batch, itemsById, index + 1, popularSource, seen, selectedIds, selected);
         });
     }
 
@@ -138,18 +141,15 @@ public class MixedFeedService {
     }
 
     private Mono<Set<String>> loadSeen(String viewer) {
-        return redis.opsForList().range(FeedCacheKeys.seenPost(viewer), 0, -1).collectList()
-                .map(ids -> (Set<String>) new HashSet<>(ids)).onErrorResume(error -> {
-                    log.warn("|MixedFeedService|seen read unavailable|viewer={}|error={}", viewer, error.getMessage());
-                    return Mono.just(new HashSet<>());
-                });
+        return seenPosts.load(viewer).onErrorResume(error -> {
+            log.warn("|MixedFeedService|seen read unavailable|viewer={}|error={}", viewer, error.getMessage());
+            return Mono.just(new HashSet<>());
+        });
     }
     private Mono<Void> markSeen(String viewer, List<FeedItemResponse> items) {
         if (items.isEmpty()) return Mono.empty();
-        String key = FeedCacheKeys.seenPost(viewer);
-        return Flux.fromIterable(items).concatMap(item -> redis.opsForList().rightPush(key, item.postId()))
-                .then(redis.opsForList().trim(key, -1000, -1)).then(redis.expire(key, Duration.ofDays(5)))
-                .then().onErrorResume(error -> {
+        return seenPosts.mark(viewer, items.stream().map(FeedItemResponse::postId).toList())
+                .onErrorResume(error -> {
                     log.warn("|MixedFeedService|seen write unavailable|viewer={}|error={}", viewer, error.getMessage());
                     return Mono.empty();
                 });

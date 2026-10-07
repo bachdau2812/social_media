@@ -1,6 +1,6 @@
 package com.dauducbach.clone.modules.post.service.post;
 import com.dauducbach.clone.modules.post.elastic.PostVector;
-import com.dauducbach.clone.infrastructure.vector.VectorMath;
+import com.dauducbach.clone.commons.vector.VectorMath;
 import co.elastic.clients.elasticsearch.core.*;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.elasticsearch._types.*;
