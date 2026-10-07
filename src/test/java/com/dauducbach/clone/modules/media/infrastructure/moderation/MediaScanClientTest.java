@@ -19,14 +19,14 @@ class MediaScanClientTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"{\"data\":{}}", "{\"data\":{\"is_nsfw\":null}}", "{\"data\":{\"is_nsfw\":\"false\"}}", "{\"data\":{\"is_nsfw\":0}}", ""})
-    void scanMediaRejectsResponsesWithoutAnExplicitBooleanDecision(String response) {
+    void scanMediaFailsWhenScannerResponseDoesNotContainAnExplicitBooleanDecision(String response) {
         MediaScanClient utils = newClient(request -> Mono.just(ClientResponse.create(HttpStatus.OK)
                 .body(request.url().toString().equals("http://scan.local/api") ? response : "image-bytes")
                 .build()));
 
         StepVerifier.create(utils.scanMedia("https://cdn.example.com/image.png", "folder/image"))
-                .expectNextMatches(MediaScanClient.ScanResult::nsfw)
-                .verifyComplete();
+                .expectError()
+                .verify();
     }
 
     @Test
@@ -56,22 +56,36 @@ class MediaScanClientTest {
     }
 
     @Test
-    void scanMediaReturnsRejectedWhenDownloadFails() {
+    void scanMediaPropagatesDownloadFailuresInsteadOfTreatingThemAsModerationRejections() {
         MediaScanClient utils = newClient(request -> Mono.error(new IllegalStateException("download failed")));
 
         StepVerifier.create(utils.scanMedia("https://cdn.example.com/media/image.jpg", "folder/image"))
-                .expectNextMatches(MediaScanClient.ScanResult::nsfw)
-                .verifyComplete();
+                .expectErrorMessage("download failed")
+                .verify();
     }
 
     @Test
-    void scanMediaReturnsRejectedWhenDownloadDoesNotFinishBeforeTimeout() {
+    void scanMediaPropagatesDownloadTimeoutInsteadOfTreatingItAsModerationRejection() {
         MediaScanClient utils = newClient(request -> Mono.never());
         ReflectionTestUtils.setField(utils, "scanTimeout", Duration.ofMillis(10));
 
         StepVerifier.create(utils.scanMedia("https://cdn.example.com/media/image.jpg", "folder/image"))
-                .expectNextMatches(MediaScanClient.ScanResult::nsfw)
-                .verifyComplete();
+                .expectError(java.util.concurrent.TimeoutException.class)
+                .verify();
+    }
+
+    @Test
+    void scanMediaPropagatesScannerApiFailuresInsteadOfTreatingThemAsModerationRejections() {
+        MediaScanClient utils = newClient(request -> {
+            if (request.url().toString().equals("http://scan.local/api")) {
+                return Mono.error(new IllegalStateException("scanner unavailable"));
+            }
+            return Mono.just(ClientResponse.create(HttpStatus.OK).body("fake-image-bytes").build());
+        });
+
+        StepVerifier.create(utils.scanMedia("https://cdn.example.com/media/image.jpg", "folder/image"))
+                .expectErrorMessage("scanner unavailable")
+                .verify();
     }
 
     private MediaScanClient newClient(ExchangeFunction exchangeFunction) {

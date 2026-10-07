@@ -48,6 +48,12 @@ public class PostContentQueryService {
                         })));
     }
 
+    public Mono<Long> findAuthorPostPosition(String userId, String postId) {
+        return postDetailsRepository.findApprovedFeedEligibleById(postId)
+                .filter(post -> userId.equals(post.getUserId()))
+                .flatMap(post -> postDetailsRepository.countEligibleAuthorPostsBefore(userId, post.getCreatedAt(), postId));
+    }
+
     public Flux<PostDetails> findByAuthorId(String userId, int page, int size) {
         int limit = size <= 0 ? 10 : Math.min(size, 50);
         int offset = Math.max(page, 0) * limit;

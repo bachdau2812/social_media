@@ -45,5 +45,6 @@ build/
 /visibility-red.log
 
 logs/
-
+src/main/resources/images
+src/main/resources/db/manual
 .superpowers/

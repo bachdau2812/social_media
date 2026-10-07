@@ -85,6 +85,7 @@ public class ChatReadRepository {
                 LEFT JOIN messages last_message ON last_message.id = c.last_message_id
                 WHERE cm.user_id = :userId
                   AND cm.member_status = 'ACTIVE'
+                  AND c.last_message_seq > 0
                   AND (c.conversation_type = 'GROUP' OR cm.last_deleted_message_seq IS NULL OR c.last_message_seq > cm.last_deleted_message_seq)
                 """;
 

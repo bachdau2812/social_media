@@ -29,6 +29,18 @@ class StoryLibraryControllerTest {
     @Mock Authentication authentication;
 
     @Test
+    void viewersUseAuthenticatedOwnerAndForwardSearchQuery() {
+        when(authentication.getName()).thenReturn("real-owner");
+        var page = com.dauducbach.clone.commons.response.PageResponse.<com.dauducbach.clone.modules.post.dto.story.response.StoryViewerResponse>of(
+                List.of(), 0, 0, 20);
+        when(storyLibraryService.viewers("story", "real-owner", 0, 20, "mai")).thenReturn(Mono.just(page));
+        var controller = new StoryLibraryController(storyLibraryService, storyReactionService);
+        StepVerifier.create(controller.viewers("story", "spoofed-owner", 0, 20, "mai", authentication))
+                .assertNext(response -> assertThat(response.getResult()).isEqualTo(page)).verifyComplete();
+        org.mockito.Mockito.verify(storyLibraryService).viewers("story", "real-owner", 0, 20, "mai");
+    }
+
+    @Test
     void likeStoryLogsRequestAndCompletionWithStableIds() {
         when(authentication.getName()).thenReturn("actor-1");
         when(storyReactionService.like("story-1", "actor-1")).thenReturn(Mono.just(true));

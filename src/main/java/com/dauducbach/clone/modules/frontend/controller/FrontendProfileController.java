@@ -20,6 +20,18 @@ import reactor.core.publisher.Mono;
 public class FrontendProfileController {
     private final ProfileScreenService service;
 
+    @GetMapping("/{userId}/posts")
+    public Mono<ApiResponse<com.dauducbach.clone.modules.frontend.dto.ProfilePostsPageResponse>> getPosts(
+            @PathVariable String userId, @RequestParam(required = false) String viewerId,
+            Authentication authentication, @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "18") int size, @RequestParam(required = false) String selectedPostId) {
+        String viewer = viewerId == null || viewerId.isBlank() ? authentication.getName()
+                : ActorIdentity.require(authentication.getName(), viewerId);
+        return service.getPosts(viewer, userId, page, size, selectedPostId)
+                .map(result -> ApiResponse.<com.dauducbach.clone.modules.frontend.dto.ProfilePostsPageResponse>builder()
+                        .message("Profile posts fetched").result(result).build());
+    }
+
     @GetMapping("/{userId}/summary")
     public Mono<ApiResponse<ProfileSummaryResponse>> getProfile(
             @PathVariable String userId,

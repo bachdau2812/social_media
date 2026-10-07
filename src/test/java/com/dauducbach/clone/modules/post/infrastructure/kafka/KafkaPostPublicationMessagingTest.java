@@ -4,6 +4,10 @@ import com.dauducbach.clone.modules.post.dto.event.PostMediaScanItem;
 import com.dauducbach.clone.modules.post.entity.PostDetails;
 import com.dauducbach.clone.modules.post.service.post.PostSseService;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.core.env.MapPropertySource;
+import org.springframework.kafka.annotation.KafkaListener;
+import com.dauducbach.clone.modules.post.service.post.ImageScanWorker;
 import org.reactivestreams.Publisher;
 import org.mockito.ArgumentCaptor;
 import reactor.core.publisher.Flux;
@@ -14,6 +18,7 @@ import reactor.kafka.sender.SenderResult;
 import reactor.test.StepVerifier;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -74,5 +79,47 @@ class KafkaPostPublicationMessagingTest {
         PostDetails post = PostDetails.builder().postId("post-1").userId("user-1").content("hello").build();
 
         StepVerifier.create(messaging.publishUpdated(post)).expectErrorMatches(error -> error == failure).verify();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void propagatesKafkaSenderResultFailuresForMediaScanRequests() {
+        RuntimeException failure = new IllegalStateException("broker rejected");
+        SenderResult<String> result = mock(SenderResult.class);
+        when(result.exception()).thenReturn(failure);
+        doReturn(Flux.just(result)).when(kafkaSender).<String>send(any());
+
+        StepVerifier.create(messaging.requestMediaScan("post-1", "user-1", List.of()))
+                .expectErrorMatches(error -> error == failure)
+                .verify();
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void configuredScanTopicIsSharedByPublisherAndWorkerWithoutChangingPublicationTopics() throws Exception {
+        try (var context = new AnnotationConfigApplicationContext()) {
+            context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("test", Map.of(
+                    "post.media.scan.topic", "check_media_event_test_local",
+                    "post.media.scan.consumer-group", "post-media-scan-test-local")));
+            context.registerBean(KafkaSender.class, () -> kafkaSender);
+            context.registerBean(PostSseService.class, () -> postSseService);
+            context.registerBean(KafkaPostPublicationMessaging.class);
+            context.refresh();
+            doReturn(Flux.empty()).when(kafkaSender).<String>send(any());
+            var configured = context.getBean(KafkaPostPublicationMessaging.class);
+            configured.requestMediaScan("post-1", "user-1", List.of()).block();
+            configured.publishUpdated(PostDetails.builder().postId("post-1").build()).block();
+            ArgumentCaptor<Publisher<SenderRecord<String, String, String>>> captor =
+                    (ArgumentCaptor) ArgumentCaptor.forClass(Publisher.class);
+            verify(kafkaSender, times(2)).<String>send(captor.capture());
+            assertThat(captor.getAllValues().stream().map(p -> Flux.from(p).blockFirst().topic()).toList())
+                    .containsExactly("check_media_event_test_local", "post_update_event");
+            KafkaListener listener = ImageScanWorker.class.getMethod("handlePostScanEvent", String.class)
+                    .getAnnotation(KafkaListener.class);
+            assertThat(context.getEnvironment().resolveRequiredPlaceholders(listener.topics()[0]))
+                    .isEqualTo("check_media_event_test_local");
+            assertThat(context.getEnvironment().resolveRequiredPlaceholders(listener.groupId()))
+                    .isEqualTo("post-media-scan-test-local");
+        }
     }
 }

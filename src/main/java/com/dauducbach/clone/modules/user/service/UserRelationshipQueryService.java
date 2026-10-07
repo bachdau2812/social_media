@@ -123,6 +123,13 @@ public class UserRelationshipQueryService implements UserRelationshipQuery {
     }
 
     @Override
+    public Flux<String> findFollowingIds(String followerId, java.util.Collection<String> candidateIds) {
+        var ids = candidateIds == null ? java.util.List.<String>of() : candidateIds.stream()
+                .filter(id -> id != null && !id.isBlank()).distinct().toList();
+        return ids.isEmpty() ? Flux.empty() : userFollowerRepository.findFollowingIds(followerId, ids);
+    }
+
+    @Override
     public Flux<String> getFollowerIdsForFeedBroadcast(String userId) {
         if (userId == null || userId.isBlank()) {
             return Flux.empty();

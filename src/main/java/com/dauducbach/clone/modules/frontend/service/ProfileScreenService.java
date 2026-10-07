@@ -29,6 +29,16 @@ public class ProfileScreenService {
     private final UserIdentityQuery userIdentityQueryService;
     private final PostProfileQuery postProfileQueryService;
 
+    public Mono<com.dauducbach.clone.modules.frontend.dto.ProfilePostsPageResponse> getPosts(
+            String viewerId, String userId, int page, int size, String selectedPostId) {
+        return postProfileQueryService.getPostsPage(viewerId, userId, page, size, selectedPostId)
+                .map(result -> new com.dauducbach.clone.modules.frontend.dto.ProfilePostsPageResponse(
+                        result.userId(), result.posts().stream().map(row ->
+                            new com.dauducbach.clone.modules.frontend.dto.ProfilePostsPageResponse.TimelinePostResponse(
+                                toProfilePost(row.post()), row.savedByCurrentUser())).toList(),
+                        result.pageNumber(), result.pageSize(), result.hasMore(), result.hasPrevious(), result.selectedPostFound()));
+    }
+
     public Mono<ProfileSummaryResponse> getProfile(String viewerId, String userId, int postLimit) {
         int safePostLimit = postLimit <= 0 ? 12 : Math.min(postLimit, 50);
         String safeViewer = viewerId == null || viewerId.isBlank() ? userId : viewerId;

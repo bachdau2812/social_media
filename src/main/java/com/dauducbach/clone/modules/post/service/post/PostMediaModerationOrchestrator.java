@@ -16,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -44,6 +45,7 @@ public class PostMediaModerationOrchestrator {
     private final KafkaSender<String, String> kafkaSender;
     private final MediaModerationProvider moderationProvider;
     private final PostVectorService postVectorService;
+    private final R2dbcEntityTemplate r2dbcEntityTemplate;
 
     public Mono<Void> process(String postId, String userId, List<PostMediaScanItem> items) {
         if (postId == null || postId.isBlank() || userId == null || userId.isBlank()
@@ -51,32 +53,37 @@ public class PostMediaModerationOrchestrator {
             return Mono.empty();
         }
         return claimPendingPost(postId)
+                .doOnNext(claimed -> {
+                    if (claimed) {
+                        log.info("|PostMediaModerationOrchestrator|process|claimed|postId={}|itemCount={}", postId, items.size());
+                    } else {
+                        log.warn("|PostMediaModerationOrchestrator|process|skipped|postId={}|reason=not_pending_or_already_claimed", postId);
+                    }
+                })
                 .flatMap(claimed -> claimed
                         ? processClaimedPost(postId, userId, items)
+                                .doOnSuccess(unused -> log.info(
+                                        "|PostMediaModerationOrchestrator|process|completed|postId={}", postId))
+                                .doOnError(error -> log.error(
+                                        "|PostMediaModerationOrchestrator|process|discarding|postId={}|error={}", postId, error.getMessage()))
+                                .onErrorResume(error -> discardFailedPost(postId, items)
+                                        .onErrorResume(cleanupError -> recordSecondaryFailure(postId, "cleanup", error, cleanupError))
+                                        .then(Mono.defer(() -> sendPostFailureSse(userId, postId,
+                                                "Bài viết không thể xử lý media, vui lòng thử lại"))
+                                                .onErrorResume(notificationError -> recordSecondaryFailure(
+                                                        postId, "failureNotification", error, notificationError)))
+                                        .then(Mono.error(error)))
                         : Mono.empty())
-                .doOnSuccess(unused -> log.info(
-                        "|PostMediaModerationOrchestrator|process|completed|postId={}", postId))
                 .doOnError(error -> log.error(
                         "|PostMediaModerationOrchestrator|process|failed|postId={}|error={}",
-                        postId, error.getMessage()))
-                .onErrorResume(error -> releaseClaim(postId)
-                        .then(sendPostFailureSse(
-                                userId,
-                                postId,
-                                "Bài viết không thể xử lý media, vui lòng thử lại"))
-                        .then(Mono.error(error)));
+                        postId, error.getMessage()));
     }
 
     public Mono<Void> scanAdditionalPostItems(String postId, List<PostMediaScanItem> items) {
         if (items == null || items.isEmpty()) {
             return Mono.empty();
         }
-        return scanAndPersistItems(postId, items)
-                .flatMap(outcomes -> outcomes.stream().anyMatch(PostScanOutcome::processingFailure)
-                        ? Mono.error(new AppException(
-                                ErrorCode.POST_UPDATE_FAILED,
-                                "One or more new media items could not be processed"))
-                        : Mono.empty());
+        return scanAndPersistItems(postId, items).then();
     }
 
     private Mono<Boolean> claimPendingPost(String postId) {
@@ -84,11 +91,6 @@ public class PostMediaModerationOrchestrator {
                         postId, STATUS_PENDING, STATUS_PROCESSING, Instant.now())
                 .map(updated -> updated > 0)
                 .defaultIfEmpty(false);
-    }
-
-    private Mono<Void> releaseClaim(String postId) {
-        return postDetailsRepository.releaseMediaScanClaim(
-                postId, STATUS_PENDING, STATUS_PROCESSING, Instant.now()).then();
     }
 
     private Mono<Void> processClaimedPost(String postId, String userId, List<PostMediaScanItem> items) {
@@ -107,6 +109,12 @@ public class PostMediaModerationOrchestrator {
 
     private Mono<PostScanOutcome> scanAndSavePostItem(String postId, PostMediaScanItem item) {
         return moderationProvider.scan(item.getSecureUrl(), item.getPublicId(), item.getResourceType())
+                .doOnSubscribe(subscription -> log.info(
+                        "|PostMediaModerationOrchestrator|scanAndSavePostItem|started|postId={}|publicId={}|resourceType={}",
+                        postId, item.getPublicId(), item.getResourceType()))
+                .doOnNext(decision -> log.info(
+                        "|PostMediaModerationOrchestrator|scanAndSavePostItem|decision|postId={}|publicId={}|decision={}",
+                        postId, item.getPublicId(), decision))
                 .flatMap(decision -> {
                     if (decision == MediaModerationProvider.Decision.REJECTED) {
                         return mediaAssets.deleteAsset(item.getPublicId())
@@ -115,13 +123,9 @@ public class PostMediaModerationOrchestrator {
                     return mediaAssets.fetchRemoteAsset(item.getPublicId())
                             .flatMap(media -> persistAllowedItem(postId, item, media));
                 })
-                .onErrorResume(error -> {
-                    log.error(
-                            "|PostMediaModerationOrchestrator|scanAndSavePostItem|postId={}|publicId={}|error={}",
-                            postId, item.getPublicId(), error.getMessage());
-                    return mediaAssets.deleteAsset(item.getPublicId())
-                            .thenReturn(PostScanOutcome.failed(item, "PROCESSING_ERROR"));
-                });
+                .doOnError(error -> log.error(
+                        "|PostMediaModerationOrchestrator|scanAndSavePostItem|postId={}|publicId={}|error={}",
+                        postId, item.getPublicId(), error.getMessage()));
     }
 
     private Mono<PostScanOutcome> persistAllowedItem(
@@ -133,8 +137,10 @@ public class PostMediaModerationOrchestrator {
             return mediaAssets.deleteAsset(item.getPublicId())
                     .thenReturn(PostScanOutcome.rejected(item, "INVALID_MEDIA"));
         }
-                    return mediaAssets.registerFetchedAsset(media, postId, OwnerType.POST)
-                .flatMap(savedMedia -> postItemRepository.save(buildPostItem(postId, item, savedMedia))
+        return mediaAssets.registerFetchedAsset(media, postId, OwnerType.POST)
+                // The UUID is assigned before persistence: save() would attempt an UPDATE.
+                .flatMap(savedMedia -> r2dbcEntityTemplate.insert(PostItem.class)
+                        .using(buildPostItem(postId, item, savedMedia))
                         .thenReturn(PostScanOutcome.approved(item)));
     }
 
@@ -163,22 +169,13 @@ public class PostMediaModerationOrchestrator {
     ) {
         long rejectedCount = outcomes.stream().filter(outcome -> !outcome.approved()).count();
         long approvedCount = outcomes.size() - rejectedCount;
-        long processingFailureCount = outcomes.stream()
-                .filter(PostScanOutcome::processingFailure)
-                .count();
-
+        log.info("|PostMediaModerationOrchestrator|finalizePostScan|postId={}|approvedCount={}|rejectedCount={}",
+                postId, approvedCount, rejectedCount);
         return postDetailsRepository.findById(postId)
                 .switchIfEmpty(Mono.error(new AppException(
                         ErrorCode.POST_NOT_FOUND,
                         "Post not found for scan result")))
                 .flatMap(post -> {
-                    if (processingFailureCount > 0) {
-                        return cleanupFailedPost(postId, outcomes)
-                                .then(sendPostFailureSse(
-                                        userId,
-                                        postId,
-                                        "Bài viết không thể xử lý, vui lòng thử lại"));
-                    }
                     if (approvedCount <= 0) {
                         return cleanupFailedPost(postId, outcomes)
                                 .then(sendPostFailureSse(
@@ -195,35 +192,64 @@ public class PostMediaModerationOrchestrator {
                                     "Bài viết được đăng tải thành công, có %d ảnh/video bị xóa do vi phạm tiêu chuẩn cộng đồng",
                                     rejectedCount);
                     return postDetailsRepository.save(post)
-                            .flatMap(saved -> sendPostSuccessSse(userId, saved, message)
-                                    .then(sendPostUploadEvent(saved)));
+                            .flatMap(saved -> sendPostUploadEvent(saved)
+                                    .then(Mono.defer(() -> sendPostSuccessSse(userId, saved, message))));
                 });
     }
 
     private Mono<Void> cleanupFailedPost(String postId, List<PostScanOutcome> outcomes) {
-        List<String> publicIds = outcomes.stream()
-                .map(PostScanOutcome::item)
+        return discardFailedPost(postId, outcomes.stream().map(PostScanOutcome::item).toList());
+    }
+
+    /** Compensate failed creation using all uploaded inputs, including items not yet scanned. */
+    public Mono<Void> discardFailedPost(String postId, List<PostMediaScanItem> items) {
+        List<String> publicIds = items.stream()
                 .map(PostMediaScanItem::getPublicId)
                 .filter(publicId -> publicId != null && !publicId.isBlank())
                 .distinct()
                 .toList();
 
-        return postDetailsRepository.findById(postId).map(java.util.Optional::of).defaultIfEmpty(java.util.Optional.empty())
+        return Mono.defer(() -> postDetailsRepository.findById(postId))
+                .doOnSubscribe(subscription -> log.info(
+                        "|PostMediaModerationOrchestrator|discardFailedPost|started|postId={}|assetCount={}", postId, publicIds.size()))
+                .map(java.util.Optional::of)
+                .onErrorResume(error -> {
+                    log.error("|PostMediaModerationOrchestrator|discardFailedPost|lookup|postId={}|error={}",
+                            postId, error.getMessage());
+                    return Mono.empty();
+                })
+                .defaultIfEmpty(java.util.Optional.empty())
                 .flatMap(source -> {
-                    if (source.isEmpty()) return postVectorService.rebuild(postId);
-                    String authorId = source.get().getUserId();
-                    return mediaAssets.deleteAssets(publicIds)
-                .then(postItemRepository.deleteByPostId(postId))
-                .then(mediaAssets.deleteAssetsForOwner(postId, OwnerType.POST))
-                .then(redisTemplate.opsForValue().delete(POST_CACHE_PREFIX + postId).then())
-                .then(postDetailsRepository.deleteById(postId))
-                .doOnError(error -> log.error(
-                        "|PostMediaModerationOrchestrator|cleanupFailedPost|postId={}|error={}",
-                        postId, error.getMessage()))
-                .onErrorResume(error -> postDetailsRepository.deleteById(postId).then())
-                // Fence only after SQL deletion succeeds, outside the best-effort asset-cleanup boundary.
-                .then(Mono.defer(() -> postVectorService.deletePost(postId, authorId)));
+                    // Each best-effort step runs even when another cleanup dependency fails.
+                    // Remote deletion must run even if creating/finding the post failed.
+                    return cleanupStep(postId, "cloudinary", () -> mediaAssets.deleteAssets(publicIds))
+                            .then(cleanupStep(postId, "items", () -> postItemRepository.deleteByPostId(postId)))
+                            .then(cleanupStep(postId, "media", () -> mediaAssets.deleteAssetsForOwner(postId, OwnerType.POST)))
+                            .then(cleanupStep(postId, "cache", () -> redisTemplate.opsForValue()
+                                    .delete(POST_CACHE_PREFIX + postId).then()))
+                            .then(Mono.defer(() -> postDetailsRepository.deleteById(postId)))
+                            // Fence only after SQL deletion succeeds.
+                            .then(Mono.defer(() -> source.isPresent()
+                                    ? postVectorService.deletePost(postId, source.get().getUserId())
+                                    : postVectorService.rebuild(postId)));
                 });
+    }
+
+    private Mono<Void> cleanupStep(String postId, String step, java.util.function.Supplier<Mono<Void>> action) {
+        return Mono.defer(action).doOnSuccess(unused -> log.info(
+                "|PostMediaModerationOrchestrator|discardFailedPost|stepCompleted|step={}|postId={}", step, postId))
+                .onErrorResume(error -> {
+                    log.error("|PostMediaModerationOrchestrator|discardFailedPost|step={}|postId={}|error={}",
+                            step, postId, error.getMessage());
+                    return Mono.empty();
+                });
+    }
+
+    private Mono<Void> recordSecondaryFailure(String postId, String step, Throwable original, Throwable secondary) {
+        if (original != secondary) original.addSuppressed(secondary);
+        log.error("|PostMediaModerationOrchestrator|process|step={}|postId={}|error={}",
+                step, postId, secondary.getMessage());
+        return Mono.empty();
     }
 
     private Mono<Void> sendPostSuccessSse(String userId, PostDetails post, String message) {
@@ -283,12 +309,5 @@ public class PostMediaModerationOrchestrator {
             return new PostScanOutcome(item, false, reason);
         }
 
-        static PostScanOutcome failed(PostMediaScanItem item, String reason) {
-            return new PostScanOutcome(item, false, reason);
-        }
-
-        boolean processingFailure() {
-            return "PROCESSING_ERROR".equals(reason);
-        }
     }
 }

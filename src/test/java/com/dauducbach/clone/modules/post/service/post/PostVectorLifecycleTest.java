@@ -10,6 +10,8 @@ import com.dauducbach.clone.modules.media.publicapi.MediaAssets;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.data.redis.core.ReactiveValueOperations;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
 import org.springframework.data.redis.core.*;
 import reactor.core.publisher.*;
@@ -91,7 +93,28 @@ class PostVectorLifecycleTest {
     @Test void approvedTextCreatePublishesFromPersistedPost() {
         when(sql.insert(PostDetails.class).using(any(PostDetails.class))).thenAnswer(i -> Mono.fromSupplier(() -> { trace.add("sql-insert"); return i.getArgument(0); }));
         PostCreateRequest create = new PostCreateRequest(); create.setUserId("a"); create.setContent("hello"); create.setHashtags(List.of("tag"));
-        service.createPost(create).block(); assertThat(trace).containsExactly("sql-insert", "event:post_upload_event");
+        var response = service.createPost(create).block();
+        assertThat(response.getMessage()).isEqualTo("Bài viết đã được đăng tải thành công.");
+        assertThat(trace).containsExactly("sql-insert", "event:post_upload_event");
+    }
+    @Test void mediaCreateReturnsReadablePendingModerationMessage() {
+        when(sql.insert(PostDetails.class).using(any(PostDetails.class))).thenAnswer(i -> Mono.just(i.getArgument(0)));
+        when(publicationMessaging.requestMediaScan(anyString(), eq("a"), anyList())).thenReturn(Mono.empty());
+        PostItemCreateRequest item = PostItemCreateRequest.builder()
+                .orderNumber(1)
+                .secureUrl("https://cdn.example.com/image.jpg")
+                .publicId("posts/image")
+                .resourceType("image")
+                .build();
+        PostCreateRequest create = PostCreateRequest.builder()
+                .userId("a")
+                .content("")
+                .items(List.of(item))
+                .build();
+
+        var response = service.createPost(create).block();
+
+        assertThat(response.getMessage()).isEqualTo("Bài viết đã được gửi và đang chờ kiểm duyệt.");
     }
     @Test void publicationFailureCannotTurnAnUpdateIntoSuccessfulPublish() {
         when(posts.findById("p")).thenReturn(Mono.just(PostVectorServiceTest.post("old")));
@@ -102,6 +125,22 @@ class PostVectorLifecycleTest {
         PostUpdateRequest update = new PostUpdateRequest(); update.setPostId("p"); update.setUserId("a"); update.setContent("new");
         StepVerifier.create(service.updatePost(update)).expectErrorMatches(e -> e.getCause() == failure).verify();
     }
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void failedMediaCreationCompensatesBothInsertAndScanPublicationFailure(boolean insertFails) {
+        RuntimeException failure = new IllegalStateException(insertFails ? "SQL unavailable" : "Kafka unavailable");
+        when(sql.insert(PostDetails.class).using(any(PostDetails.class))).thenAnswer(i ->
+                insertFails ? Mono.error(failure) : Mono.just(i.getArgument(0)));
+        when(publicationMessaging.requestMediaScan(anyString(), anyString(), anyList())).thenReturn(Mono.error(failure));
+        when(moderation.discardFailedPost(anyString(), anyList())).thenReturn(Mono.empty());
+        PostCreateRequest create = PostCreateRequest.builder().userId("a").content("")
+                .items(List.of(PostItemCreateRequest.builder().orderNumber(1)
+                        .secureUrl("https://cdn.example.com/image.jpg").publicId("posts/image").resourceType("image").build()))
+                .build();
+        StepVerifier.create(service.createPost(create)).expectErrorMatches(e -> e.getCause() == failure).verify();
+        verify(moderation).discardFailedPost(anyString(), argThat(scanItems -> scanItems.size() == 1
+                && "posts/image".equals(scanItems.getFirst().getPublicId())));
+    }
     @Test void rejectedModerationCleanupFencesSourceEvenWhenAssetCleanupFails() throws Exception {
         when(posts.findById("p")).thenReturn(Mono.just(PostVectorServiceTest.post("text")));
         MediaAssets assets = mock(MediaAssets.class);
@@ -111,7 +150,7 @@ class PostVectorLifecycleTest {
         when(posts.deleteById("p")).thenReturn(Mono.fromRunnable(() -> trace.add("sql-delete")));
         when(items.deleteByPostId("p")).thenReturn(Mono.empty());
         PostMediaModerationOrchestrator orchestrator = new PostMediaModerationOrchestrator(posts, assets, items, redis, sse, kafka,
-                mock(MediaModerationProvider.class), vectors);
+                mock(MediaModerationProvider.class), vectors, sql);
         var cleanup = PostMediaModerationOrchestrator.class.getDeclaredMethod("cleanupFailedPost", String.class, List.class); cleanup.setAccessible(true);
         ((Mono<Void>)cleanup.invoke(orchestrator, "p", List.of())).block();
         assertThat(trace).containsExactly("sql-delete", "fence:p");

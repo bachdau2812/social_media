@@ -17,6 +17,7 @@ import com.dauducbach.clone.modules.post.repository.story.StoryViewRepository;
 import com.dauducbach.clone.modules.post.repository.story.StoryViewQueryRepository;
 import com.dauducbach.clone.modules.post.repository.story.projection.StoryViewerRow;
 import com.dauducbach.clone.modules.post.repository.story.UserStoriesRepository;
+import com.dauducbach.clone.modules.user.publicapi.UserRelationshipQuery;
 import com.dauducbach.clone.modules.user.publicapi.UserIdentity;
 import com.dauducbach.clone.modules.user.publicapi.UserIdentityQuery;
 import lombok.RequiredArgsConstructor;
@@ -40,6 +41,8 @@ public class StoryLibraryService {
     private final StoryViewQueryRepository storyViewQuery;
     private final UserIdentityQuery userIdentityQuery;
     private final StoryPlaybackHydrator storyPlaybackHydrator;
+    private final StoryViewerSearch viewerSearch;
+    private final UserRelationshipQuery relationshipQuery;
 
     public Mono<Void> recordView(String storyId, String viewerId, String reaction) {
         String viewer = requireText(viewerId, "viewerId");
@@ -57,36 +60,43 @@ public class StoryLibraryService {
     }
 
     public Mono<PageResponse<StoryViewerResponse>> viewers(String storyId, String ownerId, int page, int size) {
-        int pageNumber = Math.max(0, page);
-        int pageSize = Math.max(1, Math.min(size, 50));
-        int offset = pageNumber * pageSize;
-        return ownedStory(storyId)
-                .flatMap(story -> {
-                    if (!story.getUserId().equals(ownerId)) {
-                        return Mono.error(new AppException(ErrorCode.STORY_SAVE_FAILED, "Only the story owner can view viewers"));
-                    }
-                    Mono<List<StoryViewerResponse>> content = storyViewQuery
-                            .findViewerPage(storyId, pageSize, offset)
-                            .collectList()
-                            .flatMap(rows -> userIdentityQuery.findIdentities(
-                                            rows.stream().map(StoryViewerRow::viewerId).toList())
-                                    .collectMap(UserIdentity::userId)
-                                    .map(identities -> rows.stream()
-                                            .map(row -> toViewerResponse(row, identities.get(row.viewerId())))
-                                            .toList()));
-                    return Mono.zip(content, viewRepository.countByStoryId(storyId).defaultIfEmpty(0L))
-                            .map(result -> PageResponse.of(result.getT1(), pageNumber, result.getT2(), pageSize));
-                });
+        return viewers(storyId, ownerId, page, size, "");
     }
 
-    private StoryViewerResponse toViewerResponse(StoryViewerRow row, UserIdentity identity) {
-        return new StoryViewerResponse(
-                row.viewerId(),
+    public Mono<PageResponse<StoryViewerResponse>> viewers(String storyId, String ownerId, int page, int size, String query) {
+        int pageNumber = Math.max(0, page);
+        int pageSize = Math.max(1, Math.min(size, 50));
+        int offset = Math.multiplyExact(pageNumber, pageSize);
+        String search = normalize(query);
+        return ownedStory(storyId).flatMap(story -> {
+            if (!story.getUserId().equals(ownerId)) {
+                return Mono.error(new AppException(ErrorCode.STORY_SAVE_FAILED, "Only the story owner can view viewers"));
+            }
+            Mono<PageResponse<StoryViewerRow>> rows = search == null
+                    ? Mono.zip(storyViewQuery.findViewerPage(storyId, pageSize, offset).collectList(),
+                            viewRepository.countByStoryId(storyId).defaultIfEmpty(0L))
+                        .map(result -> PageResponse.of(result.getT1(), pageNumber, result.getT2(), pageSize))
+                    : viewerSearch.search(storyId, search, pageNumber, pageSize, offset);
+            return rows.flatMap(result -> {
+                var ids = result.content().stream().map(StoryViewerRow::viewerId).toList();
+                if (ids.isEmpty()) return Mono.just(new PageResponse<StoryViewerResponse>(
+                        List.of(), result.pageNumber(), result.totalElements(), result.totalPages()));
+                return Mono.zip(userIdentityQuery.findIdentities(ids).collectMap(UserIdentity::userId),
+                                relationshipQuery.findFollowingIds(ownerId, ids).collectList())
+                        .map(data -> new PageResponse<>(result.content().stream()
+                                .map(row -> toViewerResponse(row, data.getT1().get(row.viewerId()),
+                                        data.getT2().contains(row.viewerId())))
+                                .toList(), result.pageNumber(), result.totalElements(), result.totalPages()));
+            });
+        });
+    }
+
+    private StoryViewerResponse toViewerResponse(StoryViewerRow row, UserIdentity identity, boolean following) {
+        return new StoryViewerResponse(row.viewerId(),
                 identity == null ? null : identity.username(),
                 identity == null ? null : identity.fullName(),
                 identity == null ? null : identity.avatarUrl(),
-                row.reaction(),
-                row.viewedAt());
+                row.reaction(), row.viewedAt(), following);
     }
 
     public Mono<Void> deleteStory(String storyId, String authenticatedUserId) {

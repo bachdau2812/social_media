@@ -36,15 +36,20 @@ public class MediaAssetCleanupService {
         }
         return Mono.fromCallable(() -> {
                     try {
-                        cloudinary.uploader().destroy(publicId, ObjectUtils.emptyMap());
+                        var result = cloudinary.uploader().destroy(publicId, ObjectUtils.emptyMap());
+                        log.info("|MediaAssetCleanupService|delete|publicId={}|resourceType=image|result={}",
+                                publicId, result == null ? null : result.get("result"));
                     } catch (Exception imageError) {
                         log.warn("|MediaAssetCleanupService|delete|image skipped|publicId={}|error={}",
                                 publicId, imageError.getMessage());
                     }
                     try {
-                        return cloudinary.uploader().destroy(
+                        var result = cloudinary.uploader().destroy(
                                 publicId,
                                 ObjectUtils.asMap("resource_type", "video"));
+                        log.info("|MediaAssetCleanupService|delete|publicId={}|resourceType=video|result={}",
+                                publicId, result == null ? null : result.get("result"));
+                        return result;
                     } catch (Exception videoError) {
                         log.warn("|MediaAssetCleanupService|delete|video skipped|publicId={}|error={}",
                                 publicId, videoError.getMessage());

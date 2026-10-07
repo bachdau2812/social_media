@@ -8,6 +8,7 @@ import com.dauducbach.clone.modules.post.service.post.PostSseService;
 import com.dauducbach.clone.commons.serialization.GsonUtils;
 import com.google.gson.JsonObject;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,17 +27,19 @@ public class KafkaPostPublicationMessaging implements PostPublicationMessaging {
     private final KafkaSender<String, String> kafkaSender;
     private final PostSseService postSseService;
 
+    @Value("${post.media.scan.topic:check_media_event}")
+    private String mediaScanTopic = "check_media_event";
+
     @Override
     public Mono<Void> requestMediaScan(String postId, String userId, List<PostMediaScanItem> items) {
         JsonObject payload = new JsonObject();
         payload.addProperty("postId", postId);
         payload.addProperty("userId", userId);
         payload.add("items", GsonUtils.getGson().toJsonTree(items));
-        return kafkaSender.send(Mono.just(record("check_media_event", postId, payload.toString())))
-                .then()
+        return send(mediaScanTopic, postId, payload.toString())
                 .doOnError(error -> log.error("|KafkaPostPublicationMessaging|requestMediaScan|postId={}|error={}", postId, error.getMessage()))
-                .doOnSuccess(unused -> log.info("|KafkaPostPublicationMessaging|requestMediaScan|sent|postId={}|userId={}|itemCount={}",
-                        postId, userId, items.size()));
+                .doOnSuccess(unused -> log.info("|KafkaPostPublicationMessaging|requestMediaScan|sent|topic={}|postId={}|userId={}|itemCount={}",
+                        mediaScanTopic, postId, userId, items.size()));
     }
 
     @Override

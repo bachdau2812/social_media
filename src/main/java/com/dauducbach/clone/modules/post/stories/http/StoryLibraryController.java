@@ -73,9 +73,10 @@ public class StoryLibraryController {
             @RequestParam String ownerId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "") String query,
             Authentication authentication
     ) {
-        return service.viewers(storyId, authentication.getName(), page, size)
+        return service.viewers(storyId, authentication.getName(), page, size, query)
                 .map(result -> ApiResponse.<PageResponse<StoryViewerResponse>>builder()
                         .message("Story viewers fetched")
                         .result(result)

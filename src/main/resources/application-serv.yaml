@@ -114,6 +114,9 @@ post:
   media:
     scan:
       api-url: http://localhost:8000/api/v1/scan
+      # Use the existing routing names; configure a separate Kafka cluster for Dev.
+      topic: ${POST_MEDIA_SCAN_TOPIC:check_media_event}
+      consumer-group: ${POST_MEDIA_SCAN_CONSUMER_GROUP:post-service}
 
 app:
   media:

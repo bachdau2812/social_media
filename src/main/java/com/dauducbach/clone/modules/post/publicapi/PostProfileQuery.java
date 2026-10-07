@@ -11,6 +11,11 @@ public interface PostProfileQuery {
 
     Flux<ProfilePostSnapshot> getRepostedPosts(String viewerId, String userId, int limit);
 
+    reactor.core.publisher.Mono<ProfilePostsPage> getPostsPage(String viewerId, String userId, int page, int size, String selectedPostId);
+    record TimelinePostSnapshot(ProfilePostSnapshot post, boolean savedByCurrentUser) {}
+    record ProfilePostsPage(String userId, List<TimelinePostSnapshot> posts, int pageNumber, int pageSize,
+                            boolean hasMore, boolean hasPrevious, boolean selectedPostFound) {}
+
     record ProfilePostSnapshot(
             String postId,
             String userId,

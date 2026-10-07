@@ -12,6 +12,9 @@ public interface UserFollowerRepository extends ReactiveCrudRepository<UserFollo
 
     Mono<Boolean> existsByFollowerIdAndFollowingId(String followerId, String followingId);
 
+    @Query("SELECT following_id FROM user_follower WHERE follower_id = :followerId AND following_id IN (:candidateIds)")
+    Flux<String> findFollowingIds(String followerId, java.util.Collection<String> candidateIds);
+
     // Get all followers of a user
     @Query("SELECT * FROM user_follower WHERE following_id = :userId ORDER BY created_at DESC LIMIT :limit OFFSET :offset")
     Flux<UserFollower> findFollowersByUserId(String userId, int limit, int offset);

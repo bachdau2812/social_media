@@ -18,7 +18,7 @@ public class StoryViewQueryRepository {
                         SELECT viewer_id, reaction, viewed_at
                         FROM story_views
                         WHERE story_id = :storyId
-                        ORDER BY viewed_at DESC
+                        ORDER BY viewed_at DESC, viewer_id ASC
                         LIMIT :limit OFFSET :offset
                         """)
                 .bind("storyId", storyId)

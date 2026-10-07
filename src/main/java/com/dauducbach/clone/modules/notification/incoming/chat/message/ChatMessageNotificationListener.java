@@ -7,10 +7,12 @@ import com.dauducbach.clone.modules.chat.publicapi.ChatEvent;
 import com.dauducbach.clone.modules.chat.dto.response.ChatMessageResponse;
 import com.dauducbach.clone.modules.chat.publicapi.ChatEventTopics;
 import com.dauducbach.clone.modules.chat.publicapi.ChatNotificationQuery;
+import com.dauducbach.clone.modules.chat.publicapi.ChatNotificationConversation;
 import com.dauducbach.clone.modules.notification.constants.NotificationType;
 import com.dauducbach.clone.modules.notification.dto.NotificationForService;
 import com.dauducbach.clone.modules.notification.repository.NotificationTemplatesRepository;
 import com.dauducbach.clone.modules.notification.service.PushNotificationService;
+import com.dauducbach.clone.modules.user.publicapi.UserIdentityQuery;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -35,6 +37,7 @@ public class ChatMessageNotificationListener {
     private final NotificationTemplatesRepository templateRepository;
     private final PushNotificationService pushNotificationService;
     private final ChatNotificationQuery chatNotificationQueryService;
+    private final UserIdentityQuery userIdentityQuery;
 
     @KafkaListener(
             topics = ChatEventTopics.MESSAGE_CREATED,
@@ -54,9 +57,16 @@ public class ChatMessageNotificationListener {
                 return CompletableFuture.completedFuture(null);
             }
 
+            // Resolve once per event, and only when a recipient is eligible for a notification.
+            Mono<MessageNotificationContext> context = Mono.defer(() -> Mono.zip(
+                            chatNotificationQueryService.findConversation(event.conversationId()),
+                            senderName(event.message()))
+                    .map(tuple -> new MessageNotificationContext(tuple.getT1(), tuple.getT2())))
+                    .cache();
+
             return Flux.fromIterable(event.recipientIds())
                     .filter(recipientId -> !recipientId.equals(event.actorId()))
-                    .concatMap(recipientId -> sendPush(recipientId, event))
+                    .concatMap(recipientId -> sendPush(recipientId, event, context))
                     .then()
                     .doOnError(error -> log.error(
                             "|ChatMessageNotificationListener|handle|failed|conversationId={}|error={}",
@@ -69,17 +79,19 @@ public class ChatMessageNotificationListener {
         }
     }
 
-    private Mono<Void> sendPush(String recipientId, ChatEvent event) {
+    private Mono<Void> sendPush(String recipientId, ChatEvent event, Mono<MessageNotificationContext> context) {
         return chatNotificationQueryService.canReceiveMessageNotification(event.conversationId(), recipientId, Instant.now())
                 .filter(Boolean::booleanValue)
                 .flatMap(ignored -> templateRepository.findByActionType(UserActionType.SEND_MESSAGE)
                         .map(template -> template.getTemplate())
                         .defaultIfEmpty("{USERNAME}: {MESSAGE}")
-                        .flatMap(template -> {
+                        .flatMap(template -> context.flatMap(display -> {
                             ChatMessageResponse message = event.message();
-                            String sender = firstNonBlank(message.senderDisplayName(), message.senderId(), "Người dùng");
+                            String sender = display.sender();
                             String preview = previewEnhanced(message);
-                            String body = notificationBody(sender, message, preview);
+                            String body = display.conversation().group()
+                                    ? sender + " đã gửi một tin nhắn: \"" + preview + "\""
+                                    : notificationBody(sender, message, preview);
                             Map<String, String> metadata = new HashMap<>();
                             metadata.put("EVENT_ID", event.eventId());
                             metadata.put("CONVERSATION_ID", event.conversationId());
@@ -87,6 +99,9 @@ public class ChatMessageNotificationListener {
                             metadata.put("MESSAGE_SEQ", String.valueOf(message.messageSeq()));
                             metadata.put("MESSAGE_TYPE", message.messageType().name());
                             metadata.put("MESSAGE_PREVIEW", preview);
+                            if (display.conversation().group()) {
+                                metadata.put("GROUP_NAME", display.conversation().title());
+                            }
                             return pushNotificationService.sendPushNotification(
                                     NotificationForService.builder()
                                             .actorId(event.actorId())
@@ -94,13 +109,27 @@ public class ChatMessageNotificationListener {
                                             .entityId(message.id())
                                             .entityType("CHAT_MESSAGE")
                                             .recipient(recipientId)
-                                            .title(sender)
+                                            .title(display.conversation().group() ? display.conversation().title() : sender)
                                             .htmlContent(body)
                                             .metadata(metadata)
                                             .notificationType(NotificationType.PUSH)
                                             .build());
-                        }))
+                        })))
                 .then();
+    }
+
+    private Mono<String> senderName(ChatMessageResponse message) {
+        String eventName = message.senderDisplayName();
+        if (eventName != null && !eventName.isBlank() && !eventName.trim().equals(message.senderId())) {
+            return Mono.just(eventName.trim());
+        }
+        return userIdentityQuery.resolveDisplayName(message.senderId())
+                .filter(name -> !name.isBlank() && !name.trim().equals(message.senderId()))
+                .map(String::trim)
+                .defaultIfEmpty("Người dùng");
+    }
+
+    private record MessageNotificationContext(ChatNotificationConversation conversation, String sender) {
     }
 
 

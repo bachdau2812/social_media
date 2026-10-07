@@ -84,7 +84,7 @@ public class RepostService {
 
     public Mono<Boolean> hasReposted(String actorId, String postId) {
         validateRequiredIds(actorId, postId);
-        return repostRepository.existsByActorIdAndPostId(actorId, postId)
+        return repostRepository.findByActorIdAndPostId(actorId, postId).hasElement()
                 .onErrorMap(error -> new AppException(ErrorCode.REPOST_FETCH_FAILED, "Check repost status failed", error));
     }
 

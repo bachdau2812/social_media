@@ -20,6 +20,14 @@ Use the Maven wrapper on Windows so contributors use the project-pinned Maven se
 
 Use 4-space indentation for Java. Keep class names in `PascalCase`, methods and fields in `camelCase`, constants in `UPPER_SNAKE_CASE`, and packages lowercase. Follow the existing module pattern: controllers expose HTTP endpoints, services hold business logic, repositories isolate persistence, DTOs are split into `request`, `response`, and `event` where relevant. Prefer Reactor types consistently in WebFlux flows and avoid blocking calls in reactive paths.
 
+## R2DBC Insert Convention
+
+All INSERT operations for new records must use `R2dbcEntityTemplate` (for example, `r2dbcEntityTemplate.insert(Entity.class).using(entity)`). Do not use `repository.save()` or `repository.saveAll()` to insert new records. Reserve repository save methods for updates to records that already exist.
+
+This is especially important for application-assigned IDs such as UUIDs: a non-null ID can cause Spring Data R2DBC to treat a new entity as an existing row and issue UPDATE instead of INSERT.
+
+Keep the template inside the existing persistence implementation or adapter when the module has one; business/domain code should not acquire a direct infrastructure dependency solely to follow this rule.
+
 ## Testing Guidelines
 
 Tests use Spring Boot Test, JUnit 5, Reactor Test, H2, and Spring Security Test. Name test classes with the `*Test` suffix, matching the class or behavior under test, for example `PostServiceTest` or `UserSearchControllerTest`. Add focused tests beside changed module code, especially for services, controllers, security behavior, and reactive flows. Run `.\mvnw.cmd test` before opening a pull request.

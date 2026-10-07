@@ -57,6 +57,7 @@ public class MediaScanClient implements MediaScanGateway {
                 .uri(mediaUrl)
                 .retrieve()
                 .bodyToMono(byte[].class)
+                .doOnSubscribe(subscription -> log.info("|MediaScanClient|scanMedia|downloadStarted|publicId={}", publicId))
                 .flatMap(bytes -> {
                     if (bytes.length == 0 || isOverMaxScanSize(bytes)) {
                         log.warn("|MediaScanClient|scanMedia|rejected oversized media|publicId={}|byteSize={}|limit={}",
@@ -67,10 +68,9 @@ public class MediaScanClient implements MediaScanGateway {
                 })
                 .switchIfEmpty(Mono.just(ScanResult.rejected()))
                 .timeout(scanTimeout)
-                .onErrorResume(error -> {
+                .doOnError(error -> {
                     log.error("|MediaScanClient|scanMedia|failed|publicId={}|mediaUrlLength={}|error={}",
                             publicId, mediaUrl.length(), error.getMessage());
-                    return Mono.just(ScanResult.rejected());
                 });
     }
 
@@ -99,13 +99,15 @@ public class MediaScanClient implements MediaScanGateway {
                 .body(BodyInserters.fromMultipartData(formData))
                 .retrieve()
                 .bodyToMono(String.class)
+                .doOnSubscribe(subscription -> log.info("|MediaScanClient|callScanApi|started|publicId={}|filename={}|byteSize={}",
+                        publicId, filename, bytes.length))
+                .switchIfEmpty(Mono.error(new IllegalStateException("Media scanner returned an empty response")))
                 .map(this::parseScanResponse)
                 .doOnSuccess(result -> log.info("|MediaScanClient|callScanApi|completed|publicId={}|filename={}|nsfw={}",
                         publicId, filename, result.nsfw()))
-                .onErrorResume(error -> {
+                .doOnError(error -> {
                     log.error("|MediaScanClient|callScanApi|failed|publicId={}|filename={}|error={}",
                             publicId, filename, error.getMessage());
-                    return Mono.just(ScanResult.rejected());
                 });
     }
 
@@ -113,12 +115,12 @@ public class MediaScanClient implements MediaScanGateway {
         JsonObject json = GsonUtils.fromString(rawResponse);
         JsonObject data = json.getAsJsonObject("data");
         if (data == null) {
-            return ScanResult.rejected();
+            throw new IllegalStateException("Media scanner response did not contain scan data");
         }
 
         var decision = data.get("is_nsfw");
         if (decision == null || !decision.isJsonPrimitive() || !decision.getAsJsonPrimitive().isBoolean()) {
-            return ScanResult.rejected();
+            throw new IllegalStateException("Media scanner response did not contain a boolean is_nsfw decision");
         }
         return new ScanResult(decision.getAsBoolean());
     }

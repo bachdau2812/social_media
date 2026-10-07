@@ -6,6 +6,7 @@ import org.springframework.data.elasticsearch.core.ReactiveElasticsearchOperatio
 import org.springframework.data.elasticsearch.core.SearchHit;
 import org.springframework.data.elasticsearch.core.mapping.IndexCoordinates;
 import org.springframework.data.elasticsearch.core.query.Query;
+import org.springframework.data.elasticsearch.client.elc.NativeQuery;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -58,6 +59,33 @@ class ElasticsearchSemanticVectorSearchTest {
                 .verifyComplete();
 
         verifyNoInteractions(embeddings);
+        var query = org.mockito.ArgumentCaptor.forClass(Query.class);
+        verify(elasticsearch).search(query.capture(), eq(Map.class), any(IndexCoordinates.class));
+        NativeQuery nativeQuery = (NativeQuery) query.getValue();
+        assertThat(nativeQuery.getMinScore()).isEqualTo(1.50f);
+        assertThat(nativeQuery.getQuery().scriptScore().minScore()).isEqualTo(1.50f);
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void textSearchRetainsItsExistingThresholdForUsersAndPosts() {
+        TextEmbeddingProvider embeddings = mock(TextEmbeddingProvider.class);
+        ReactiveElasticsearchOperations elasticsearch = mock(ReactiveElasticsearchOperations.class);
+        when(embeddings.getEmbedding("query")).thenReturn(Mono.just(vector()));
+        doReturn(Flux.empty()).when(elasticsearch)
+                .search(any(Query.class), eq(Map.class), any(IndexCoordinates.class));
+        var search = new ElasticsearchSemanticVectorSearch(embeddings, elasticsearch);
+
+        StepVerifier.create(search.searchUserIds("query", 5, Set.of())).expectNext(List.of()).verifyComplete();
+        StepVerifier.create(search.searchPostIds("query", 5, Set.of())).expectNext(List.of()).verifyComplete();
+
+        var query = org.mockito.ArgumentCaptor.forClass(Query.class);
+        verify(elasticsearch, times(2)).search(query.capture(), eq(Map.class), any(IndexCoordinates.class));
+        assertThat(query.getAllValues()).allSatisfy(value -> {
+            NativeQuery nativeQuery = (NativeQuery) value;
+            assertThat(nativeQuery.getMinScore()).isEqualTo(0.80f + 1.0f);
+            assertThat(nativeQuery.getQuery().scriptScore().minScore()).isEqualTo(0.80f + 1.0f);
+        });
     }
 
     private static List<Double> vector() {

@@ -34,9 +34,33 @@ class UserVectorCoordinatorTest {
         var redis = new InMemoryVectorRedisState(); var coordinator = new UserVectorCoordinator(redis); redis.owner = "other";
         var entered = new AtomicBoolean();
         StepVerifier.withVirtualTime(() -> coordinator.withSnapshotLock("u", lease -> { entered.set(true); return Mono.just(1); }))
-                .thenAwait(Duration.ofSeconds(2)).expectError(java.util.concurrent.TimeoutException.class).verify();
+                .expectSubscription().expectNoEvent(Duration.ofSeconds(9))
+                .thenAwait(Duration.ofSeconds(1)).expectError(java.util.concurrent.TimeoutException.class)
+                .verify(Duration.ofSeconds(30));
         assertThat(entered).isFalse(); assertThat(redis.owner).isEqualTo("other");
     }
+    @Test void snapshotReaderWaitsForAnotherOperationToReleaseAfterThreeSeconds() {
+        var redis = new InMemoryVectorRedisState();
+        var coordinator = new UserVectorCoordinator(redis);
+        redis.owner = "other";
+        var entered = new AtomicBoolean();
+        StepVerifier.withVirtualTime(() -> coordinator.withSnapshotLock("u", lease -> {
+                    entered.set(true);
+                    return Mono.just("snapshot");
+                }))
+                .thenAwait(Duration.ofSeconds(3))
+                .then(() -> {
+                    assertThat(entered).isFalse();
+                    assertThat(redis.owner).isEqualTo("other");
+                    redis.owner = null;
+                })
+                .thenAwait(Duration.ofMillis(100))
+                .expectNext("snapshot")
+                .expectComplete().verify(Duration.ofSeconds(30));
+        assertThat(entered).isTrue();
+        assertThat(redis.owner).isNull();
+    }
+
     @Test void emptyWorkAlsoChecksOwnershipBeforeReportingSuccess() {
         var redis = new InMemoryVectorRedisState(); var coordinator = new UserVectorCoordinator(redis);
         StepVerifier.create(coordinator.withUserLock("u", lease -> Mono.fromRunnable(() -> redis.owner = "replacement")))

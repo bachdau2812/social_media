@@ -13,6 +13,8 @@ import com.dauducbach.clone.modules.post.repository.story.StoryViewRepository;
 import com.dauducbach.clone.modules.post.repository.story.StoryViewQueryRepository;
 import com.dauducbach.clone.modules.post.repository.story.projection.StoryViewerRow;
 import com.dauducbach.clone.modules.post.repository.story.UserStoriesRepository;
+import com.dauducbach.clone.modules.user.publicapi.UserRelationshipQuery;
+import com.dauducbach.clone.commons.response.PageResponse;
 import com.dauducbach.clone.modules.user.publicapi.UserIdentity;
 import com.dauducbach.clone.modules.user.publicapi.UserIdentityQuery;
 import org.junit.jupiter.api.Test;
@@ -72,7 +74,7 @@ class StoryLibraryServiceTest {
         StoryLibraryService service = new StoryLibraryService(
                 stories, views, highlights, items,
                 mock(R2dbcEntityTemplate.class), viewerQuery, identities,
-                playbackHydrator);
+                playbackHydrator, mock(StoryViewerSearch.class), mock(UserRelationshipQuery.class));
 
         StepVerifier.create(service.listHighlights("owner-1"))
                 .assertNext(response -> {
@@ -89,6 +91,8 @@ class StoryLibraryServiceTest {
         StoryViewRepository views = mock(StoryViewRepository.class);
         StoryViewQueryRepository viewerQuery = mock(StoryViewQueryRepository.class);
         UserIdentityQuery identities = mock(UserIdentityQuery.class);
+        UserRelationshipQuery relationships = mock(UserRelationshipQuery.class);
+        when(relationships.findFollowingIds(eq("owner-1"), any())).thenReturn(Flux.just("viewer-1"));
         Instant firstViewedAt = Instant.parse("2026-10-06T08:00:00Z");
         Instant secondViewedAt = Instant.parse("2026-10-06T07:00:00Z");
         when(stories.findById("story-1"))
@@ -101,21 +105,55 @@ class StoryLibraryServiceTest {
                 .thenReturn(Flux.just(new UserIdentity("viewer-1", "first", "First Viewer", "avatar-1")));
         StoryLibraryService service = new StoryLibraryService(
                 stories, views, mock(StoryHighlightRepository.class), mock(StoryHighlightItemRepository.class),
-                mock(R2dbcEntityTemplate.class), viewerQuery, identities, mock(StoryPlaybackHydrator.class));
+                mock(R2dbcEntityTemplate.class), viewerQuery, identities, mock(StoryPlaybackHydrator.class), mock(StoryViewerSearch.class), relationships);
 
         StepVerifier.create(service.viewers("story-1", "owner-1", 0, 50))
                 .assertNext(page -> {
                     assertThat(page.totalElements()).isEqualTo(2);
                     assertThat(page.content()).containsExactly(
                             new com.dauducbach.clone.modules.post.dto.story.response.StoryViewerResponse(
-                                    "viewer-1", "first", "First Viewer", "avatar-1", "LIKE", firstViewedAt),
+                                    "viewer-1", "first", "First Viewer", "avatar-1", "LIKE", firstViewedAt, true),
                             new com.dauducbach.clone.modules.post.dto.story.response.StoryViewerResponse(
-                                    "viewer-2", null, null, null, null, secondViewedAt));
+                                    "viewer-2", null, null, null, null, secondViewedAt, false));
                 })
                 .verifyComplete();
 
         verify(viewerQuery).findViewerPage("story-1", 50, 0);
         verify(identities).findIdentities(List.of("viewer-1", "viewer-2"));
+    }
+
+    @Test
+    void searchUsesFilteredPaginationAndBatchedFollowingState() {
+        UserStoriesRepository stories = mock(UserStoriesRepository.class);
+        StoryViewerSearch search = mock(StoryViewerSearch.class);
+        UserIdentityQuery identities = mock(UserIdentityQuery.class);
+        UserRelationshipQuery relationships = mock(UserRelationshipQuery.class);
+        StoryViewQueryRepository viewerQuery = mock(StoryViewQueryRepository.class);
+        when(stories.findById("story-1")).thenReturn(Mono.just(story("story-1", "owner-1", "APPROVED", Instant.now())));
+        when(search.search("story-1", "Mai", 1, 20, 20)).thenReturn(Mono.just(PageResponse.of(
+                List.of(new StoryViewerRow("match", null, Instant.now())), 1, 25, 20)));
+        when(identities.findIdentities(List.of("match"))).thenReturn(Flux.just(new UserIdentity("match", "mai", "Mai Hoa", "avatar")));
+        when(relationships.findFollowingIds("owner-1", List.of("match"))).thenReturn(Flux.just("match"));
+        StoryLibraryService service = new StoryLibraryService(stories, mock(StoryViewRepository.class),
+                mock(StoryHighlightRepository.class), mock(StoryHighlightItemRepository.class),
+                mock(R2dbcEntityTemplate.class), viewerQuery, identities, mock(StoryPlaybackHydrator.class), search, relationships);
+        StepVerifier.create(service.viewers("story-1", "owner-1", 1, 20, "  Mai  "))
+                .assertNext(page -> {
+                    assertThat(page.pageNumber()).isEqualTo(1);
+                    assertThat(page.totalElements()).isEqualTo(25);
+                    assertThat(page.totalPages()).isEqualTo(2);
+                    assertThat(page.content().getFirst().username()).isEqualTo("mai");
+                    assertThat(page.content().getFirst().viewerFollowsUser()).isTrue();
+                }).verifyComplete();
+        verify(viewerQuery, never()).findViewerPage(anyString(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt());
+    }
+
+    @Test
+    void nonOwnerCannotSearchViewers() {
+        UserStoriesRepository stories = mock(UserStoriesRepository.class);
+        when(stories.findById("story-1")).thenReturn(Mono.just(story("story-1", "owner-1", "APPROVED", Instant.now())));
+        StepVerifier.create(service(stories).viewers("story-1", "someone-else", 0, 20, "mai"))
+                .expectError(AppException.class).verify();
     }
 
     @Test
@@ -154,7 +192,7 @@ class StoryLibraryServiceTest {
                 mock(R2dbcEntityTemplate.class),
                 mock(StoryViewQueryRepository.class),
                 mock(UserIdentityQuery.class),
-                mock(StoryPlaybackHydrator.class));
+                mock(StoryPlaybackHydrator.class), mock(StoryViewerSearch.class), mock(UserRelationshipQuery.class));
     }
 
     private UserStories story(String id, String ownerId, String status, Instant expiresAt) {

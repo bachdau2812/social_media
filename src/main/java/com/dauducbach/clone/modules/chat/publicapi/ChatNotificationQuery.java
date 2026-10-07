@@ -11,4 +11,6 @@ public interface ChatNotificationQuery {
     Mono<Boolean> isActiveMember(String conversationId, String userId);
 
     Mono<String> getConversationTitle(String conversationId, String fallback);
+
+    Mono<ChatNotificationConversation> findConversation(String conversationId);
 }

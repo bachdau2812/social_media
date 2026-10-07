@@ -1,6 +1,8 @@
 package com.dauducbach.clone.modules.chat.service;
 
 import com.dauducbach.clone.modules.chat.publicapi.ChatNotificationQuery;
+import com.dauducbach.clone.modules.chat.publicapi.ChatNotificationConversation;
+import com.dauducbach.clone.modules.chat.constant.ConversationType;
 import com.dauducbach.clone.modules.chat.repository.ConversationMemberRepository;
 import com.dauducbach.clone.modules.chat.repository.ConversationRepository;
 import lombok.RequiredArgsConstructor;
@@ -45,5 +47,13 @@ public class ChatNotificationQueryService implements ChatNotificationQuery {
             }
         }
         return "";
+    }
+
+    @Override
+    public Mono<ChatNotificationConversation> findConversation(String conversationId) {
+        return conversationRepository.findById(conversationId)
+                .map(conversation -> new ChatNotificationConversation(
+                        conversation.getConversationType() == ConversationType.GROUP,
+                        firstNonBlank(conversation.getTitle(), "Nhóm chat")));
     }
 }

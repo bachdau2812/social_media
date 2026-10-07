@@ -15,6 +15,8 @@ public interface UserRelationshipQuery {
 
     Mono<Boolean> isFollowing(String followerId, String followingId);
 
+    Flux<String> findFollowingIds(String followerId, java.util.Collection<String> candidateIds);
+
     Flux<String> getFollowerIdsForFeedBroadcast(String userId);
 
     Mono<FollowerCountResponse> getFollowerCounts(String userId);

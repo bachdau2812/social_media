@@ -48,7 +48,8 @@ class PostProfileQueryServiceTest {
                 .thenReturn(Mono.just(new PostInteractionQuery.Snapshot(7, 3, 2, true, false)));
 
         PostProfileQueryService query = new PostProfileQueryService(
-                contentQuery, detailQuery, repostService, interactionQuery, identityQuery);
+                contentQuery, detailQuery, repostService, interactionQuery, identityQuery,
+                mock(com.dauducbach.clone.modules.post.repository.SavedItemRepository.class));
 
         StepVerifier.create(query.getRecentPosts("viewer-1", "author-1", 5))
                 .assertNext(snapshot -> {

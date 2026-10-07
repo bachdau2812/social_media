@@ -10,6 +10,12 @@ import reactor.core.publisher.Mono;
 
 @Repository
 public interface SavedItemRepository extends ReactiveCrudRepository<SavedItem, String> {
+    @Query("SELECT EXISTS(SELECT 1 FROM saved_items WHERE user_id = :userId AND post_id = :postId)")
+    Mono<Boolean> existsByUserIdAndPostId(String userId, String postId);
+
+    @Query("SELECT * FROM saved_items WHERE user_id = :userId AND post_id = :postId LIMIT 1")
+    Mono<SavedItem> findSavedItemByUserIdAndPostId(String userId, String postId);
+
     @Query("SELECT * FROM saved_items WHERE user_id = :userId ORDER BY created_at DESC LIMIT :limit OFFSET :offset")
     Flux<SavedItem> findByUserId(String userId, int limit, int offset);
 

@@ -40,8 +40,8 @@ import java.util.stream.IntStream;
 public class PostService {
     private static final Logger log = LoggerFactory.getLogger(PostService.class);
     private static final long POST_NOTIFICATION_MUTE_DAYS = 60L;
-    private static final String PENDING_SCAN_MESSAGE = "BÃ i viáº¿t máº¥t má»™t chÃºt thá»i gian Ä‘á»ƒ táº£i lÃªn, vui lÃ²ng Ä‘á»£i";
-
+    private static final String PENDING_SCAN_MESSAGE = "Bài viết đã được gửi và đang chờ kiểm duyệt.";
+    private static final String PUBLISHED_MESSAGE = "Bài viết đã được đăng tải thành công.";
     PostDetailsRepository postDetailsRepository;
     PostItemRepository postItemRepository;
     R2dbcEntityTemplate r2dbcEntityTemplate;
@@ -79,13 +79,21 @@ public class PostService {
             postDetails.setUpdatedAt(Instant.now());
             postDetails.setHashtagList(request.getHashtags());
 
-                    Mono<Void> createAction = r2dbcEntityTemplate.insert(PostDetails.class)
+            Mono<Void> createAction = r2dbcEntityTemplate.insert(PostDetails.class)
                     .using(postDetails)
                     .flatMap(saved -> hasMedia
                             ? publicationMessaging.requestMediaScan(saved.getPostId(), saved.getUserId(), scanItems)
-                            : publicationMessaging.publishApproved(saved, "BÃ i viáº¿t Ä‘Ã£ Ä‘Æ°á»£c Ä‘Äƒng táº£i thÃ nh cÃ´ng"))
+                            : publicationMessaging.publishApproved(saved, PUBLISHED_MESSAGE))
                     .doOnSuccess(v -> log.info("|PostService|createPost|accepted|postId={}|userId={}|mediaCount={}",
                             postId, userId, scanItems.size()))
+                    .onErrorResume(error -> Mono.defer(() -> postMediaModerationOrchestrator.discardFailedPost(postId, scanItems))
+                            .onErrorResume(cleanupError -> {
+                                if (cleanupError != error) error.addSuppressed(cleanupError);
+                                log.error("|PostService|createPost|cleanupFailed|postId={}|error={}",
+                                        postId, cleanupError.getMessage());
+                                return Mono.empty();
+                            })
+                            .then(Mono.error(error)))
                     .onErrorMap(throwable -> throwable instanceof AppException
                             ? throwable
                             : new AppException(
@@ -96,7 +104,7 @@ public class PostService {
 
             return createAction.thenReturn(PostCreateResponse.builder()
                     .postId(postId)
-                    .message(hasMedia ? PENDING_SCAN_MESSAGE : "BÃ i viáº¿t Ä‘Ã£ Ä‘Æ°á»£c Ä‘Äƒng táº£i thÃ nh cÃ´ng")
+                    .message(hasMedia ? PENDING_SCAN_MESSAGE : PUBLISHED_MESSAGE)
                     .build());
         });
     }

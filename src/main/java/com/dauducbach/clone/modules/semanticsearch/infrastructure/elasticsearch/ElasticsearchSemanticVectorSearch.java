@@ -25,7 +25,7 @@ import java.util.Set;
 @FieldDefaults(level = lombok.AccessLevel.PRIVATE, makeFinal = true)
 public class ElasticsearchSemanticVectorSearch implements SemanticVectorSearch {
     static final float MIN_VECTOR_SIMILARITY = 0.80f;
-    private static final float ELASTIC_MIN_SCORE = MIN_VECTOR_SIMILARITY + 1.0f;
+    private static final float MIN_USER_DISCOVERY_SIMILARITY = 0.50f;
 
     TextEmbeddingProvider embeddings;
     ReactiveElasticsearchOperations elasticsearch;
@@ -39,7 +39,7 @@ public class ElasticsearchSemanticVectorSearch implements SemanticVectorSearch {
     public Mono<List<String>> searchUserIdsByVector(List<Double> vector, int limit, Set<String> excludedIds) {
         if (vector == null || vector.isEmpty() || limit <= 0) return Mono.just(List.of());
         Set<String> excluded = safeExcluded(excludedIds);
-        return searchByVector(vector, Target.USERS, limit + excluded.size() + 10)
+        return searchByVector(vector, Target.USERS, limit + excluded.size() + 10, MIN_USER_DISCOVERY_SIMILARITY)
                 .map(SearchHit::getId)
                 .filter(this::hasId)
                 .filter(id -> !excluded.contains(id))
@@ -57,7 +57,7 @@ public class ElasticsearchSemanticVectorSearch implements SemanticVectorSearch {
         if (limit <= 0) return Mono.just(List.of());
         Set<String> excluded = safeExcluded(excludedIds);
         return embeddings.getEmbedding(query)
-                .flatMapMany(vector -> searchByVector(vector, target, limit + excluded.size() + 10))
+                .flatMapMany(vector -> searchByVector(vector, target, limit + excluded.size() + 10, MIN_VECTOR_SIMILARITY))
                 .map(SearchHit::getId)
                 .filter(this::hasId)
                 .filter(id -> !excluded.contains(id))
@@ -66,7 +66,8 @@ public class ElasticsearchSemanticVectorSearch implements SemanticVectorSearch {
                 .collectList();
     }
 
-    private Flux<SearchHit<Map>> searchByVector(List<Double> vector, Target target, int maxResults) {
+    private Flux<SearchHit<Map>> searchByVector(List<Double> vector, Target target, int maxResults, float minSimilarity) {
+        float minScore = minSimilarity + 1.0f;
         NativeQuery query = NativeQuery.builder()
                 .withQuery(root -> root.scriptScore(scriptScore -> scriptScore
                         .query(inner -> inner.bool(eligible -> eligible
@@ -79,8 +80,8 @@ public class ElasticsearchSemanticVectorSearch implements SemanticVectorSearch {
                                 .lang("painless")
                                 .source("cosineSimilarity(params.queryVector, '" + target.vectorField + "') + 1.0")
                                 .params("queryVector", JsonData.of(VectorMath.normalize(vector))))
-                        .minScore(ELASTIC_MIN_SCORE)))
-                .withMinScore(ELASTIC_MIN_SCORE)
+                        .minScore(minScore)))
+                .withMinScore(minScore)
                 .withMaxResults(Math.max(maxResults, 1))
                 .build();
 

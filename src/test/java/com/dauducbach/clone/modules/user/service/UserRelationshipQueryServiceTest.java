@@ -21,6 +21,16 @@ class UserRelationshipQueryServiceTest {
     UserFollowerRepository userFollowerRepository;
 
     @Test
+    void batchFollowingOnlyQueriesTheRequestedUsers() {
+        var service = new UserRelationshipQueryService(userFollowerRepository);
+        when(userFollowerRepository.findFollowingIds("owner", java.util.List.of("a", "b"))).thenReturn(Flux.just("b"));
+        StepVerifier.create(service.findFollowingIds("owner", java.util.List.of("a", "b", "a")))
+                .expectNext("b").verifyComplete();
+        StepVerifier.create(service.findFollowingIds("owner", java.util.List.of())).verifyComplete();
+        verify(userFollowerRepository, org.mockito.Mockito.times(1)).findFollowingIds("owner", java.util.List.of("a", "b"));
+    }
+
+    @Test
     void followerPaginationClampsPageSizeAndKeepsResponseShape() {
         UserRelationshipQueryService service = new UserRelationshipQueryService(userFollowerRepository);
         UserFollower relation = UserFollower.builder()

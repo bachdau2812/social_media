@@ -27,7 +27,9 @@ public class ImageScanWorker {
     private final PostMediaModerationOrchestrator postOrchestrator;
     private final CommentMediaModerationOrchestrator commentOrchestrator;
 
-    @KafkaListener(topics = "check_media_event", groupId = "post-service")
+    @KafkaListener(id = "postMediaScanListener",
+            topics = "${post.media.scan.topic:check_media_event}",
+            groupId = "${post.media.scan.consumer-group:post-service}")
     public CompletableFuture<Void> handlePostScanEvent(@Payload String payload) {
         try {
             JsonObject payloadJson = GsonUtils.fromString(payload);
@@ -40,6 +42,8 @@ public class ImageScanWorker {
                         postId, userId, items.size());
                 return CompletableFuture.completedFuture(null);
             }
+            log.info("|ImageScanWorker|handlePostScanEvent|received|postId={}|userId={}|itemCount={}",
+                    postId, userId, items.size());
             return postOrchestrator.process(postId, userId, items)
                     .doOnError(error -> log.error(
                             "|ImageScanWorker|handlePostScanEvent|failed|postId={}|error={}",

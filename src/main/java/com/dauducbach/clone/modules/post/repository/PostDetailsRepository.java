@@ -71,6 +71,14 @@ public interface PostDetailsRepository extends ReactiveCrudRepository<PostDetail
             """)
     Flux<PostDetails> findByUserId(String userId, int limit, int offset);
 
+    @Query("""
+            SELECT COUNT(*) FROM post_details p
+            WHERE p.user_id = :userId AND p.validate_status = 'APPROVED'
+              AND NOT EXISTS (SELECT 1 FROM user_archive_items a WHERE a.content_id = p.post_id AND UPPER(a.content_type) = 'POST')
+              AND (p.created_at > :createdAt OR (p.created_at = :createdAt AND p.post_id > :postId))
+            """)
+    Mono<Long> countEligibleAuthorPostsBefore(String userId, java.time.Instant createdAt, String postId);
+
     Flux<PostDetails> findAllByUserId(String userId);
 
     @Query("""

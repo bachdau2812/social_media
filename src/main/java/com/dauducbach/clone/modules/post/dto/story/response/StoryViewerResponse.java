@@ -8,6 +8,7 @@ public record StoryViewerResponse(
         String fullName,
         String avatarUrl,
         String reaction,
-        Instant viewedAt
+        Instant viewedAt,
+        boolean viewerFollowsUser
 ) {
 }
